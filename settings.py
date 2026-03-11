@@ -6,11 +6,15 @@ ASSETS_DIR = BASE_DIR / "Assets"
 MAP_PATH = ASSETS_DIR / "maps" / "level 1.tmx"
 BACKGROUND_PATH = ASSETS_DIR / "Background" / "background.jpg"
 
+<<<<<<< HEAD
 # ── Window ────────────────────────────────────────────────────────────────────
+=======
+>>>>>>> 7277d45c8860066391a0d25d6144869849134703
 WINDOW_SIZE = (1280, 720)
 WINDOW_TITLE = "GRID SURVIVAL"
 BACKGROUND_COLOR = (18, 18, 22)
 TARGET_FPS = 60
+<<<<<<< HEAD
 
 # ── Tile & Grid ───────────────────────────────────────────────────────────────
 TILE_SIZE   = 64        # pixels per tile (square)
@@ -40,3 +44,5 @@ PLAYER_COLOR      = (220,  70,  70)   # red placeholder
 PLAYER_SPEED      = 320   # px per second for smooth tile-to-tile tween
 PLAYER_FALL_SPEED = 480   # px per second initial fall speed
 
+=======
+>>>>>>> 7277d45c8860066391a0d25d6144869849134703

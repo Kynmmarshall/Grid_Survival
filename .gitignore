@@ -1,28 +1,29 @@
-# Python
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
 __pycache__/
 *.py[cod]
+*$py.class
 *.pyo
-*.pyd
-*.egg
+
+# Distribution / packaging
 *.egg-info/
 dist/
 build/
-*.spec
 
-# Virtual environment
-venv/
-env/
-.venv/
-
-# IDE / Editor
+# IDE / editor
 .vscode/
 .idea/
-*.suo
-*.user
+*.swp
+*.swo
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Tiled editor session (optional - remove if you want to track it)
+# Tiled session/project files (optional - remove if you want them tracked)
 tiles/*.tiled-session

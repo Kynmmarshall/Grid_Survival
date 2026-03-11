@@ -1,5 +1,6 @@
 import pygame
 
+<<<<<<< HEAD
 from assets import load_background_surface
 from player import ELIMINATED, Player
 from settings import BACKGROUND_COLOR, TARGET_FPS, WINDOW_SIZE, WINDOW_TITLE
@@ -9,6 +10,10 @@ from tile_grid import TileGrid
 _HUD_FONT_SIZE = 28
 _HUD_COLOR     = (255, 255, 255)
 _GAMEOVER_COLOR = (220, 60, 60)
+=======
+from assets import load_background_surface, load_tilemap_surface
+from settings import BACKGROUND_COLOR, TARGET_FPS, WINDOW_SIZE, WINDOW_TITLE
+>>>>>>> 7277d45c8860066391a0d25d6144869849134703
 
 
 class Game:
@@ -22,6 +27,7 @@ class Game:
         self.running = True
 
         self.background_surface = load_background_surface(WINDOW_SIZE)
+<<<<<<< HEAD
 
         # ── Game objects ──────────────────────────────────────────────────
         self.grid   = TileGrid()
@@ -34,6 +40,9 @@ class Game:
         self._game_over = False
 
     # ── Events ────────────────────────────────────────────────────────────
+=======
+        self.map_surface, self.tmx_data = load_tilemap_surface(WINDOW_SIZE)
+>>>>>>> 7277d45c8860066391a0d25d6144869849134703
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -41,6 +50,7 @@ class Game:
                 self.running = False
 
         keys = pygame.key.get_pressed()
+<<<<<<< HEAD
 
         if keys[pygame.K_ESCAPE]:
             self.running = False
@@ -148,6 +158,23 @@ class Game:
 
     # ── Main loop ─────────────────────────────────────────────────────────
 
+=======
+        if keys[pygame.K_ESCAPE]:
+            self.running = False
+
+    def update(self, dt: float):
+        """Advance game state. Placeholder for future logic."""
+        _ = dt  # suppress unused variable warnings for now
+
+    def draw(self):
+        self.screen.fill(BACKGROUND_COLOR)
+        if self.background_surface:
+            self.screen.blit(self.background_surface, (0, 0))
+        if self.map_surface:
+            self.screen.blit(self.map_surface, (0, 0))
+        pygame.display.flip()
+
+>>>>>>> 7277d45c8860066391a0d25d6144869849134703
     def run(self):
         while self.running:
             dt = self.clock.tick(TARGET_FPS) / 1000.0
