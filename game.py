@@ -39,7 +39,8 @@ class Game:
 
         # ── Pre-rendered overlays ─────────────────────────────────────────
         self._shadow_surface  = self._build_shadow()
-        self._vignette_surface = self._build_vignette()
+        # Bake vignette directly into the background so it costs nothing per frame
+        self._bake_vignette_into_background()
 
         # ── Game objects ──────────────────────────────────────────────────
         self.grid   = TileGrid()
@@ -94,8 +95,6 @@ class Game:
         self.screen.blit(self._shadow_surface, self._shadow_rect)
 
         self._draw_scene()
-
-        self.screen.blit(self._vignette_surface, (0, 0))
 
         self._draw_hud()
 
@@ -224,16 +223,22 @@ class Game:
         w, h = WINDOW_SIZE
         ys = np.linspace(-1, 1, h).reshape(-1, 1)
         xs = np.linspace(-1, 1, w).reshape(1, -1)
-        # Elliptical distance normalised so corners = 1
         dist = np.sqrt(xs ** 2 + ys ** 2) / math.sqrt(2)
-        # Start darkening beyond 40 % from centre, ramp up toward edges
         alpha = np.clip((dist - 0.4) / 0.6, 0, 1) ** 1.8
-        alpha = (alpha * 120).astype(np.uint8)        # max 120 at corners
+        alpha = (alpha * 120).astype(np.uint8)
 
         pixels = np.zeros((h, w, 4), dtype=np.uint8)
         pixels[:, :, 3] = alpha
 
         return pygame.image.frombuffer(pixels.tobytes(), (w, h), "RGBA").convert_alpha()
+
+    def _bake_vignette_into_background(self) -> None:
+        """Composite the vignette onto the background surface once."""
+        vignette = self._build_vignette()
+        if self.background_surface is None:
+            self.background_surface = pygame.Surface(WINDOW_SIZE).convert()
+            self.background_surface.fill(BACKGROUND_COLOR)
+        self.background_surface.blit(vignette, (0, 0))
 
     # ── Restart ───────────────────────────────────────────────────────────
 

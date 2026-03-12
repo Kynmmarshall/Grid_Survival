@@ -23,14 +23,13 @@ ISO_TILE_H     = 64     # screen height of one tile's top-face diamond
 ISO_TILE_DEPTH = 32     # visible side-face height (3-D box depth, px)
 
 # Grid screen origin — isometric north vertex of tile (0, 0), centred on screen.
-# Visual bounding box:
+# Centre the TOP FACE (playable surface) on screen; depth extends below.
 #   w = (GRID_COLS + GRID_ROWS) * ISO_TILE_W // 2  = 1024 px
-#   h = (GRID_COLS + GRID_ROWS) * ISO_TILE_H // 2
-#       + ISO_TILE_DEPTH                            = 544  px
-_ISO_GRID_W   = (GRID_COLS + GRID_ROWS) * ISO_TILE_W // 2       # 1024
-_ISO_GRID_H   = (GRID_COLS + GRID_ROWS) * ISO_TILE_H // 2 + ISO_TILE_DEPTH  # 544
+#   top_h = (GRID_COLS + GRID_ROWS) * ISO_TILE_H // 2  = 512 px  (top face only)
+_ISO_GRID_W     = (GRID_COLS + GRID_ROWS) * ISO_TILE_W // 2         # 1024
+_ISO_GRID_TOP_H = (GRID_COLS + GRID_ROWS) * ISO_TILE_H // 2         #  512
 ISO_GRID_OFFSET_X = (WINDOW_SIZE[0] - _ISO_GRID_W) // 2 + GRID_ROWS * ISO_TILE_W // 2  # 512
-ISO_GRID_OFFSET_Y = (WINDOW_SIZE[1] - _ISO_GRID_H) // 2                                 # 88
+ISO_GRID_OFFSET_Y = (WINDOW_SIZE[1] - _ISO_GRID_TOP_H) // 2                             # 104
 
 # Tile colours
 TILE_TOP_COLOR     = ( 93, 187,  69)   # #5DBB45 – top face
