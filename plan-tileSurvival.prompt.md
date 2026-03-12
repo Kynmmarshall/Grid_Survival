@@ -59,12 +59,12 @@ NORMAL ──(timer expires)──> WARNING ──(flash duration)──> DISAPP
 ## Week 2 — Gameplay Expansion
 
 ### Goals
-- [ ] Jump mechanics + improved physics (gravity, landing)
-- [ ] Local multiplayer (2 players: WASD + Arrow keys)
-- [ ] Hazard system: bullets + moving traps
-- [ ] Difficulty scaling system (faster disappearance, more simultaneous tiles)
-- [ ] Visual feedback (score, survival timer, elimination screen)
-- [ ] Bug fixes
+- [x] Jump mechanics + improved physics (gravity, landing)
+- [x] Local multiplayer (2 players: WASD + Arrow keys)
+- [x] Hazard system: bullets + moving traps
+- [x] Difficulty scaling system (faster disappearance, more simultaneous tiles)
+- [x] Visual feedback (score, survival timer, elimination screen)
+- [x] Bug fixes
 
 ---
 
