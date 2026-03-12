@@ -3,7 +3,7 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "ground.tsx",
+    "activeFile": "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
     "expandedProjectPaths": [
     ],
     "file.lastUsedOpenFilter": "All Files (*)",
@@ -21,11 +21,11 @@
             "scaleInDock": 0.75
         },
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx": {
-            "scale": 1.5,
+            "scale": 1,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 777,
-                "y": 418.99999999999994
+                "x": 734.5,
+                "y": 474.5
             }
         },
         "C_OutSide_Nature.tsx": {
@@ -45,7 +45,7 @@
         },
         "tilesfloor.tsx": {
             "dynamicWrapping": true,
-            "scaleInDock": 1,
+            "scaleInDock": 0.75,
             "scaleInEditor": 1
         }
     },
@@ -57,13 +57,14 @@
     "map.tileWidth": 64,
     "map.width": 24,
     "openFiles": [
-        "ground.tsx"
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
+        "tilesfloor.tsx"
     ],
     "project": "grid survival.tiled-project",
     "recentFiles": [
-        "ground.tsx",
         "tilesfloor.tsx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
+        "ground.tsx",
         "C_OutSide_Nature.tsx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level 1.tmx",
         "tiles isometric.tsx"
