@@ -73,8 +73,7 @@ class Game:
         if self.background_surface:
             self.screen.blit(self.background_surface, (0, 0))
 
-        self.grid.draw(self.screen)
-        self.player.draw(self.screen)
+        self._draw_scene()
 
         self._draw_hud()
 
@@ -82,6 +81,28 @@ class Game:
             self._draw_game_over()
 
         pygame.display.flip()
+
+    def _draw_scene(self):
+        """Draw tiles and player interleaved in back-to-front isometric order."""
+        # Collect and sort all tiles by depth (row + col ascending)
+        all_tiles = sorted(
+            (tile for row in self.grid.tiles for tile in row),
+            key=lambda t: t.col + t.row,
+        )
+
+        player_depth = self.player.col + self.player.row
+        player_drawn = False
+
+        for tile in all_tiles:
+            # Draw player once we pass its depth layer
+            if not player_drawn and tile.col + tile.row > player_depth:
+                self.player.draw(self.screen)
+                player_drawn = True
+            tile.draw(self.screen)
+
+        # Player at maximum depth (or eliminated) — draw last
+        if not player_drawn:
+            self.player.draw(self.screen)
 
     def _draw_hud(self):
         # Survival timer (top-left)
