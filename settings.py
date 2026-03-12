@@ -49,5 +49,23 @@ TILES_PER_SECOND  = 0.4   # 1 tile every 2.5 s at difficulty level 1
 # ── Player ────────────────────────────────────────────────────────────────────
 PLAYER_SIZE       = 44    # px (smaller than TILE_SIZE so it fits inside)
 PLAYER_COLOR      = (220,  70,  70)   # red placeholder
+PLAYER_COLOR_2    = ( 70, 130, 220)   # blue — player 2
 PLAYER_SPEED      = 320   # px per second for smooth tile-to-tile tween
 PLAYER_FALL_SPEED = 480   # px per second initial fall speed
+PLAYER_JUMP_VEL   = -340  # initial upward velocity (negative = up)
+PLAYER_GRAVITY    = 900   # px/s² downward acceleration
+
+# ── Difficulty scaling ────────────────────────────────────────────────────────
+DIFFICULTY_INTERVAL     = 10.0   # seconds between difficulty bumps
+DIFFICULTY_SPEED_FACTOR = 0.85   # multiply spawn interval each bump
+DIFFICULTY_MIN_INTERVAL = 0.3    # fastest tile disappear rate (seconds)
+
+# ── Hazards ───────────────────────────────────────────────────────────────────
+BULLET_SPEED       = 260   # px/s
+BULLET_SIZE        = 10    # px radius for drawing
+BULLET_SPAWN_TIME  = 6.0   # seconds between bullet spawns (initial)
+BULLET_COLOR       = (255,  80,  80)
+TRAP_SPEED         = 120   # px/s for moving traps
+TRAP_SIZE          = 20    # half-width of trap diamond
+TRAP_COLOR         = (200,  40, 200)
+TRAP_SPAWN_TIME    = 12.0  # seconds between trap spawns (initial)
