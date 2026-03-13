@@ -4,6 +4,7 @@ from assets import load_background_surface, load_tilemap_surface
 from player import Player
 from settings import (
     BACKGROUND_COLOR,
+    DEBUG_VISUALS_ENABLED,
     DEBUG_DRAW_WALKABLE,
     DEBUG_WALKABLE_COLOR,
     TARGET_FPS,
@@ -36,6 +37,9 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_l:
+                    self.player.reset()
 
     def update(self, dt: float, keys):
         if keys[pygame.K_ESCAPE]:
@@ -64,7 +68,7 @@ class Game:
         pygame.display.flip()
 
     def _draw_walkable_debug(self):
-        if not DEBUG_DRAW_WALKABLE or self.walkable_mask is None:
+        if not (DEBUG_VISUALS_ENABLED and DEBUG_DRAW_WALKABLE) or self.walkable_mask is None:
             return
 
         if self.walkable_debug_surface is None:

@@ -2,6 +2,9 @@ import pygame
 
 from animation import SpriteAnimation, load_frames_from_directory
 from settings import (
+    DEBUG_DRAW_PLAYER_FOOTBOX,
+    DEBUG_PLAYER_FOOTBOX_COLOR,
+    DEBUG_VISUALS_ENABLED,
     PLAYER_ANIMATION_PATHS,
     PLAYER_DEFAULT_DIRECTION,
     PLAYER_FRAME_DURATION,
@@ -152,8 +155,21 @@ class Player:
 
     def draw(self, surface: pygame.Surface):
         surface.blit(self.current_animation.image, self.rect.topleft)
-        feet_rect = self._feet_rect(self.position)
-        pygame.draw.rect(surface, (255, 230, 0), feet_rect, 1)
+        if DEBUG_VISUALS_ENABLED and DEBUG_DRAW_PLAYER_FOOTBOX:
+            feet_rect = self._feet_rect(self.position)
+            pygame.draw.rect(surface, DEBUG_PLAYER_FOOTBOX_COLOR, feet_rect, 1)
+
+    def reset(self):
+        self.position = pygame.Vector2(PLAYER_START_POS)
+        self.velocity.update(0, 0)
+        self.state = "idle"
+        self.facing = PLAYER_DEFAULT_DIRECTION
+        self.current_animation = self.animations[self.state][self.facing]
+        self.current_animation.reset()
+        self.rect.center = PLAYER_START_POS
+        self.falling = False
+        self.fall_velocity = 0.0
+        self.fall_draw_behind = False
 
     def _feet_mask_for_rect(self, rect: pygame.Rect) -> pygame.mask.Mask:
         size = rect.size

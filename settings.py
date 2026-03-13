@@ -18,8 +18,8 @@ PLAYER_SCALE = .2  # set to tuple like (48, 64) if you prefer explicit sizing
 PLAYER_START_POS = (WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)
 PLAYER_SPEED = 200  # pixels per second
 PLAYER_DEFAULT_DIRECTION = "down"
-PLAYER_FALL_GRAVITY = 1400  # pixels per second squared
-PLAYER_FALL_MAX_SPEED = 1800  # pixels per second
+PLAYER_FALL_GRAVITY = 800  # pixels per second squared
+PLAYER_FALL_MAX_SPEED = 1000  # pixels per second
 
 
 PLAYER_ANIMATION_PATHS = {
@@ -41,5 +41,8 @@ WALKABLE_LAYER_NAMES = ["Top"]  # tile layers whose cells are considered walkabl
 WALKABLE_OBJECT_CLASS_NAMES = ["Platform"]  # Tiled object classes (rect/polygon) that define walkable regions
 WALKABLE_ISO_TOP_FRACTION = 1  # for isometric tiles, percentage of height treated as walkable (0-1)
 
+DEBUG_VISUALS_ENABLED = False
 DEBUG_DRAW_WALKABLE = True
 DEBUG_WALKABLE_COLOR = (30, 144, 255)
+DEBUG_DRAW_PLAYER_FOOTBOX = True
+DEBUG_PLAYER_FOOTBOX_COLOR = (255, 230, 0)
