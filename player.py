@@ -114,12 +114,12 @@ class Player:
         return any(feet_rect.colliderect(collider) for collider in colliders)
 
     def _feet_rect(self, position: pygame.Vector2) -> pygame.Rect:
-        width = max(4, int(self.rect.width * 0.45))
-        height = max(4, int(self.rect.height * 0.3))
+        width = max(4, int(self.rect.width * 0.2))
+        height = max(4, int(self.rect.height * 0.1))
         rect = pygame.Rect(0, 0, width, height)
         rect.center = (
             round(position.x),
-            round(position.y + self.rect.height * 0.15),
+            round(position.y + self.rect.height * 0.1),
         )
         return rect
 
