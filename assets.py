@@ -6,6 +6,7 @@ from settings import (
     MAP_PATH,
     WALKABLE_LAYER_NAMES,
     WALKABLE_OBJECT_CLASS_NAMES,
+    WALKABLE_ISO_TOP_FRACTION,
 )
 
 try:
@@ -60,11 +61,36 @@ def _render_tmx_to_surface(tmx_data) -> pygame.Surface:
     return surface
 
 
+WALKABLE_FILL_COLOR = (255, 255, 255, 255)
+
+
+def _draw_iso_top(surface, pos, tilewidth, tileheight):
+    fraction = max(0.0, min(1.0, WALKABLE_ISO_TOP_FRACTION))
+    if fraction <= 0:
+        return
+
+    top_y = pos[1]
+    bottom_y = pos[1] + tileheight * fraction
+    mid_y = (top_y + bottom_y) / 2
+    center_x = pos[0] + tilewidth / 2
+    left_x = pos[0]
+    right_x = pos[0] + tilewidth
+
+    points = [
+        (int(round(center_x)), int(round(top_y))),
+        (int(round(right_x)), int(round(mid_y))),
+        (int(round(center_x)), int(round(bottom_y))),
+        (int(round(left_x)), int(round(mid_y))),
+    ]
+    pygame.draw.polygon(surface, WALKABLE_FILL_COLOR, points)
+
+
 def _render_walkable_surface(tmx_data, layer_names, object_class_names):
     map_width, map_height = _calculate_surface_size(tmx_data)
     surface = pygame.Surface((map_width, map_height), pygame.SRCALPHA)
     target_layers = {name.lower() for name in (layer_names or []) if name}
     target_classes = {name.lower() for name in (object_class_names or []) if name}
+    is_iso = tmx_data.orientation == "isometric"
 
     if target_layers:
         for layer in tmx_data.layers:
@@ -73,16 +99,15 @@ def _render_walkable_surface(tmx_data, layer_names, object_class_names):
             if not hasattr(layer, "tiles"):
                 continue
 
-            for x, y, image in layer.tiles():
+            for x, y, _ in layer.tiles():
                 pos = _tile_to_pixel(x, y, layer, tmx_data)
-                if image:
-                    surface.blit(image, pos)
+                if is_iso:
+                    _draw_iso_top(surface, pos, tmx_data.tilewidth, tmx_data.tileheight)
                 else:
                     rect = pygame.Rect(pos, (tmx_data.tilewidth, tmx_data.tileheight))
-                    pygame.draw.rect(surface, (255, 255, 255, 255), rect)
+                    pygame.draw.rect(surface, WALKABLE_FILL_COLOR, rect)
 
     if target_classes:
-        fill_color = (255, 255, 255, 255)
         for layer in tmx_data.layers:
             if not hasattr(layer, "objects"):
                 continue
@@ -100,14 +125,24 @@ def _render_walkable_surface(tmx_data, layer_names, object_class_names):
 
                 width = getattr(obj, "width", 0)
                 height = getattr(obj, "height", 0)
+                if width <= 0 or height <= 0:
+                    continue
 
                 rect = pygame.Rect(
-                    obj.x + layer_offset_x,
-                    obj.y + layer_offset_y,
-                    width,
-                    height,
+                    int(round(obj.x + layer_offset_x)),
+                    int(round(obj.y + layer_offset_y)),
+                    int(round(width)),
+                    int(round(height)),
                 )
-                pygame.draw.rect(surface, fill_color, rect)
+
+                if is_iso:
+                    scaled_height = int(
+                        round(height * max(0.0, min(1.0, WALKABLE_ISO_TOP_FRACTION)))
+                    )
+                    if scaled_height <= 0:
+                        continue
+                    rect.height = scaled_height
+                pygame.draw.rect(surface, WALKABLE_FILL_COLOR, rect)
 
     return surface
 
