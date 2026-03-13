@@ -30,6 +30,7 @@ class Player:
         self._feet_mask_count = 0
         self.falling = False
         self.fall_velocity = 0.0
+        self.fall_draw_behind = False
 
     def _load_animations(self):
         animations = {}
@@ -74,7 +75,7 @@ class Player:
             return "right"
         return self.facing
 
-    def update(self, dt: float, keys, walkable_mask):
+    def update(self, dt: float, keys, walkable_mask, walkable_bounds):
         if self.falling:
             self._update_fall(dt)
             self.current_animation.update(dt)
@@ -102,7 +103,7 @@ class Player:
                 left_playable = True
 
         if left_playable:
-            self._start_fall()
+            self._start_fall(walkable_bounds)
             self._update_fall(dt)
 
         self.current_animation.update(dt)
@@ -162,12 +163,16 @@ class Player:
             self._feet_mask_count = self._feet_mask.count()
         return self._feet_mask
 
-    def _start_fall(self):
+    def _start_fall(self, walkable_bounds):
         if self.falling:
             return
         self.falling = True
         self.fall_velocity = 0.0
         self.velocity.update(0, 0)
+        if walkable_bounds:
+            self.fall_draw_behind = self.position.y <= walkable_bounds.centery
+        else:
+            self.fall_draw_behind = False
 
     def _update_fall(self, dt: float):
         self.fall_velocity = min(
@@ -179,3 +184,6 @@ class Player:
         bottom_limit = WINDOW_SIZE[1] + self.rect.height
         if self.position.y - self.rect.height / 2 > WINDOW_SIZE[1]:
             self.position.y = min(self.position.y, bottom_limit)
+
+    def draws_behind_map(self) -> bool:
+        return self.falling and self.fall_draw_behind

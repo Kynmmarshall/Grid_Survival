@@ -171,13 +171,16 @@ def load_tilemap_surface(window_size):
         tmx_data, WALKABLE_LAYER_NAMES, WALKABLE_OBJECT_CLASS_NAMES
     )
     walkable_surface = pygame.transform.smoothscale(walkable_surface_raw, window_size)
+    walkable_bounds = walkable_surface.get_bounding_rect()
+    if walkable_bounds.width == 0 or walkable_bounds.height == 0:
+        walkable_bounds = None
     walkable_mask = (
         pygame.mask.from_surface(walkable_surface)
         if walkable_surface.get_width() and walkable_surface.get_height()
         else None
     )
 
-    return scaled_surface, tmx_data, walkable_mask
+    return scaled_surface, tmx_data, walkable_mask, walkable_bounds
 
 
 def load_background_surface(window_size):

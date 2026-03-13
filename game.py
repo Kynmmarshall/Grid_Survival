@@ -27,6 +27,7 @@ class Game:
             self.map_surface,
             self.tmx_data,
             self.walkable_mask,
+            self.walkable_bounds,
         ) = load_tilemap_surface(WINDOW_SIZE)
         self.walkable_debug_surface = None
         self.player = Player()
@@ -41,16 +42,25 @@ class Game:
             self.running = False
             return
 
-        self.player.update(dt, keys, self.walkable_mask)
+        self.player.update(dt, keys, self.walkable_mask, self.walkable_bounds)
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
         if self.background_surface:
             self.screen.blit(self.background_surface, (0, 0))
+        draw_player_first = self.player.draws_behind_map()
+
+        if draw_player_first:
+            self.player.draw(self.screen)
+
         if self.map_surface:
             self.screen.blit(self.map_surface, (0, 0))
+
         self._draw_walkable_debug()
-        self.player.draw(self.screen)
+
+        if not draw_player_first:
+            self.player.draw(self.screen)
+
         pygame.display.flip()
 
     def _draw_walkable_debug(self):
