@@ -20,7 +20,7 @@ PLAYER_SPEED = 200  # pixels per second
 PLAYER_DEFAULT_DIRECTION = "down"
 PLAYER_FALL_GRAVITY = 800  # pixels per second squared
 PLAYER_FALL_MAX_SPEED = 1000  # pixels per second
-PLAYER_SINK_SPEED = 50  # pixels per second while drowning
+PLAYER_SINK_SPEED = 80 # pixels per second while drowning
 
 
 PLAYER_ANIMATION_PATHS = {

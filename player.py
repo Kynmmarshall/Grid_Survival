@@ -205,10 +205,12 @@ class Player:
         self.drown_surface_y = None
         if walkable_bounds:
             feet_rect = self._feet_rect(self.position)
-            if walkable_bounds.contains(feet_rect):
-                self.fall_draw_behind = True
-            else:
-                self.fall_draw_behind = self.position.y <= walkable_bounds.centery
+            inside_bounds = walkable_bounds.contains(feet_rect)
+            gap_threshold = walkable_bounds.top + walkable_bounds.height * 0.6
+            falling_through_gap = inside_bounds and feet_rect.bottom <= gap_threshold
+            above_top_edge = feet_rect.bottom <= walkable_bounds.top
+            # Only draw behind when falling through interior gaps or leaving via the back (top) edge.
+            self.fall_draw_behind = falling_through_gap or above_top_edge
         else:
             self.fall_draw_behind = False
 
