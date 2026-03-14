@@ -4,6 +4,7 @@ import pygame
 
 from assets import load_background_surface, load_tilemap_surface
 from player import Player
+from water import AnimatedWater
 from settings import (
     BACKGROUND_COLOR,
     DEBUG_VISUALS_ENABLED,
@@ -34,6 +35,7 @@ class Game:
         ) = load_tilemap_surface(WINDOW_SIZE)
         self.walkable_debug_surface = None
         self.player = Player()
+        self.water = AnimatedWater()
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -48,6 +50,7 @@ class Game:
             self.running = False
             return
 
+        self.water.update(dt)
         self.player.update(dt, keys, self.walkable_mask, self.walkable_bounds)
 
     def draw(self):
@@ -55,6 +58,7 @@ class Game:
 
         if self.background_surface:
             self.screen.blit(self.background_surface, (0, 0))
+        self.water.draw(self.screen)
         draw_player_first = self.player.draws_behind_map()
 
         if draw_player_first:
