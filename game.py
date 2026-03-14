@@ -1,3 +1,5 @@
+import math
+
 import pygame
 
 from assets import load_background_surface, load_tilemap_surface
@@ -50,6 +52,7 @@ class Game:
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
+
         if self.background_surface:
             self.screen.blit(self.background_surface, (0, 0))
         draw_player_first = self.player.draws_behind_map()
