@@ -151,11 +151,11 @@ def load_tilemap_surface(window_size):
     """Load the TMX tilemap, scale it, and build the walkable mask."""
     if load_pygame is None:
         print("Install pytmx (pip install pytmx) to render Tiled maps.")
-        return None, None, []
+        return None, None, None, None
 
     if not MAP_PATH.exists():
         print(f"Map file not found: {MAP_PATH}")
-        return None, None, []
+        return None, None, None, None
 
     tmx_data = load_pygame(MAP_PATH.as_posix())
     raw_surface = _render_tmx_to_surface(tmx_data)
