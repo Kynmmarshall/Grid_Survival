@@ -261,3 +261,7 @@ class Player:
         # After the death animation holds, sink slowly beneath the water surface.
         self.position.y += PLAYER_SINK_SPEED * dt
         self.velocity.y = PLAYER_SINK_SPEED
+        max_center_y = WINDOW_SIZE[1] - self.rect.height / 3.5
+        if self.position.y > max_center_y:
+            self.position.y = max_center_y
+            self.velocity.y = 0.0
