@@ -3,69 +3,64 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 ASSETS_DIR = BASE_DIR / "Assets"
 
-MAP_PATH = ASSETS_DIR / "maps" / "level 1.tmx"
+MAP_PATH = ASSETS_DIR / "maps" / "level_1.tmx"
 BACKGROUND_PATH = ASSETS_DIR / "Background" / "background.jpg"
 
-# ── Window ────────────────────────────────────────────────────────────────────
+CHARACTER_BASE = ASSETS_DIR / "Characters" / "Caveman"
+
 WINDOW_SIZE = (1280, 720)
 WINDOW_TITLE = "GRID SURVIVAL"
 BACKGROUND_COLOR = (18, 18, 22)
 TARGET_FPS = 60
 
-# ── Tile & Grid ───────────────────────────────────────────────────────────────
-TILE_SIZE   = 64        # logical tile unit (used for physics / movement)
-GRID_COLS   = 10        # number of tile columns
-GRID_ROWS   = 6         # number of tile rows
+PLAYER_FRAME_DURATION = 1 / 24  # seconds per frame
+PLAYER_SCALE = .2  # set to tuple like (48, 64) if you prefer explicit sizing
+PLAYER_START_POS = (WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)
+PLAYER_SPEED = 200  # pixels per second
+PLAYER_DEFAULT_DIRECTION = "down"
+PLAYER_FALL_GRAVITY = 800  # pixels per second squared
+PLAYER_FALL_MAX_SPEED = 1000  # pixels per second
+PLAYER_SINK_SPEED = 80 # pixels per second while drowning
 
-# ── Isometric projection ──────────────────────────────────────────────────────
-ISO_TILE_W     = 128    # screen width of one tile (2:1 ratio, so height = 64)
-ISO_TILE_H     = 64     # screen height of one tile's top-face diamond
-ISO_TILE_DEPTH = 32     # visible side-face height (3-D box depth, px)
 
-# Grid screen origin — isometric north vertex of tile (0, 0), centred on screen.
-# Centre the TOP FACE (playable surface) on screen; depth extends below.
-#   w = (GRID_COLS + GRID_ROWS) * ISO_TILE_W // 2  = 1024 px
-#   top_h = (GRID_COLS + GRID_ROWS) * ISO_TILE_H // 2  = 512 px  (top face only)
-_ISO_GRID_W     = (GRID_COLS + GRID_ROWS) * ISO_TILE_W // 2         # 1024
-_ISO_GRID_TOP_H = (GRID_COLS + GRID_ROWS) * ISO_TILE_H // 2         #  512
-ISO_GRID_OFFSET_X = (WINDOW_SIZE[0] - _ISO_GRID_W) // 2 + GRID_ROWS * ISO_TILE_W // 2  # 512
-ISO_GRID_OFFSET_Y = (WINDOW_SIZE[1] - _ISO_GRID_TOP_H) // 2                             # 104
+PLAYER_ANIMATION_PATHS = {
+	"idle": {
+		"down": CHARACTER_BASE / "idle" / "Front - Idle Blinking",
+		"up": CHARACTER_BASE / "idle" / "Back - Idle",
+		"left": CHARACTER_BASE / "idle" / "Left - Idle Blinking",
+		"right": CHARACTER_BASE / "idle" / "Right - Idle Blinking",
+	},
+	"run": {
+		"down": CHARACTER_BASE / "running" / "Front - Running",
+		"up": CHARACTER_BASE / "running" / "Back - Running",
+		"left": CHARACTER_BASE / "running" / "Left - Running",
+		"right": CHARACTER_BASE / "running" / "Right - Running",
+	},
+	"death": {
+		"down": CHARACTER_BASE / "Dying",
+		"up": CHARACTER_BASE / "Dying",
+		"left": CHARACTER_BASE / "Dying",
+		"right": CHARACTER_BASE / "Dying",
+	},
+}
 
-# Tile colours
-TILE_TOP_COLOR     = ( 93, 187,  69)   # #5DBB45 – top face
-TILE_LEFT_COLOR    = ( 61, 140,  47)   # #3D8C2F – left face
-TILE_RIGHT_COLOR   = ( 42,  97,  33)   # #2A6121 – right face
-TILE_BORDER_COLOR  = ( 25,  55,  20)   # dark border (1 px)
-TILE_COLOR_WARNING = (220, 150,  25)   # amber  – about to fall
-TILE_COLOR_VOID    = ( 12,  12,  18)   # hole   – disappeared tile bg
+WALKABLE_LAYER_NAMES = ["Top"]  # tile layers whose cells are considered walkable
+WALKABLE_OBJECT_CLASS_NAMES = ["Platform"]  # Tiled object classes (rect/polygon) that define walkable regions
+WALKABLE_ISO_TOP_FRACTION = 1  # for isometric tiles, percentage of height treated as walkable (0-1)
 
-# Tile state timing
-TILE_WARNING_TIME = 2.0   # seconds the tile flashes before disappearing
-TILE_FLASH_RATE   = 0.30  # initial seconds per flash toggle (speeds up)
+DEBUG_VISUALS_ENABLED = False
+DEBUG_DRAW_WALKABLE = True
+DEBUG_WALKABLE_COLOR = (30, 144, 255)
+DEBUG_DRAW_PLAYER_FOOTBOX = True
+DEBUG_PLAYER_FOOTBOX_COLOR = (255, 230, 0)
 
-# How many new tiles are scheduled to disappear per second
-TILES_PER_SECOND  = 0.4   # 1 tile every 2.5 s at difficulty level 1
-
-# ── Player ────────────────────────────────────────────────────────────────────
-PLAYER_SIZE       = 44    # px (smaller than TILE_SIZE so it fits inside)
-PLAYER_COLOR      = (220,  70,  70)   # red placeholder
-PLAYER_COLOR_2    = ( 70, 130, 220)   # blue — player 2
-PLAYER_SPEED      = 320   # px per second for smooth tile-to-tile tween
-PLAYER_FALL_SPEED = 480   # px per second initial fall speed
-PLAYER_JUMP_VEL   = -340  # initial upward velocity (negative = up)
-PLAYER_GRAVITY    = 900   # px/s² downward acceleration
-
-# ── Difficulty scaling ────────────────────────────────────────────────────────
-DIFFICULTY_INTERVAL     = 10.0   # seconds between difficulty bumps
-DIFFICULTY_SPEED_FACTOR = 0.85   # multiply spawn interval each bump
-DIFFICULTY_MIN_INTERVAL = 0.3    # fastest tile disappear rate (seconds)
-
-# ── Hazards ───────────────────────────────────────────────────────────────────
-BULLET_SPEED       = 260   # px/s
-BULLET_SIZE        = 10    # px radius for drawing
-BULLET_SPAWN_TIME  = 6.0   # seconds between bullet spawns (initial)
-BULLET_COLOR       = (255,  80,  80)
-TRAP_SPEED         = 120   # px/s for moving traps
-TRAP_SIZE          = 20    # half-width of trap diamond
-TRAP_COLOR         = (200,  40, 200)
-TRAP_SPAWN_TIME    = 12.0  # seconds between trap spawns (initial)
+WATER_SPRITESHEET = ASSETS_DIR / "Background" / "Water" / "Animated Water.png"
+WATER_FRAME_SIZE = (192, 96)
+WATER_FRAME_COUNT = 24
+WATER_FRAME_DURATION = 1 / 12
+WATER_TARGET_HEIGHT = 150
+WATER_SPLASH_SPRITESHEET = ASSETS_DIR / "Background" / "Water" / "Animated Water-Splash-Sheet-192x1344.png"
+WATER_SPLASH_FRAME_SIZE = (192, 192)
+WATER_SPLASH_FRAME_COUNT = 7
+WATER_SPLASH_FRAME_DURATION = 1 / 18
+WATER_SPLASH_SIZE = (256, 256)

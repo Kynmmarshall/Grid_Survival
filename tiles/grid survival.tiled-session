@@ -3,19 +3,72 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "",
+    "activeFile": "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
     "expandedProjectPaths": [
     ],
+    "file.lastUsedOpenFilter": "All Files (*)",
     "fileStates": {
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level 1.tmx": {
+            "scale": 0.75,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 621.9999999999999,
+                "y": 509.99999999999994
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level 1.tmx#ground": {
+            "dynamicWrapping": false,
+            "scaleInDock": 0.75
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx": {
+            "scale": 0.75,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 715.3333333333333,
+                "y": 377.99999999999994
+            }
+        },
+        "C_OutSide_Nature.tsx": {
+            "dynamicWrapping": false,
+            "scaleInDock": 1,
+            "scaleInEditor": 1
+        },
+        "ground.tsx": {
+            "dynamicWrapping": false,
+            "scaleInDock": 1,
+            "scaleInEditor": 1
+        },
+        "tiles isometric.tsx": {
+            "dynamicWrapping": true,
+            "scaleInDock": 1,
+            "scaleInEditor": 1
+        },
+        "tilesfloor.tsx": {
+            "dynamicWrapping": true,
+            "scaleInDock": 0.75,
+            "scaleInEditor": 1
+        }
     },
-    "last.imagePath": "C:/Users/kynm/Desktop/Grid_Survival/tilesets/tilesets",
-    "map.height": 30,
+    "last.imagePath": "C:/Users/kynm/Desktop/Grid_Survival/Assets/cropped",
+    "map.height": 24,
     "map.lastUsedFormat": "tmx",
-    "map.width": 40,
+    "map.layerDataFormat": "1",
+    "map.orientation": "2",
+    "map.tileWidth": 64,
+    "map.width": 24,
     "openFiles": [
+        "tilesfloor.tsx",
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx"
     ],
     "project": "grid survival.tiled-project",
     "recentFiles": [
+        "tilesfloor.tsx",
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
+        "ground.tsx",
+        "C_OutSide_Nature.tsx",
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level 1.tmx",
+        "tiles isometric.tsx"
     ],
-    "tileset.lastUsedFormat": "tsx"
+    "tileset.lastUsedFormat": "tsx",
+    "tileset.type": 1
 }
