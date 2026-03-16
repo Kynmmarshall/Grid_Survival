@@ -14,6 +14,9 @@ from settings import (
     PLAYER_SCALE,
     PLAYER_SPEED,
     PLAYER_START_POS,
+    PLAYER_JUMP_VELOCITY,
+    PLAYER_JUMP_GRAVITY,
+    PLAYER_MAX_FALL_SPEED,
     WINDOW_SIZE,
 )
 
@@ -21,7 +24,8 @@ from settings import (
 class Player:
     """Animated player entity with directional movement."""
 
-    def __init__(self, position=PLAYER_START_POS):
+    def __init__(self, position=PLAYER_START_POS, controls=None):
+        self.is_ai = False
         self.position = pygame.Vector2(position)
         self.speed = PLAYER_SPEED
         self.state = "idle"
@@ -38,6 +42,20 @@ class Player:
         self.drowning = False
         self.drown_animation_done = False
         self.drown_surface_y = None
+        
+        # Jump mechanics
+        self.jumping = False
+        self.jump_velocity = 0.0
+        self.on_ground = True
+        
+        # Control scheme (for multiplayer)
+        self.controls = controls or {
+            'up': pygame.K_w,
+            'down': pygame.K_s,
+            'left': pygame.K_a,
+            'right': pygame.K_d,
+            'jump': pygame.K_SPACE
+        }
 
     def _load_animations(self):
         animations = {}
@@ -64,15 +82,19 @@ class Player:
 
     def _input_vector(self, keys) -> pygame.Vector2:
         direction = pygame.Vector2(0, 0)
-        if keys[pygame.K_w]:
+        if keys[self.controls['up']]:
             direction.y -= 1
-        if keys[pygame.K_s]:
+        if keys[self.controls['down']]:
             direction.y += 1
-        if keys[pygame.K_a]:
+        if keys[self.controls['left']]:
             direction.x -= 1
-        if keys[pygame.K_d]:
+        if keys[self.controls['right']]:
             direction.x += 1
         return direction
+    
+    def _check_jump_input(self, keys) -> bool:
+        """Check if jump key is pressed."""
+        return keys[self.controls['jump']]
 
     def _determine_facing(self, direction: pygame.Vector2) -> str:
         if direction.y < 0:
@@ -86,6 +108,18 @@ class Player:
         return self.facing
 
     def update(self, dt: float, keys, walkable_mask, walkable_bounds):
+        move_vector = self._input_vector(keys)
+        jump_pressed = self._check_jump_input(keys)
+        self._update_with_move_vector(dt, move_vector, walkable_mask, walkable_bounds, jump_pressed)
+
+    def _update_with_move_vector(
+        self,
+        dt: float,
+        move_vector: pygame.Vector2,
+        walkable_mask,
+        walkable_bounds,
+        jump_pressed: bool = False,
+    ):
         if self.falling:
             self._update_fall(dt)
             self.current_animation.update(dt)
@@ -97,7 +131,22 @@ class Player:
             self.rect.center = (round(self.position.x), round(self.position.y))
             return
 
-        move_vector = self._input_vector(keys)
+        # Handle jumping
+        if self.jumping:
+            self._update_jump(dt, move_vector, walkable_mask)
+            self.current_animation.update(dt)
+            self.rect.center = (round(self.position.x), round(self.position.y))
+            return
+
+        # Check if on ground
+        self.on_ground = self._is_over_platform(self.position, walkable_mask)
+        
+        # Initiate jump
+        if jump_pressed and self.on_ground:
+            self.jumping = True
+            self.jump_velocity = PLAYER_JUMP_VELOCITY
+            self.on_ground = False
+
         desired_facing = (
             self._determine_facing(move_vector)
             if move_vector.length_squared() > 0
@@ -185,6 +234,9 @@ class Player:
         self.drowning = False
         self.drown_animation_done = False
         self.drown_surface_y = None
+        self.jumping = False
+        self.jump_velocity = 0.0
+        self.on_ground = True
 
     def _feet_mask_for_rect(self, rect: pygame.Rect) -> pygame.mask.Mask:
         size = rect.size
@@ -224,6 +276,38 @@ class Player:
         bottom_limit = WINDOW_SIZE[1] + self.rect.height
         if self.position.y - self.rect.height / 2 > WINDOW_SIZE[1]:
             self.position.y = min(self.position.y, bottom_limit)
+    
+    def _update_jump(self, dt: float, move_vector: pygame.Vector2, walkable_mask):
+        """Update jump physics and horizontal movement during jump."""
+        # Apply gravity to jump velocity
+        self.jump_velocity = min(
+            self.jump_velocity + PLAYER_JUMP_GRAVITY * dt, PLAYER_MAX_FALL_SPEED
+        )
+        
+        # Update vertical position
+        self.position.y += self.jump_velocity * dt
+        self.velocity.y = self.jump_velocity
+        
+        # Allow horizontal movement during jump
+        if move_vector.length_squared() > 0:
+            move_vector = move_vector.normalize()
+            horizontal_displacement = pygame.Vector2(move_vector.x * self.speed * dt, 0)
+            proposed_x = self.position + horizontal_displacement
+            if self._is_over_platform(proposed_x, walkable_mask):
+                self.position.x = proposed_x.x
+        
+        # Check if landed on platform
+        if self.jump_velocity > 0:  # Falling down
+            if self._is_over_platform(self.position, walkable_mask):
+                self.jumping = False
+                self.jump_velocity = 0.0
+                self.on_ground = True
+        
+        # Check if fell off platform
+        if not self._is_over_platform(self.position, walkable_mask) and self.jump_velocity > 0:
+            self.jumping = False
+            self.falling = True
+            self.fall_velocity = self.jump_velocity
 
     def draws_behind_map(self) -> bool:
         return (self.falling or self.drowning) and self.fall_draw_behind
