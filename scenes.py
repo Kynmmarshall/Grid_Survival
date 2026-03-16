@@ -32,6 +32,7 @@ from settings import (
     MODE_VS_COMPUTER,
     MUSIC_PATH,
     MUSIC_VOLUME,
+    SCENE_OVERLAY_COLOR,
     MODE_CLICK_FLASH_TIME,
     NAME_MAX_LENGTH,
     PROMPT_BLINK_SPEED,
@@ -48,6 +49,7 @@ from settings import (
     TITLE_PARTICLE_MIN_SIZE,
     TITLE_PARTICLE_MIN_SPEED,
     TITLE_PULSE_SPEED,
+    TITLE_PARTICLE_COLOR_BASE,
     TITLE_SUBTITLE_COLOR,
     TITLE_SUB_FONT_SIZE,
     TITLE_TEXT,
@@ -139,7 +141,12 @@ class TitleScreen:
 
         for p in self._particles:
             alpha = int(80 + 60 * math.sin(self._title_time * 4 + p["phase"]))
-            color = (255, 180, 60, max(20, min(180, alpha)))
+            color = (
+                TITLE_PARTICLE_COLOR_BASE[0],
+                TITLE_PARTICLE_COLOR_BASE[1],
+                TITLE_PARTICLE_COLOR_BASE[2],
+                max(20, min(180, alpha)),
+            )
             tile_surf = pygame.Surface((p["size"], p["size"]), pygame.SRCALPHA)
             pygame.draw.rect(tile_surf, color, tile_surf.get_rect(), border_radius=2)
             self.screen.blit(tile_surf, (p["x"], p["y"]))
@@ -216,7 +223,7 @@ class TitleScreen:
             self._draw_title()
             self._draw_input()
             overlay.set_alpha(int(alpha))
-            overlay.fill((0, 0, 0))
+            overlay.fill(SCENE_OVERLAY_COLOR)
             self.screen.blit(overlay, (0, 0))
             pygame.display.flip()
 
@@ -348,7 +355,7 @@ class ModeSelectionScreen:
                     break
 
             self._draw()
-            overlay.fill((0, 0, 0))
+            overlay.fill(SCENE_OVERLAY_COLOR)
             overlay.set_alpha(int(alpha))
             self.screen.blit(overlay, (0, 0))
             pygame.display.flip()
