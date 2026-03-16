@@ -41,11 +41,13 @@ class AIPlayer(Player):
             self._decision_timer = 0.0
             self._current_direction = self._choose_direction(walkable_mask, walkable_bounds)
 
+        # AI doesn't jump for now
         self._update_with_move_vector(
             dt,
             self._current_direction,
             walkable_mask,
             walkable_bounds,
+            jump_pressed=False,
         )
 
     def _choose_direction(self, walkable_mask, walkable_bounds) -> pygame.Vector2:
