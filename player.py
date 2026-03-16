@@ -22,6 +22,7 @@ class Player:
     """Animated player entity with directional movement."""
 
     def __init__(self, position=PLAYER_START_POS):
+        self.is_ai = False
         self.position = pygame.Vector2(position)
         self.speed = PLAYER_SPEED
         self.state = "idle"
@@ -86,6 +87,16 @@ class Player:
         return self.facing
 
     def update(self, dt: float, keys, walkable_mask, walkable_bounds):
+        move_vector = self._input_vector(keys)
+        self._update_with_move_vector(dt, move_vector, walkable_mask, walkable_bounds)
+
+    def _update_with_move_vector(
+        self,
+        dt: float,
+        move_vector: pygame.Vector2,
+        walkable_mask,
+        walkable_bounds,
+    ):
         if self.falling:
             self._update_fall(dt)
             self.current_animation.update(dt)
@@ -97,7 +108,6 @@ class Player:
             self.rect.center = (round(self.position.x), round(self.position.y))
             return
 
-        move_vector = self._input_vector(keys)
         desired_facing = (
             self._determine_facing(move_vector)
             if move_vector.length_squared() > 0

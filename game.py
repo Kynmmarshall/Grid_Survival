@@ -1,16 +1,16 @@
-import math
-
 import pygame
 
+from ai_player import AIPlayer
 from assets import load_background_surface, load_tilemap_surface
 from player import Player
 from water import AnimatedWater
 from settings import (
     BACKGROUND_COLOR,
-    DEBUG_VISUALS_ENABLED,
     DEBUG_DRAW_WALKABLE,
+    DEBUG_VISUALS_ENABLED,
     DEBUG_WALKABLE_COLOR,
     TARGET_FPS,
+    USE_AI_PLAYER,
     WINDOW_SIZE,
     WINDOW_TITLE,
 )
@@ -34,7 +34,7 @@ class Game:
             self.walkable_bounds,
         ) = load_tilemap_surface(WINDOW_SIZE)
         self.walkable_debug_surface = None
-        self.player = Player()
+        self.player = AIPlayer() if USE_AI_PLAYER else Player()
         self.water = AnimatedWater()
 
     def handle_events(self):
@@ -51,7 +51,10 @@ class Game:
             return
 
         self.water.update(dt)
-        self.player.update(dt, keys, self.walkable_mask, self.walkable_bounds)
+        if self.player.is_ai:
+            self.player.update_ai(dt, self.walkable_mask, self.walkable_bounds)
+        else:
+            self.player.update(dt, keys, self.walkable_mask, self.walkable_bounds)
         self._check_water_contact()
 
     def draw(self):

@@ -13,15 +13,14 @@ WINDOW_TITLE = "GRID SURVIVAL"
 BACKGROUND_COLOR = (18, 18, 22)
 TARGET_FPS = 60
 
-PLAYER_FRAME_DURATION = 1 / 24  # seconds per frame
-PLAYER_SCALE = .2  # set to tuple like (48, 64) if you prefer explicit sizing
+PLAYER_FRAME_DURATION = 1 / 24
+PLAYER_SCALE = 0.2
 PLAYER_START_POS = (WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)
-PLAYER_SPEED = 200  # pixels per second
+PLAYER_SPEED = 200
 PLAYER_DEFAULT_DIRECTION = "down"
-PLAYER_FALL_GRAVITY = 800  # pixels per second squared
-PLAYER_FALL_MAX_SPEED = 1000  # pixels per second
-PLAYER_SINK_SPEED = 80 # pixels per second while drowning
-
+PLAYER_FALL_GRAVITY = 800
+PLAYER_FALL_MAX_SPEED = 1000
+PLAYER_SINK_SPEED = 80
 
 PLAYER_ANIMATION_PATHS = {
 	"idle": {
@@ -44,9 +43,9 @@ PLAYER_ANIMATION_PATHS = {
 	},
 }
 
-WALKABLE_LAYER_NAMES = ["Top"]  # tile layers whose cells are considered walkable
-WALKABLE_OBJECT_CLASS_NAMES = ["Platform"]  # Tiled object classes (rect/polygon) that define walkable regions
-WALKABLE_ISO_TOP_FRACTION = 1  # for isometric tiles, percentage of height treated as walkable (0-1)
+WALKABLE_LAYER_NAMES = ["Top"]
+WALKABLE_OBJECT_CLASS_NAMES = ["Platform"]
+WALKABLE_ISO_TOP_FRACTION = 1
 
 DEBUG_VISUALS_ENABLED = False
 DEBUG_DRAW_WALKABLE = True
@@ -59,8 +58,15 @@ WATER_FRAME_SIZE = (192, 96)
 WATER_FRAME_COUNT = 24
 WATER_FRAME_DURATION = 1 / 12
 WATER_TARGET_HEIGHT = 150
-WATER_SPLASH_SPRITESHEET = ASSETS_DIR / "Background" / "Water" / "Animated Water-Splash-Sheet-192x1344.png"
+WATER_SPLASH_SPRITESHEET = (
+	ASSETS_DIR / "Background" / "Water" / "Animated Water-Splash-Sheet-192x1344.png"
+)
 WATER_SPLASH_FRAME_SIZE = (192, 192)
 WATER_SPLASH_FRAME_COUNT = 7
 WATER_SPLASH_FRAME_DURATION = 1 / 18
 WATER_SPLASH_SIZE = (256, 256)
+
+USE_AI_PLAYER = True
+AI_DECISION_INTERVAL = 0.22
+AI_LOOKAHEAD_DISTANCE = 42
+AI_EDGE_MARGIN_WEIGHT = 0.06
