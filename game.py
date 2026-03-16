@@ -4,7 +4,7 @@ from ai_player import AIPlayer
 from assets import load_background_surface, load_tilemap_surface
 from player import Player
 from water import AnimatedWater
-from tile_system import TileGrid
+from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
 from ui import GameHUD, EliminationScreen
 from settings import (
@@ -43,9 +43,19 @@ class GameManager:
             self.walkable_bounds,
         ) = load_tilemap_surface(WINDOW_SIZE)
         self.walkable_debug_surface = None
+        self.original_walkable_mask = self.walkable_mask.copy() if self.walkable_mask else None
+
+        # Calculate scale factors for TMX tile manager
+        if self.tmx_data and self.map_surface:
+            from assets import _calculate_surface_size
+            raw_width, raw_height = _calculate_surface_size(self.tmx_data)
+            scale_x = WINDOW_SIZE[0] / raw_width if raw_width > 0 else 1.0
+            scale_y = WINDOW_SIZE[1] / raw_height if raw_height > 0 else 1.0
+        else:
+            scale_x = scale_y = 1.0
 
         # Initialize game systems
-        self.tile_grid = TileGrid()
+        self.tile_manager = TMXTileManager(self.tmx_data, scale_x, scale_y)
         self.hazard_manager = HazardManager()
         self.hud = GameHUD()
         self.water = AnimatedWater()
@@ -112,7 +122,11 @@ class GameManager:
 
         # Update game systems
         self.water.update(dt)
-        self.tile_grid.update(dt)
+        self.tile_manager.update(dt)
+        
+        # Update walkable mask with disappeared tiles
+        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        
         self.hazard_manager.update(dt)
         self.hud.update(dt)
         
@@ -155,9 +169,6 @@ class GameManager:
         # Draw water
         self.water.draw(self.screen)
         
-        # Draw tile grid
-        self.tile_grid.draw(self.screen)
-        
         # Determine which players draw behind map
         players_behind = [p for p in self.players if p.draws_behind_map()]
         players_front = [p for p in self.players if not p.draws_behind_map()]
@@ -166,9 +177,11 @@ class GameManager:
         for player in players_behind:
             player.draw(self.screen)
 
-        # Draw TMX map
-        if self.map_surface:
-            self.screen.blit(self.map_surface, (0, 0))
+        # Draw TMX map with tile disappearance
+        self._draw_tmx_map_with_tiles()
+
+        # Draw warning overlays on tiles
+        self.tile_manager.draw_warning_overlays(self.screen)
 
         # Draw walkable debug overlay
         self._draw_walkable_debug()
@@ -233,7 +246,8 @@ class GameManager:
         self.eliminated_players.clear()
         
         # Reset all systems
-        self.tile_grid.reset()
+        self.tile_manager.reset()
+        self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
         self.hud.reset()
         
@@ -244,6 +258,24 @@ class GameManager:
         # Update HUD
         self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
 
+    def _draw_tmx_map_with_tiles(self):
+        """Draw TMX map, rendering tiles individually to skip disappeared ones."""
+        if not self.tmx_data or not self.map_surface:
+            return
+        
+        # For now, we'll use a simpler approach: render the full map, then mask out disappeared tiles
+        # This is more efficient than re-rendering individual tiles each frame
+        
+        # Draw the full map surface
+        self.screen.blit(self.map_surface, (0, 0))
+        
+        # Draw black diamonds over disappeared tiles to create "holes"
+        for tile in self.tile_manager.tiles.values():
+            if tile.state == TileState.DISAPPEARED:
+                points = tile.get_diamond_points()
+                # Draw black diamond to create hole effect
+                pygame.draw.polygon(self.screen, (0, 0, 0), points)
+    
     def _draw_walkable_debug(self):
         if not (DEBUG_VISUALS_ENABLED and DEBUG_DRAW_WALKABLE) or self.walkable_mask is None:
             return
