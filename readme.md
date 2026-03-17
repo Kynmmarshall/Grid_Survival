@@ -14,6 +14,37 @@ Grid Survival is a small isometric survival vignette built with Pygame. Guide a 
 
 ---
 
+## Recent Updates (March 2026)
+
+### Tile Disappearance System Polish
+  **Crumble animation**: Tiles now transition WARNING → CRUMBLING → DISAPPEARED over 350ms, progressively darkening before vanishing.
+  **Particle debris**: 4–6 colored particles fly outward from crumbling tiles with gravity.
+  **Sound effects**: Warning crackle and disappearance rumble sounds; player fall sound when losing ground.
+  **Grace period**: No tiles disappear for the first 3 seconds of gameplay.
+  **Polished void holes**: Disappeared tiles show a dark void diamond instead of raw black.
+
+### In-Game HUD Redesign
+**Styled panels**: Score (top-left), Timer (top-center), Alive (top-right) panels with dark semi-transparent backgrounds, colored borders, and inner glow.
+**Arcade font**: Uses PressStart2P/Orbitron-style font loaded from `assets/fonts/`.
+**Timer urgency**: When time is low, border pulses red, text turns red, and font size increases.
+**Score animation**: Score value scales to 120% and flashes gold briefly when it increases.
+  **Alive counter states**: Green (all alive) → Orange (one eliminated) → Red with slow pulse (last player standing).
+
+### TitleScreen & ModeSelectionScreen Overhaul
+  **Font hierarchy**: Display (game title), Heading, Body, and Small fonts defined and loaded gracefully.
+  **Title animation**: Letters drop in with bounce, gold/orange/red color cycling, periodic shake effect, subtitle floats slowly.
+  **Input box**: Rounded rectangle with gold border, blinking cursor, fade-in prompt.
+  **Mode selection cards**: 460×145px cards with per-mode colored borders (Cyan/Green/Purple), hover effects (brighten + lift), click scale animation.
+  **Header slide-in**: "Welcome, [PlayerName]!" slides down while fading in.
+
+### Elimination & Victory Screens
+  **Polished end-game screens**: Dark overlay with centered panel card containing player stats.
+  **Pulsing title**: "ELIMINATED!" pulses red/orange; "VICTORY!" pulses green.
+  **Drop shadow**: 3px offset shadow behind title text.
+  **Blinking prompt**: Restart instructions blink after screen fully fades in.
+
+---
+
 ## Controls
 
 | Key | Action |
