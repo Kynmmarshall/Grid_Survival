@@ -82,7 +82,76 @@ AI_EDGE_MARGIN_WEIGHT = 0.06
 MUSIC_PATH = BASE_DIR / "Soundtrack" / "TileSuv2.mp3"
 MUSIC_VOLUME = 0.45
 
-# Opening scenes visual constants
+# ─────────────────────────────────────────────────────────────────────────────
+# CATEGORY 1 — TILE DISAPPEARANCE SYSTEM
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tile crumble animation duration (ms → seconds)
+TILE_CRUMBLE_DURATION = 0.350  # 350ms
+
+# Grace period before first tile disappears (seconds)
+TILE_GRACE_PERIOD = 3.0
+
+# Sound file paths
+SOUND_TILE_WARNING = str(ASSETS_DIR / "sounds" / "tile_warning.wav")
+SOUND_TILE_DISAPPEAR = str(ASSETS_DIR / "sounds" / "tile_disappear.wav")
+SOUND_PLAYER_FALL = str(ASSETS_DIR / "sounds" / "player_fall.wav")
+
+# Player fall animation duration (seconds)
+PLAYER_FALL_ANIM_DURATION = 0.5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CATEGORY 2 — IN-GAME HUD
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Font paths
+FONT_PATH_HUD = str(ASSETS_DIR / "fonts" / "PressStart2P.ttf")
+FONT_SIZE_LABEL = 12
+FONT_SIZE_VALUE = 32
+FONT_SIZE_LARGE = 48   # for timer when urgent
+
+# Timer urgency threshold (seconds remaining)
+TIMER_WARNING_THRESHOLD = 10
+
+# HUD panel colors
+HUD_PANEL_BG = (20, 20, 20, 180)
+HUD_PANEL_RADIUS = 12
+HUD_PANEL_BORDER_WIDTH = 2
+HUD_PANEL_PADDING_H = 12
+HUD_PANEL_PADDING_V = 8
+
+HUD_SCORE_BORDER_COLOR = (255, 200, 0)       # GOLD
+HUD_TIMER_BORDER_COLOR = (220, 220, 220)     # WHITE
+HUD_ALIVE_BORDER_COLOR_ALL = (50, 220, 80)   # LIME GREEN
+HUD_ALIVE_BORDER_COLOR_ONE = (255, 160, 0)   # ORANGE
+HUD_ALIVE_BORDER_COLOR_LAST = (220, 50, 50)  # RED
+
+HUD_TIMER_URGENT_COLOR = (220, 40, 40)       # RED when urgent
+HUD_VALUE_COLOR = (255, 255, 255)            # WHITE
+HUD_LABEL_COLOR_SCORE = (255, 200, 0)
+HUD_LABEL_COLOR_TIMER = (220, 220, 220)
+HUD_LABEL_COLOR_ALIVE = (50, 220, 80)
+
+# Score animation
+SCORE_ANIM_SCALE_UP_DURATION = 0.2   # seconds
+SCORE_ANIM_SCALE_DOWN_DURATION = 0.15
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CATEGORY 3 — OPENING SCREENS FONT HIERARCHY
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Font paths for opening screens
+FONT_PATH_DISPLAY = str(ASSETS_DIR / "fonts" / "PressStart2P.ttf")
+FONT_PATH_HEADING = str(ASSETS_DIR / "fonts" / "PressStart2P.ttf")
+FONT_PATH_BODY = str(ASSETS_DIR / "fonts" / "Orbitron-Regular.ttf")
+FONT_PATH_SMALL = str(ASSETS_DIR / "fonts" / "Orbitron-Regular.ttf")
+
+FONT_SIZE_DISPLAY = 64       # Game title (reduced from 150 for PressStart2P readability)
+FONT_SIZE_HEADING = 32       # Screen subtitles
+FONT_SIZE_BODY = 22          # Button labels
+FONT_SIZE_SMALL = 18         # Input labels, hints
+
+# Opening scenes visual constants (legacy kept for compatibility)
 TITLE_TEXT = "TILE SURVIVAL"
 TITLE_FONT_SIZE = 96
 TITLE_SUB_FONT_SIZE = 34
@@ -100,11 +169,11 @@ TITLE_PARTICLE_MIN_SPEED = 20
 TITLE_PARTICLE_MAX_SPEED = 70
 
 NAME_MAX_LENGTH = 16
-INPUT_BOX_WIDTH = 500
-INPUT_BOX_HEIGHT = 62
-MODE_CARD_WIDTH = 700
-MODE_CARD_HEIGHT = 110
-MODE_CARD_SPACING = 132
+INPUT_BOX_WIDTH = 320
+INPUT_BOX_HEIGHT = 52
+MODE_CARD_WIDTH = 460
+MODE_CARD_HEIGHT = 145
+MODE_CARD_SPACING = 34 + 145  # gap + card height
 
 SCENE_FADE_SPEED = 420  # alpha units per second
 TITLE_DROP_DURATION = 0.85
@@ -112,31 +181,63 @@ TITLE_PULSE_SPEED = 3.2
 PROMPT_BLINK_SPEED = 2.0
 MODE_CLICK_FLASH_TIME = 0.15
 
+# Title shake animation
+TITLE_SHAKE_INTERVAL = 4.0   # seconds between shakes
+TITLE_SHAKE_OFFSET = 3       # pixels
+TITLE_SHAKE_FRAMES = 3       # rapid frames
+
+# Subtitle float animation
+SUBTITLE_FLOAT_AMPLITUDE = 3  # pixels
+SUBTITLE_FLOAT_SPEED = 1.0    # cycles per second
+
+# Cursor blink speed
+CURSOR_BLINK_SPEED = 2.0  # blinks per second (0.5s period)
+
+# Warning display duration
+WARNING_DISPLAY_DURATION = 2.0  # seconds
+
+# Mode selection header animation
+MODE_HEADER_SLIDE_DURATION = 1.5   # seconds
+MODE_HEADER_SLIDE_DISTANCE = 80    # pixels
+MODE_SUBTITLE_DELAY = 0.15         # seconds after header
+
 TITLE_BG_COLOR = (12, 15, 28)
 TITLE_SUBTITLE_COLOR = (220, 230, 250)
-INPUT_LABEL_COLOR = (245, 245, 255)
-INPUT_BOX_BG_COLOR = (28, 36, 58)
+INPUT_LABEL_COLOR = (160, 160, 160)
+INPUT_BOX_BG_COLOR = (30, 30, 30)
 INPUT_BOX_BORDER_COLOR = (245, 185, 70)
+INPUT_BOX_BORDER_UNFOCUSED = (100, 100, 100)
 INPUT_TEXT_COLOR = (255, 255, 255)
 PROMPT_TEXT_COLOR = (255, 220, 90)
-WARNING_TEXT_COLOR = (255, 70, 70)
+WARNING_TEXT_COLOR = (220, 60, 60)
 
 MODE_BG_COLOR = (10, 14, 26)
-MODE_HEADER_COLOR = (255, 230, 120)
-MODE_SUBTITLE_COLOR = (220, 228, 255)
-MODE_CARD_BASE_COLOR = (32, 44, 68)
-MODE_CARD_HOVER_COLOR = (58, 86, 128)
+MODE_HEADER_COLOR = (255, 255, 255)
+MODE_HEADER_NAME_COLOR = (255, 200, 0)   # GOLD for player name
+MODE_SUBTITLE_COLOR = (200, 200, 200)
+MODE_CARD_BASE_COLOR = (25, 25, 40, 200)
+MODE_CARD_HOVER_COLOR = (40, 40, 70, 230)
 MODE_CARD_BORDER_COLOR = (230, 190, 80)
 MODE_CARD_TITLE_COLOR = (255, 255, 255)
-MODE_CARD_DESC_COLOR = (210, 220, 235)
+MODE_CARD_DESC_COLOR = (200, 200, 200)
 MODE_CARD_CLICK_BASE = (90, 110, 50)
 TITLE_PARTICLE_COLOR_BASE = (255, 180, 60)
 SCENE_OVERLAY_COLOR = (0, 0, 0)
 
+# Mode card border colors per mode
+MODE_CARD_BORDER_VS_COMPUTER = (0, 200, 255)       # CYAN
+MODE_CARD_BORDER_LOCAL_MP = (50, 220, 80)           # GREEN
+MODE_CARD_BORDER_ONLINE_MP = (180, 80, 255)         # PURPLE
+
+# Mode card hover border (lightened)
+MODE_CARD_HOVER_BORDER_VS_COMPUTER = (80, 220, 255)
+MODE_CARD_HOVER_BORDER_LOCAL_MP = (100, 255, 130)
+MODE_CARD_HOVER_BORDER_ONLINE_MP = (210, 130, 255)
+
 TITLE_COLORS = [
-	(255, 70, 70),
-	(255, 140, 40),
-	(255, 220, 60),
+	(255, 200, 0),    # GOLD
+	(255, 140, 40),   # ORANGE
+	(255, 70, 70),    # RED
 ]
 
 MODE_VS_COMPUTER = "vs_computer"
