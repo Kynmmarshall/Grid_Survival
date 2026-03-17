@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grid Survival | Download</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ========== INTERNAL CSS FOR DOWNLOAD PAGE ========== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        :root {
+            --primary: #4a6fa5;
+            --secondary: #6b4e71;
+            --accent: #ffb347;
+            --dark: #343a40;
+            --success: #5cb85c;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        main { flex: 1; }
+
+        /* Navbar */
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            padding: 1rem 0;
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 2rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .logo i { color: var(--accent); }
+
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+        .nav-menu a {
+            text-decoration: none;
+            color: var(--dark);
+            font-weight: 500;
+            transition: color 0.3s;
+            padding: 0.5rem 0;
+        }
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            color: var(--primary);
+            border-bottom: 2px solid var(--accent);
+        }
+
+        .hamburger {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+        }
+        .bar {
+            width: 25px;
+            height: 3px;
+            background: var(--dark);
+            margin: 3px 0;
+            transition: 0.3s;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 3rem 2rem;
+        }
+
+        .page-header {
+            background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7));
+            color: white;
+            text-align: center;
+            padding: 3rem 2rem;
+        }
+        .page-header h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+
+        /* Stats Cards */
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+        .stat-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .stat-icon { font-size: 2.5rem; color: var(--primary); margin-bottom: 0.5rem; }
+        .stat-number {
+            display: block;
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--dark);
+        }
+        .stat-label { color: #666; }
+
+        /* Platform Grid */
+        .platform-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        .platform-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            text-align: center;
+            text-decoration: none;
+            color: var(--dark);
+            transition: transform 0.3s;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            display: block;
+            cursor: pointer;
+        }
+        .platform-card:hover { transform: translateY(-5px); }
+        .platform-card i { font-size: 3rem; margin-bottom: 1rem; }
+        .platform-card.windows i { color: #00a4ef; }
+        .platform-card.mac i { color: #555; }
+        .platform-card.linux i { color: #fcc624; }
+        .platform-card.android i { color: #3ddc84; }
+        .download-size {
+            display: inline-block;
+            background: #f0f0f0;
+            padding: 0.2rem 1rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+        }
+
+        /* System Requirements */
+        .system-reqs {
+            background: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin: 3rem 0;
+        }
+        .reqs-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .reqs-grid ul { list-style: none; }
+        .reqs-grid li { margin: 0.5rem 0; padding-left: 1.5rem; position: relative; }
+        .reqs-grid li::before {
+            content: "•";
+            color: var(--primary);
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.3s;
+            margin: 0.5rem;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: var(--dark);
+        }
+        .btn-secondary {
+            background: transparent;
+            color: white;
+            border: 2px solid white;
+        }
+        .btn-primary:hover, .btn-secondary:hover { transform: translateY(-3px); }
+        .btn-secondary:hover { background: white; color: var(--dark); }
+
+        .store-badges {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            font-size: 3rem;
+            color: white;
+            margin-top: 1rem;
+        }
+
+        /* Footer */
+        footer {
+            background: var(--dark);
+            color: white;
+            text-align: center;
+            padding: 2rem;
+            margin-top: auto;
+        }
+        .footer-links a {
+            color: white;
+            text-decoration: none;
+            margin: 0 1rem;
+            opacity: 0.8;
+        }
+        .footer-links a:hover { opacity: 1; }
+
+        @media (max-width: 768px) {
+            .nav-menu {
+                display: none;
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                background: white;
+                flex-direction: column;
+                align-items: center;
+                padding: 2rem;
+            }
+            .nav-menu.active { display: flex; }
+            .hamburger { display: flex; }
+            .stats-container { grid-template-columns: 1fr; }
+            .reqs-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav class="navbar">
+            <div class="nav-container">
+                <div class="logo"><i class="fas fa-border-all"></i><span>Grid Survival</span></div>
+                <ul class="nav-menu">
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="terrain.html">Terrain</a></li>
+                    <li><a href="modes.html">Game Modes</a></li>
+                    <li><a href="download.html" class="active">Download</a></li>
+                    <li><a href="sitemap.html">Site Map</a></li>
+                </ul>
+                <div class="hamburger"><span class="bar"></span><span class="bar"></span><span class="bar"></span></div>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <section class="page-header">
+            <div class="container">
+                <h1>Download Grid Survival</h1>
+                <p>Free-to-play. Join <span id="total-downloads-header">15,432</span> players.</p>
+            </div>
+        </section>
+
+        <section class="download-page">
+            <div class="container">
+                <div class="stats-container">
+                    <div class="stat-card">
+                        <i class="fas fa-download stat-icon"></i>
+                        <span class="stat-number" id="total-downloads">15,432</span>
+                        <span class="stat-label">Total Downloads</span>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-play stat-icon"></i>
+                        <span class="stat-number" id="active-users">1,243</span>
+                        <span class="stat-label">Active Now</span>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-trophy stat-icon"></i>
+                        <span class="stat-number" id="online-players">876</span>
+                        <span class="stat-label">In-Game</span>
+                    </div>
+                </div>
+
+                <div class="download-options">
+                    <h2>Select Your Platform</h2>
+                    <div class="platform-grid">
+                        <a href="#" class="platform-card windows" data-platform="Windows">
+                            <i class="fab fa-windows"></i><h3>Windows</h3>
+                            <span class="download-size">450 MB</span>
+                        </a>
+                        <a href="#" class="platform-card mac" data-platform="macOS">
+                            <i class="fab fa-apple"></i><h3>macOS</h3>
+                            <span class="download-size">480 MB</span>
+                        </a>
+                        <a href="#" class="platform-card linux" data-platform="Linux">
+                            <i class="fab fa-linux"></i><h3>Linux</h3>
+                            <span class="download-size">420 MB</span>
+                        </a>
+                        <a href="#" class="platform-card android" data-platform="Android">
+                            <i class="fab fa-android"></i><h3>Android</h3>
+                            <span class="download-size">320 MB</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="system-reqs">
+                    <h2>System Requirements</h2>
+                    <div class="reqs-grid">
+                        <div class="reqs-min">
+                            <h4>Minimum</h4>
+                            <ul><li>OS: Windows 10 / macOS 10.14</li><li>CPU: Intel Core i3</li><li>RAM: 4 GB</li></ul>
+                        </div>
+                        <div class="reqs-rec">
+                            <h4>Recommended</h4>
+                            <ul><li>OS: Windows 11 / macOS 12</li><li>CPU: Intel Core i5</li><li>RAM: 8 GB</li></ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="store-section">
+                    <div class="related-links">
+                        <a href="modes.html" class="btn btn-secondary">Compare Modes</a>
+                        <a href="terrain.html" class="btn btn-secondary">Learn Terrain</a>
+                        <a href="index.html" class="btn btn-primary">Home</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="index.html">Home</a><a href="terrain.html">Terrain</a>
+                <a href="modes.html">Modes</a><a href="download.html">Download</a>
+                <a href="sitemap.html">Site Map</a>
+            </div>
+            <p>&copy; 2025 Grid Survival. All files relate to js/script.js</p>
+        </div>
+    </footer>
+
+    <script src="js/script.js"></script>
+</body>
+</html>

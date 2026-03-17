@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grid Survival - File Relations</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ========== INTERNAL CSS FOR SITEMAP PAGE ========== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .relation-card {
+            background: rgba(255,255,255,0.95);
+            color: #333;
+            padding: 3rem;
+            border-radius: 30px;
+            max-width: 900px;
+            width: 100%;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            color: #4a6fa5;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .diagram {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2rem;
+            margin: 3rem 0;
+            position: relative;
+        }
+
+        .file-node {
+            background: #f0f0f0;
+            border-radius: 15px;
+            padding: 1.5rem;
+            width: 160px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+        .file-node:hover { transform: translateY(-5px); }
+        .file-node.html { border-top: 5px solid #e44d26; }
+        .file-node.js { border-top: 5px solid #f7df1e; }
+        .file-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        .file-name { font-weight: 700; }
+        .file-desc { font-size: 0.8rem; color: #666; }
+
+        .connector {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 1.5rem;
+        }
+
+        .relation-list {
+            background: #f9f9f9;
+            padding: 2rem;
+            border-radius: 15px;
+            margin-top: 2rem;
+        }
+        .relation-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.8rem;
+            border-bottom: 1px solid #eee;
+        }
+        .relation-item i { color: #4a6fa5; width: 25px; }
+
+        .btn {
+            display: inline-block;
+            background: #ffb347;
+            color: #343a40;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            margin: 1rem 0.5rem;
+            transition: transform 0.3s;
+        }
+        .btn:hover { transform: translateY(-3px); }
+
+        @media (max-width: 768px) {
+            .diagram { flex-direction: column; align-items: center; }
+            .connector { transform: rotate(90deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="relation-card">
+        <h1><i class="fas fa-link"></i> All Files Relate to JavaScript</h1>
+        <p>CSS is inside each HTML file - All share the same js/script.js</p>
+        
+        <div class="diagram">
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">index.html</div>
+                <div class="file-desc">(CSS inside)</div>
+            </div>
+            <div class="connector">↓</div>
+            <div class="file-node js">
+                <div class="file-icon"><i class="fab fa-js"></i></div>
+                <div class="file-name">js/script.js</div>
+                <div class="file-desc">Shared by ALL</div>
+            </div>
+            <div class="connector">↑</div>
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">terrain.html</div>
+                <div class="file-desc">(CSS inside)</div>
+            </div>
+        </div>
+
+        <div style="display: flex; justify-content: center; gap: 2rem; margin: 2rem 0;">
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">modes.html</div>
+                <div class="file-desc">(CSS inside)</div>
+            </div>
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">download.html</div>
+                <div class="file-desc">(CSS inside)</div>
+            </div>
+        </div>
+
+        <div class="relation-list">
+            <h3>How Files Relate:</h3>
+            <div class="relation-item"><i class="fas fa-check-circle" style="color:#5cb85c;"></i> <span>All HTML files have their own internal CSS</span></div>
+            <div class="relation-item"><i class="fas fa-check-circle" style="color:#5cb85c;"></i> <span>Every page links to the same <code>js/script.js</code></span></div>
+            <div class="relation-item"><i class="fas fa-check-circle" style="color:#5cb85c;"></i> <span>Navigation menu connects all pages</span></div>
+            <div class="relation-item"><i class="fas fa-check-circle" style="color:#5cb85c;"></i> <span>Real-time stats in JS update across all pages</span></div>
+            <div class="relation-item"><i class="fas fa-check-circle" style="color:#5cb85c;"></i> <span>Download buttons all call same JS function</span></div>
+        </div>
+
+        <div style="text-align: center;">
+            <a href="index.html" class="btn"><i class="fas fa-home"></i> Home</a>
+            <a href="terrain.html" class="btn">Terrain</a>
+            <a href="modes.html" class="btn">Modes</a>
+            <a href="download.html" class="btn">Download</a>
+        </div>
+        
+        <p style="text-align: center; margin-top: 2rem; color: #666;">
+            <i class="fas fa-check-circle" style="color:#5cb85c;"></i> CSS is internal in each file - JavaScript is shared
+        </p>
+    </div>
+</body>
+</html>

@@ -1,6 +1,5 @@
 import pygame
-
-i=0
+import os
 
 def crop_to_sprite(image):
     """Crop image to bounding box of non-transparent pixels."""
@@ -9,20 +8,37 @@ def crop_to_sprite(image):
     cropped.blit(image, (0, 0), rect)
     return cropped
 
-# Init pygame (needed for image functions)
+# Init pygame
 pygame.init()
 pygame.display.set_mode((1, 1), pygame.HIDDEN)
-while(i<12):
-    if i < 10:
-        sprite = pygame.image.load(f"cropper\\tobecropped\enemy3\Walking\Wraith_02_Moving Forward_00{i}.png").convert_alpha()
-    elif i>=10:
-        sprite = pygame.image.load(f"cropper\\tobecropped\enemy3\Walking\Wraith_02_Moving Forward_0{i}.png").convert_alpha()
 
-    # Crop it
-    cropped_sprite = crop_to_sprite(sprite)
+# Set the source and output directories
+source_dir = r"C:\Users\rayan\Desktop\game development\asserts\PNG Sequences\Back - Hurt"
+output_dir = r"C:\Users\rayan\Desktop\game development\asserts\PNG Sequences\Back - Hurt"
 
-    # Save to new file
-    pygame.image.save(cropped_sprite, f"{i}.png")
-    i+=1
+# Create output directory if it doesn't exist
+os.makedirs(output_dir, exist_ok=True)
 
-print("✅ Saved cropped sprite as sprite_cropped.png")
+# Process images from 001 to 012 (adjust the range as needed)
+for i in range(1, 13):  # 1 to 12
+    # Format filename with 3-digit padding (001, 002, etc.)
+    filename = os.path.join(source_dir, f"Back - Hurt_{i:03d}.png")
+    output_filename = os.path.join(output_dir, f"Back - Hurt_cropped_{i:03d}.png")
+    
+    try:
+        sprite = pygame.image.load(filename).convert_alpha()
+        
+        # Crop it
+        cropped_sprite = crop_to_sprite(sprite)
+        
+        # Save to new file
+        pygame.image.save(cropped_sprite, output_filename)
+        
+        print(f"✅ Processed: Back - Hurt_{i:03d}.png")
+        
+    except pygame.error as e:
+        print(f"❌ Error loading {filename}: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+
+print(f"🎉 All done! Cropped images saved to: {output_dir}")

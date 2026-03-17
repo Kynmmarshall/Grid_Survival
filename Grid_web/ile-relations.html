@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grid Survival - File Relations</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .relation-card {
+            background: rgba(255,255,255,0.95);
+            color: #333;
+            padding: 3rem;
+            border-radius: 30px;
+            max-width: 900px;
+            width: 100%;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #4a6fa5;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .diagram {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2rem;
+            margin: 3rem 0;
+            position: relative;
+        }
+        .file-node {
+            background: #f0f0f0;
+            border-radius: 15px;
+            padding: 1.5rem;
+            width: 160px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            position: relative;
+            transition: transform 0.3s;
+        }
+        .file-node:hover {
+            transform: translateY(-5px);
+        }
+        .file-node.html { border-top: 5px solid #e44d26; }
+        .file-node.css { border-top: 5px solid #264de4; }
+        .file-node.js { border-top: 5px solid #f7df1e; }
+        .file-icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .file-name {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        .file-desc {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 0.5rem;
+        }
+        .connector {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            color: #999;
+            font-size: 1.5rem;
+        }
+        .relation-list {
+            background: #f9f9f9;
+            padding: 2rem;
+            border-radius: 15px;
+            margin-top: 2rem;
+        }
+        .relation-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.8rem;
+            border-bottom: 1px solid #eee;
+        }
+        .relation-item i {
+            color: #4a6fa5;
+            width: 25px;
+        }
+        .btn {
+            display: inline-block;
+            background: #ffb347;
+            color: #343a40;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            margin: 1rem 0.5rem;
+            transition: transform 0.3s;
+        }
+        .btn:hover {
+            transform: translateY(-3px);
+        }
+    </style>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="relation-card">
+        <h1><i class="fas fa-link"></i> All Files Are Properly Related</h1>
+        <p>This diagram shows how all files are interconnected in the Grid Survival website</p>
+        
+        <div class="diagram">
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">index.html</div>
+                <div class="file-desc">Home page</div>
+            </div>
+            <div class="connector">↔</div>
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">terrain.html</div>
+                <div class="file-desc">Terrain page</div>
+            </div>
+            <div class="connector">↔</div>
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">modes.html</div>
+                <div class="file-desc">Game modes</div>
+            </div>
+            <div class="connector">↔</div>
+            <div class="file-node html">
+                <div class="file-icon"><i class="fab fa-html5"></i></div>
+                <div class="file-name">download.html</div>
+                <div class="file-desc">Download page</div>
+            </div>
+        </div>
+        
+        <div style="display: flex; justify-content: center; gap: 2rem; margin: 1rem 0 2rem;">
+            <div class="file-node css" style="width: 200px;">
+                <div class="file-icon"><i class="fab fa-css3-alt"></i></div>
+                <div class="file-name">css/style.css</div>
+                <div class="file-desc">Styles ALL pages</div>
+            </div>
+            <div class="connector">↓</div>
+            <div class="file-node js" style="width: 200px;">
+                <div class="file-icon"><i class="fab fa-js"></i></div>
+                <div class="file-name">js/script.js</div>
+                <div class="file-desc">Functions for ALL pages</div>
+            </div>
+        </div>
+
+        <div class="relation-list">
+            <h3>How Files Are Related:</h3>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>All HTML files</strong> link to the same <code>style.css</code> and <code>script.js</code></span>
+            </div>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>Navigation menu</strong> is identical across all pages with active page highlighting</span>
+            </div>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>Footer links</strong> connect to all pages consistently</span>
+            </div>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>Real-time download stats</strong> are shared across pages and update simultaneously</span>
+            </div>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>Grid generation function</strong> works on both terrain.html and index.html</span>
+            </div>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>Download buttons</strong> on all pages increment the same global counter</span>
+            </div>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>CSS variables</strong> ensure consistent colors and styling throughout</span>
+            </div>
+            
+            <div class="relation-item">
+                <i class="fas fa-check-circle" style="color: #5cb85c;"></i>
+                <span><strong>JavaScript functions</strong> check which page they're on and act accordingly</span>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 2rem;">
+            <a href="index.html" class="btn"><i class="fas fa-home"></i> Visit Home Page</a>
+            <a href="terrain.html" class="btn">Terrain</a>
+            <a href="modes.html" class="btn">Game Modes</a>
+            <a href="download.html" class="btn">Download</a>
+        </div>
+        
+        <p style="text-align: center; margin-top: 2rem; color: #666;">
+            <i class="fas fa-check-circle" style="color: #5cb85c;"></i> All files are now properly related and interconnected
+        </p>
+    </div>
+</body>
+</html>

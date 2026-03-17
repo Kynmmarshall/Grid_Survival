@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grid Survival | Living Terrain</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ========== INTERNAL CSS FOR TERRAIN PAGE ========== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        :root {
+            --primary: #4a6fa5;
+            --secondary: #6b4e71;
+            --accent: #ffb347;
+            --danger: #d9534f;
+            --light: #f8f9fa;
+            --dark: #343a40;
+            --grid-bg: #2c3e50;
+            --tile-color: #5d7a9c;
+            --tile-hover: #6b8cae;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        main { flex: 1; }
+
+        /* Navbar (same as index) */
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            padding: 1rem 0;
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 2rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo i { color: var(--accent); }
+
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        .nav-menu a {
+            text-decoration: none;
+            color: var(--dark);
+            font-weight: 500;
+            transition: color 0.3s;
+            padding: 0.5rem 0;
+        }
+
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            color: var(--primary);
+            border-bottom: 2px solid var(--accent);
+        }
+
+        .hamburger {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+        }
+
+        .bar {
+            width: 25px;
+            height: 3px;
+            background: var(--dark);
+            margin: 3px 0;
+            transition: 0.3s;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 3rem 2rem;
+        }
+
+        /* Page Header */
+        .page-header {
+            background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7));
+            color: white;
+            text-align: center;
+            padding: 3rem 2rem;
+        }
+
+        .page-header h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+        .page-header p { font-size: 1.2rem; opacity: 0.9; }
+
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.3s;
+            margin: 0.5rem;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: var(--dark);
+        }
+        .btn-primary:hover { transform: translateY(-3px); }
+
+        /* Terrain Showcase */
+        .terrain-showcase {
+            display: flex;
+            gap: 3rem;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            background: var(--grid-bg);
+            padding: 20px;
+            border-radius: 20px;
+            width: 100%;
+            max-width: 500px;
+            aspect-ratio: 1;
+        }
+
+        .grid-tile {
+            background: var(--tile-color);
+            border-radius: 6px;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .grid-tile:hover { background: var(--tile-hover); transform: scale(0.95); }
+        .grid-tile.player { background: var(--accent); box-shadow: 0 0 15px var(--accent); }
+        .grid-tile.empty { background: #34495e; opacity: 0.5; cursor: not-allowed; }
+
+        .terrain-info {
+            flex: 1;
+            min-width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .info-card {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            padding: 1.5rem;
+            border-radius: 15px;
+            color: white;
+            border-left: 5px solid var(--accent);
+        }
+        .info-card i { font-size: 2rem; color: var(--accent); margin-bottom: 0.5rem; }
+        .info-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+
+        /* Rules Grid */
+        .terrain-rules { background: rgba(0,0,0,0.2); }
+        .section-title {
+            font-size: 2.5rem;
+            margin-bottom: 3rem;
+            color: white;
+            text-align: center;
+        }
+        .rules-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .rule-item {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            text-align: center;
+        }
+        .rule-number {
+            width: 40px;
+            height: 40px;
+            background: var(--accent);
+            color: var(--dark);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1rem;
+            font-weight: bold;
+        }
+
+        /* Footer */
+        footer {
+            background: var(--dark);
+            color: white;
+            text-align: center;
+            padding: 2rem;
+            margin-top: auto;
+        }
+        .footer-links a {
+            color: white;
+            text-decoration: none;
+            margin: 0 1rem;
+            opacity: 0.8;
+        }
+        .footer-links a:hover { opacity: 1; }
+
+        @media (max-width: 768px) {
+            .nav-menu {
+                display: none;
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                background: white;
+                flex-direction: column;
+                align-items: center;
+                padding: 2rem;
+            }
+            .nav-menu.active { display: flex; }
+            .hamburger { display: flex; }
+            .terrain-showcase { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav class="navbar">
+            <div class="nav-container">
+                <div class="logo"><i class="fas fa-border-all"></i><span>Grid Survival</span></div>
+                <ul class="nav-menu">
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="terrain.html" class="active">Terrain</a></li>
+                    <li><a href="modes.html">Game Modes</a></li>
+                    <li><a href="download.html">Download</a></li>
+                    <li><a href="sitemap.html">Site Map</a></li>
+                </ul>
+                <div class="hamburger"><span class="bar"></span><span class="bar"></span><span class="bar"></span></div>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <section class="page-header">
+            <div class="container">
+                <h1>The Living Terrain</h1>
+                <p>Interactive grid - click tiles to see them disappear</p>
+            </div>
+        </section>
+
+        <section class="terrain-demo">
+            <div class="container">
+                <div class="terrain-showcase">
+                    <div class="grid-container" id="game-grid"></div>
+                    <div class="terrain-info">
+                        <div class="info-card">
+                            <i class="fas fa-skull"></i>
+                            <h3>Disappearing Tiles</h3>
+                            <p>Each step removes a tile. The grid shrinks as battle progresses.</p>
+                            <a href="modes.html" class="info-link">See game modes →</a>
+                        </div>
+                        <div class="info-card">
+                            <i class="fas fa-bolt"></i>
+                            <h3>Attack Mechanic</h3>
+                            <p>Target opponents to force them into the void.</p>
+                            <a href="download.html" class="info-link">Download to play →</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="terrain-rules">
+            <div class="container">
+                <h2 class="section-title">How It Works</h2>
+                <div class="rules-grid">
+                    <div class="rule-item"><div class="rule-number">1</div><h4>Move or Attack</h4><p>Each action costs one tile.</p></div>
+                    <div class="rule-item"><div class="rule-number">2</div><h4>Tiles Vanish</h4><p>The tile you leave disappears.</p></div>
+                    <div class="rule-item"><div class="rule-number">3</div><h4>Strategic Positioning</h4><p>Corner opponents.</p></div>
+                    <div class="rule-item"><div class="rule-number">4</div><h4>Last One Wins</h4><p>Last player on grid wins.</p></div>
+                </div>
+                <div style="text-align: center;">
+                    <a href="modes.html" class="btn btn-primary">Choose Game Mode</a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="index.html">Home</a><a href="terrain.html">Terrain</a>
+                <a href="modes.html">Modes</a><a href="download.html">Download</a>
+                <a href="sitemap.html">Site Map</a>
+            </div>
+            <p>&copy; 2025 Grid Survival. All files relate to js/script.js</p>
+        </div>
+    </footer>
+
+    <script src="js/script.js"></script>
+</body>
+</html>

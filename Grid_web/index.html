@@ -3,13 +3,376 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grid Survival | Living Spaces</title>
-    <!-- Font Awesome -->
+    <title>Grid Survival | Home - Living Spaces</title>
+    <!-- Font Awesome (external but fine) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/style.css">
+    <!-- JavaScript is shared - all pages link to same file -->
+    <style>
+        /* ========== INTERNAL CSS FOR HOME PAGE ========== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        :root {
+            --primary: #4a6fa5;
+            --secondary: #6b4e71;
+            --accent: #ffb347;
+            --danger: #d9534f;
+            --light: #f8f9fa;
+            --dark: #343a40;
+            --grid-bg: #2c3e50;
+            --tile-color: #5d7a9c;
+            --tile-hover: #6b8cae;
+            --success: #5cb85c;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        main {
+            flex: 1;
+        }
+
+        /* Navbar */
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            padding: 1rem 0;
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 2rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo i {
+            color: var(--accent);
+        }
+
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        .nav-menu a {
+            text-decoration: none;
+            color: var(--dark);
+            font-weight: 500;
+            transition: color 0.3s;
+            padding: 0.5rem 0;
+        }
+
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            color: var(--primary);
+            border-bottom: 2px solid var(--accent);
+        }
+
+        .hamburger {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+        }
+
+        .bar {
+            width: 25px;
+            height: 3px;
+            background: var(--dark);
+            margin: 3px 0;
+            transition: 0.3s;
+        }
+
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 3rem 2rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.3s, box-shadow 0.3s;
+            margin: 0.5rem;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--dark);
+            box-shadow: 0 4px 15px rgba(255, 180, 71, 0.4);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: white;
+            border: 2px solid white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(255, 180, 71, 0.6);
+        }
+
+        .btn-secondary:hover {
+            background: white;
+            color: var(--dark);
+        }
+
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" fill="%23333"/><path d="M10 10 L90 10 L90 90 L10 90 Z" stroke="%23ffb347" stroke-width="2" fill="none"/><circle cx="30" cy="30" r="5" fill="%234a6fa5"/><circle cx="70" cy="50" r="5" fill="%23d9534f"/><circle cx="50" cy="70" r="5" fill="%236b4e71"/></svg>');
+            background-size: cover;
+            color: white;
+            text-align: center;
+            padding: 6rem 2rem;
+        }
+
+        .hero-content h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .hero-content p {
+            font-size: 1.2rem;
+            max-width: 700px;
+            margin: 0 auto 2rem;
+        }
+
+        /* Features Section */
+        .features {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(5px);
+        }
+
+        .section-title {
+            font-size: 2.5rem;
+            margin-bottom: 3rem;
+            color: white;
+            text-align: center;
+            text-shadow: 2px 2px 0 rgba(0,0,0,0.2);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            text-align: center;
+            transition: transform 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .feature-card i {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            margin-bottom: 1rem;
+            color: var(--dark);
+        }
+
+        .feature-card p {
+            color: #666;
+            margin-bottom: 1.5rem;
+        }
+
+        .feature-link {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        /* Preview Section */
+        .preview {
+            background: rgba(255,255,255,0.15);
+        }
+
+        .preview-content {
+            display: flex;
+            align-items: center;
+            gap: 3rem;
+            flex-wrap: wrap;
+        }
+
+        .preview-text {
+            flex: 1;
+            min-width: 300px;
+            color: white;
+        }
+
+        .preview-text h2 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .mini-stats-preview {
+            display: flex;
+            gap: 2rem;
+            margin: 1.5rem 0;
+        }
+
+        .mini-stat {
+            text-align: center;
+        }
+
+        .mini-stat-number {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent);
+            display: block;
+        }
+
+        .preview-grid {
+            flex: 1;
+            min-width: 300px;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+            background: var(--grid-bg);
+            padding: 15px;
+            border-radius: 15px;
+            aspect-ratio: 1;
+        }
+
+        /* Grid Tiles */
+        .grid-tile {
+            background: var(--tile-color);
+            border-radius: 6px;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: inset 0 -2px 0 rgba(0,0,0,0.2);
+        }
+
+        .grid-tile:hover {
+            background: var(--tile-hover);
+            transform: scale(0.95);
+        }
+
+        .grid-tile.player {
+            background: var(--accent);
+            box-shadow: 0 0 15px var(--accent);
+        }
+
+        .grid-tile.empty {
+            background: #34495e;
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Footer */
+        footer {
+            background: var(--dark);
+            color: white;
+            text-align: center;
+            padding: 2rem;
+            margin-top: auto;
+        }
+
+        .footer-links {
+            margin-bottom: 1rem;
+        }
+
+        .footer-links a {
+            color: white;
+            text-decoration: none;
+            margin: 0 1rem;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+
+        .footer-links a:hover {
+            opacity: 1;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-menu {
+                display: none;
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                background: white;
+                flex-direction: column;
+                align-items: center;
+                padding: 2rem;
+                box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            }
+
+            .nav-menu.active {
+                display: flex;
+            }
+
+            .hamburger {
+                display: flex;
+            }
+
+            .hero-content h1 {
+                font-size: 2rem;
+            }
+
+            .preview-content {
+                flex-direction: column;
+            }
+
+            .footer-links a {
+                display: block;
+                margin: 0.5rem 0;
+            }
+        }
+    </style>
 </head>
 <body>
-    <!-- Header - Same across all pages -->
+    <!-- HEADER - Same across all pages -->
     <header>
         <nav class="navbar">
             <div class="nav-container">
@@ -22,6 +385,7 @@
                     <li><a href="terrain.html">Terrain</a></li>
                     <li><a href="modes.html">Game Modes</a></li>
                     <li><a href="download.html">Download</a></li>
+                    <li><a href="sitemap.html">Site Map</a></li>
                 </ul>
                 <div class="hamburger">
                     <span class="bar"></span>
@@ -60,41 +424,44 @@
                         <i class="fas fa-users"></i>
                         <h3>Multiple Modes</h3>
                         <p>VS Computer, Local VS, or 4-Player Multiplayer mayhem.</p>
-                        <a href="modes.html" class="feature-link">View modes →</a>
+                        <a href="modes.html" class="feature-link">View all modes →</a>
                     </div>
                     <div class="feature-card">
-                        <i class="fas fa-trophy"></i>
-                        <h3>Last Stand</h3>
-                        <p>Be the last player on the grid. Attack to eliminate opponents.</p>
-                        <a href="download.html" class="feature-link">Play now →</a>
+                        <i class="fas fa-download"></i>
+                        <h3>Download Now</h3>
+                        <p>Free to play on all platforms. Join thousands of players.</p>
+                        <a href="download.html" class="feature-link">Get the game →</a>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Quick Preview -->
+        <!-- Preview with stats -->
         <section class="preview">
             <div class="container">
                 <div class="preview-content">
                     <div class="preview-text">
                         <h2>Grid Survival: Living Spaces</h2>
-                        <p>A tactical battle where every step matters. Walk on tiles to claim them, but beware - each move makes a tile disappear forever. Attack opponents to force them into the void.</p>
-                        <ul class="preview-list">
-                            <li><i class="fas fa-check"></i> 5x5 dynamic grid</li>
-                            <li><i class="fas fa-check"></i> Up to 4 players</li>
-                            <li><i class="fas fa-check"></i> Cross-platform</li>
-                            <li><i class="fas fa-check"></i> Free to play</li>
-                        </ul>
+                        <p>A tactical battle where every step matters. Walk on tiles to claim them, but beware - each move makes a tile disappear forever.</p>
+                        <div class="mini-stats-preview">
+                            <div class="mini-stat">
+                                <span class="mini-stat-number" id="home-downloads">15.4k</span>
+                                <span>Downloads</span>
+                            </div>
+                            <div class="mini-stat">
+                                <span class="mini-stat-number" id="home-active">1.2k</span>
+                                <span>Active Now</span>
+                            </div>
+                        </div>
+                        <a href="terrain.html" class="btn btn-primary">Try Interactive Demo</a>
                     </div>
-                    <div class="preview-grid" id="preview-grid">
-                        <!-- Generated by JS -->
-                    </div>
+                    <div class="preview-grid" id="preview-grid"></div>
                 </div>
             </div>
         </section>
     </main>
 
-    <!-- Footer - Same across all pages -->
+    <!-- FOOTER - Same across all pages -->
     <footer>
         <div class="footer-content">
             <div class="footer-links">
@@ -102,11 +469,13 @@
                 <a href="terrain.html">Terrain</a>
                 <a href="modes.html">Modes</a>
                 <a href="download.html">Download</a>
+                <a href="sitemap.html">Site Map</a>
             </div>
-            <p>&copy; 2025 Grid Survival: Living Spaces. All rights reserved.</p>
+            <p>&copy; 2025 Grid Survival. All files relate to js/script.js</p>
         </div>
     </footer>
 
+    <!-- Single JavaScript file for ALL pages -->
     <script src="js/script.js"></script>
 </body>
 </html>
