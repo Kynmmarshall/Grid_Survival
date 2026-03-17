@@ -13,17 +13,17 @@ pygame.init()
 pygame.display.set_mode((1, 1), pygame.HIDDEN)
 
 # Set the source and output directories
-source_dir = r"C:\Users\rayan\Desktop\game development\asserts\PNG Sequences\Back - Hurt"
-output_dir = r"C:\Users\rayan\Desktop\game development\asserts\PNG Sequences\Back - Hurt"
+source_dir = r"C:\Users\rayan\Desktop\game development\asserts\PNG Sequences\Front - Attacking"
+output_dir = r"C:\Users\rayan\Desktop\game development\asserts\PNG Sequences\Front - Attacking"
 
 # Create output directory if it doesn't exist
 os.makedirs(output_dir, exist_ok=True)
 
 # Process images from 001 to 012 (adjust the range as needed)
-for i in range(1, 13):  # 1 to 12
+for i in range(0, 13):  # 0 to 12
     # Format filename with 3-digit padding (001, 002, etc.)
-    filename = os.path.join(source_dir, f"Back - Hurt_{i:03d}.png")
-    output_filename = os.path.join(output_dir, f"Back - Hurt_cropped_{i:03d}.png")
+    filename = os.path.join(source_dir, f"Front - Attacking_{i:03d}.png")
+    output_filename = os.path.join(output_dir, f"Front - Attacking_{i:03d}.png")
     
     try:
         sprite = pygame.image.load(filename).convert_alpha()
@@ -34,7 +34,7 @@ for i in range(1, 13):  # 1 to 12
         # Save to new file
         pygame.image.save(cropped_sprite, output_filename)
         
-        print(f"✅ Processed: Back - Hurt_{i:03d}.png")
+        print(f"✅ Processed: Front - Attacking_{i:03d}.png")
         
     except pygame.error as e:
         print(f"❌ Error loading {filename}: {e}")
