@@ -157,7 +157,7 @@ FONT_SIZE_BODY = 22          # Button labels
 FONT_SIZE_SMALL = 18         # Input labels, hints
 
 # Opening scenes visual constants (legacy kept for compatibility)
-TITLE_TEXT = "TILE SURVIVAL"
+TITLE_TEXT = "GRID SURVIVAL"
 TITLE_FONT_SIZE = 96
 TITLE_SUB_FONT_SIZE = 34
 INPUT_FONT_SIZE = 36
