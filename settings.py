@@ -34,19 +34,19 @@ PLAYER_ANIMATION_PATHS = {
 	"idle": {
 		"down": CHARACTER_BASE/ "idle" / "Front - Idle Blinking",
 		"up": CHARACTER_BASE / "idle" / "Back - Idle",
-		"left": CHARACTER_BASE / "idle" / "Left - Idle Blinking",
+		#"left": CHARACTER_BASE / "idle" / "Left - Idle Blinking",
 		"right": CHARACTER_BASE / "idle" / "Right - Idle Blinking",
 	},
 	"run": {
 		"down": CHARACTER_BASE / "running" / "Front - Running",
 		"up": CHARACTER_BASE / "running" / "Back - Running",
-		"left": CHARACTER_BASE / "running" / "Left - Running",
+		#"left": CHARACTER_BASE / "running" / "Left - Running",
 		"right": CHARACTER_BASE / "running" / "Right - Running",
 	},
     "death": {
 		"down": CHARACTER_BASE / "Dying",
 		"up": CHARACTER_BASE / "Dying",
-		"left": CHARACTER_BASE / "Dying",
+		#"left": CHARACTER_BASE / "Dying",
 		"right": CHARACTER_BASE / "Dying",
 	},
 
@@ -63,6 +63,22 @@ PLAYER_2_ANIMATION_PATHS = {
 		"down": CHARACTER_BASE_2 / "running" / "Front - Running",
 		"up": CHARACTER_BASE_2 / "running" / "Back - Running",
 		#"left": CHARACTER_BASE_2 / "running" / "Left - Running",
+		"right": CHARACTER_BASE_2 / "running" / "Right - Running",
+	},
+	
+}
+
+PLAYER_ANIMATION_PATHS_2 = {
+	"idle": {
+		"down": CHARACTER_BASE_2 / "idle" / "Front - Idle Blinking",
+		"up": CHARACTER_BASE_2 / "idle" / "Back - Idle",
+		"left": CHARACTER_BASE_2 / "idle" / "Left - Idle Blinking",
+		"right": CHARACTER_BASE_2 / "idle" / "Right - Idle Blinking",
+	},
+	"run": {
+		"down": CHARACTER_BASE_2 / "running" / "Front - Running",
+		"up": CHARACTER_BASE_2 / "running" / "Back - Running",
+		"left": CHARACTER_BASE_2 / "running" / "Left - Running",
 		"right": CHARACTER_BASE_2 / "running" / "Right - Running",
 	},
 	
