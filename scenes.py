@@ -284,7 +284,7 @@ class TitleScreen:
 
     def _draw_input(self) -> None:
         # Label
-        label = self._font_small.render("ENTER YOUR NAME NIGGA:", True, INPUT_LABEL_COLOR)
+        label = self._font_small.render("ENTER YOUR NAME :", True, INPUT_LABEL_COLOR)
         self.screen.blit(label, label.get_rect(center=(self.width // 2, 310)))
 
         # Input box
