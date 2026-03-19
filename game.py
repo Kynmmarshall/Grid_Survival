@@ -1,313 +1,313 @@
-import math
-
 import pygame
 
-from assets import load_background_surface
+from ai_player import AIPlayer
+from assets import load_background_surface, load_tilemap_surface
+from audio import AudioManager
+from player import Player
+from water import AnimatedWater
+from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
-from player import ELIMINATED, KEYS_ARROWS, KEYS_WASD, Player
+from ui import GameHUD, EliminationScreen
 from settings import (
     BACKGROUND_COLOR,
-    DIFFICULTY_INTERVAL,
-    DIFFICULTY_MIN_INTERVAL,
-    DIFFICULTY_SPEED_FACTOR,
-    GRID_COLS,
-    GRID_ROWS,
-    ISO_GRID_OFFSET_X,
-    ISO_GRID_OFFSET_Y,
-    ISO_TILE_DEPTH,
-    ISO_TILE_H,
-    ISO_TILE_W,
-    PLAYER_COLOR,
-    PLAYER_COLOR_2,
+    DEBUG_DRAW_WALKABLE,
+    DEBUG_VISUALS_ENABLED,
+    DEBUG_WALKABLE_COLOR,
+    MODE_VS_COMPUTER,
+    MODE_LOCAL_MULTIPLAYER,
     TARGET_FPS,
-    TILES_PER_SECOND,
+    USE_AI_PLAYER,
     WINDOW_SIZE,
     WINDOW_TITLE,
+    SOUND_PLAYER_FALL,
 )
-from tile_grid import TileGrid
-
-# HUD font size
-_HUD_FONT_SIZE = 28
-_HUD_COLOR     = (255, 255, 255)
-_GAMEOVER_COLOR = (220, 60, 60)
 
 
-class Game:
-    """Main game application wrapper."""
+def _load_sound_safe(path: str):
+    """Load a sound file gracefully; returns None if unavailable."""
+    try:
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+        return pygame.mixer.Sound(path)
+    except (pygame.error, FileNotFoundError, OSError) as exc:
+        print(f"[Game] Warning: could not load sound '{path}': {exc}")
+        return None
 
-    def __init__(self):
-        pygame.init()
-        self.screen = pygame.display.set_mode(WINDOW_SIZE)
+
+class GameManager:
+    """Main game application wrapper with full feature integration."""
+
+    def __init__(self, screen=None, clock=None, player_name: str = "Player", game_mode: str = MODE_VS_COMPUTER):
+        if screen is None or clock is None:
+            pygame.init()
+        self.screen = screen or pygame.display.set_mode(WINDOW_SIZE)
         pygame.display.set_caption(WINDOW_TITLE)
-        self.clock = pygame.time.Clock()
+        self.clock = clock or pygame.time.Clock()
         self.running = True
+        self.player_name = player_name
+        self.game_mode = game_mode
 
+        # Load assets
         self.background_surface = load_background_surface(WINDOW_SIZE)
+        (
+            self.map_surface,
+            self.tmx_data,
+            self.walkable_mask,
+            self.walkable_bounds,
+        ) = load_tilemap_surface(WINDOW_SIZE)
+        self.walkable_debug_surface = None
+        self.original_walkable_mask = self.walkable_mask.copy() if self.walkable_mask else None
 
-        # ── Pre-rendered overlays ─────────────────────────────────────────
-        self._shadow_surface  = self._build_shadow()
-        # Bake vignette directly into the background so it costs nothing per frame
-        self._bake_vignette_into_background()
+        # Calculate scale factors for TMX tile manager
+        if self.tmx_data and self.map_surface:
+            from assets import _calculate_surface_size
+            raw_width, raw_height = _calculate_surface_size(self.tmx_data)
+            scale_x = WINDOW_SIZE[0] / raw_width if raw_width > 0 else 1.0
+            scale_y = WINDOW_SIZE[1] / raw_height if raw_height > 0 else 1.0
+        else:
+            scale_x = scale_y = 1.0
 
-        # ── Game objects ──────────────────────────────────────────────────
-        self.grid    = TileGrid()
-        self.players = [
-            Player(start_col=3, start_row=2, keys=KEYS_ARROWS,
-                   color=PLAYER_COLOR, player_id=1),
-            Player(start_col=6, start_row=3, keys=KEYS_WASD,
-                   color=PLAYER_COLOR_2, player_id=2),
-        ]
-        self.hazards = HazardManager(self.grid)
+        # Initialize game systems
+        self.tile_manager = TMXTileManager(self.tmx_data, scale_x, scale_y)
+        self.hazard_manager = HazardManager()
+        self.hud = GameHUD()
+        self.water = AnimatedWater()
 
-        # ── Difficulty ────────────────────────────────────────────────────
-        self._difficulty_timer: float = 0.0
-        self._current_spawn_interval: float = 1.0 / TILES_PER_SECOND
+        # Sound effects
+        self._snd_player_fall = _load_sound_safe(SOUND_PLAYER_FALL)
 
-        # ── HUD font ──────────────────────────────────────────────────────
-        self.font      = pygame.font.SysFont("consolas", _HUD_FONT_SIZE, bold=True)
-        self.font_big  = pygame.font.SysFont("consolas", 56, bold=True)
+        # Initialize players based on game mode
+        self.players = []
+        self.eliminated_players = []
+        self.elimination_screen = None
 
-        self._game_over = False
+        if self.game_mode == MODE_VS_COMPUTER:
+            use_ai = USE_AI_PLAYER
+            self.players.append(AIPlayer() if use_ai else Player())
+            self.hud.set_player_info(player_name, 1, 1)
+        elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
+            player1_controls = {
+                'up': pygame.K_w,
+                'down': pygame.K_s,
+                'left': pygame.K_a,
+                'right': pygame.K_d,
+                'jump': pygame.K_SPACE
+            }
+            player2_controls = {
+                'up': pygame.K_UP,
+                'down': pygame.K_DOWN,
+                'left': pygame.K_LEFT,
+                'right': pygame.K_RIGHT,
+                'jump': pygame.K_RSHIFT
+            }
+            self.players.append(Player(controls=player1_controls))
+            self.players.append(Player(controls=player2_controls))
+            self.hud.set_player_info(player_name, 2, 2)
+        else:
+            self.players.append(Player())
+            self.hud.set_player_info(player_name, 1, 1)
 
-    # ── Events ────────────────────────────────────────────────────────────
+        self.game_over = False
+        self.audio = AudioManager()
+        self.audio.play_music()
 
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_l:
+                    for player in self.players:
+                        player.reset()
+                elif event.key == pygame.K_r and self.game_over:
+                    self._restart_game()
 
-        keys = pygame.key.get_pressed()
-
+    def update(self, dt: float, keys):
         if keys[pygame.K_ESCAPE]:
             self.running = False
-
-        # R to restart after game-over
-        if self._game_over and keys[pygame.K_r]:
-            self._restart()
             return
 
-        if not self._game_over:
-            for player in self.players:
-                player.handle_input(keys, self.grid)
-
-    # ── Update ────────────────────────────────────────────────────────────
-
-    def update(self, dt: float):
-        if self._game_over:
+        if self.game_over:
+            if self.elimination_screen:
+                self.elimination_screen.update(dt)
             return
 
-        self.grid.update(dt)
-        for player in self.players:
-            player.update(dt, self.grid)
-        self.hazards.update(dt, self.players)
+        # Update game systems
+        self.water.update(dt)
+        self.tile_manager.update(dt)
 
-        # Difficulty scaling
-        self._difficulty_timer += dt
-        if self._difficulty_timer >= DIFFICULTY_INTERVAL:
-            self._difficulty_timer -= DIFFICULTY_INTERVAL
-            self._current_spawn_interval = max(
-                DIFFICULTY_MIN_INTERVAL,
-                self._current_spawn_interval * DIFFICULTY_SPEED_FACTOR,
-            )
-            self.grid.set_spawn_interval(self._current_spawn_interval)
+        # Update walkable mask with disappeared/crumbling tiles
+        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
 
-        if all(p.state == ELIMINATED for p in self.players):
-            self._game_over = True
+        self.hazard_manager.update(dt)
+        self.hud.update(dt)
 
-    # ── Draw ──────────────────────────────────────────────────────────────
+        # Update players
+        for player in self.players[:]:
+            if player in self.eliminated_players:
+                continue
+
+            was_falling_before = player.is_falling()
+
+            if player.is_ai:
+                player.update_ai(dt, self.walkable_mask, self.walkable_bounds)
+            else:
+                player.update(dt, keys, self.walkable_mask, self.walkable_bounds)
+
+            # Play fall sound when player starts falling
+            if not was_falling_before and player.is_falling():
+                if self._snd_player_fall:
+                    self._snd_player_fall.play()
+
+            # Check water contact
+            self._check_water_contact(player)
+
+            # Check hazard collisions
+            if self.hazard_manager.check_player_collision(player.rect):
+                self._eliminate_player(player, "hit by hazard")
+
+            # Check if player fell off screen
+            if player.position.y > WINDOW_SIZE[1] + 100:
+                self._eliminate_player(player, "fell off")
+
+        # Update player count in HUD
+        alive_count = len(self.players) - len(self.eliminated_players)
+        self.hud.set_player_info(self.player_name, alive_count, len(self.players))
+
+        # Check game over condition
+        if alive_count == 0:
+            self._trigger_game_over()
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
 
+        # Draw background
         if self.background_surface:
             self.screen.blit(self.background_surface, (0, 0))
 
-        self.screen.blit(self._shadow_surface, self._shadow_rect)
+        # Draw water
+        self.water.draw(self.screen)
 
-        self._draw_scene()
-        self.hazards.draw(self.screen)
+        # Determine which players draw behind map
+        players_behind = [p for p in self.players if p.draws_behind_map()]
+        players_front = [p for p in self.players if not p.draws_behind_map()]
 
-        self._draw_hud()
+        # Draw players behind map
+        for player in players_behind:
+            player.draw(self.screen)
 
-        if self._game_over:
-            self._draw_game_over()
+        # Draw TMX map with tile disappearance
+        self._draw_tmx_map_with_tiles()
+
+        # Draw warning/crumble overlays and debris particles
+        self.tile_manager.draw_warning_overlays(self.screen)
+
+        # Draw walkable debug overlay
+        self._draw_walkable_debug()
+
+        # Draw players in front of map
+        for player in players_front:
+            player.draw(self.screen)
+
+        # Draw hazards
+        self.hazard_manager.draw(self.screen)
+
+        # Draw HUD
+        self.hud.draw(self.screen)
+
+        # Draw elimination screen if game over
+        if self.elimination_screen:
+            self.elimination_screen.draw(self.screen)
 
         pygame.display.flip()
 
-    def _draw_scene(self):
-        """Draw tiles and players interleaved in back-to-front isometric order."""
-        all_tiles = sorted(
-            (tile for row in self.grid.tiles for tile in row),
-            key=lambda t: t.col + t.row,
-        )
+    def _check_water_contact(self, player):
+        if not self.water.has_surface():
+            return
+        if player.is_drowning():
+            return
+        if not player.is_falling():
+            return
 
-        # Build list of (depth, drawable) for players too
-        drawables: list[tuple[int, object]] = []
-        for tile in all_tiles:
-            drawables.append((tile.col + tile.row, tile))
+        feet_rect = player.get_feet_rect()
+        if feet_rect.bottom < self.water.surface_top():
+            return
+
+        player.start_drowning(self.water.surface_top(), player.fall_draw_behind)
+        self.water.trigger_splash(player.rect.centerx)
+
+        if player not in self.eliminated_players:
+            self._eliminate_player(player, "drowned")
+
+    def _eliminate_player(self, player, reason: str):
+        """Mark a player as eliminated."""
+        if player not in self.eliminated_players:
+            self.eliminated_players.append(player)
+            print(f"Player eliminated: {reason}")
+
+    def _trigger_game_over(self):
+        """Trigger game over state."""
+        if not self.game_over:
+            self.game_over = True
+            self.elimination_screen = EliminationScreen(
+                self.player_name,
+                self.hud.survival_time,
+                self.hud.score,
+                "eliminated"
+            )
+            self.elimination_screen.show()
+
+    def _restart_game(self):
+        """Restart the game."""
+        self.game_over = False
+        self.elimination_screen = None
+        self.eliminated_players.clear()
+
+        self.tile_manager.reset()
+        self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
+        self.hazard_manager.reset()
+        self.hud.reset()
+
         for player in self.players:
-            if player.state != ELIMINATED:
-                drawables.append((player.col + player.row, player))
+            player.reset()
 
-        # Stable sort: tiles before players at the same depth
-        drawables.sort(key=lambda d: d[0])
+        self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
 
-        for _, obj in drawables:
-            obj.draw(self.screen)
+    def _draw_tmx_map_with_tiles(self):
+        """Draw TMX map, then draw void holes over disappeared tiles."""
+        if not self.tmx_data or not self.map_surface:
+            return
 
-    def _draw_hud(self):
-        # Best survival timer (top-left) — longest alive among all players
-        best_time = max(p.alive_time for p in self.players)
-        t = int(best_time)
-        minutes, seconds = divmod(t, 60)
-        timer_text = self.font.render(
-            f"TIME  {minutes:02d}:{seconds:02d}", True, _HUD_COLOR
-        )
-        self.screen.blit(timer_text, (20, 16))
+        # Draw the full map surface
+        self.screen.blit(self.map_surface, (0, 0))
 
-        # Remaining tiles (top-right)
-        remaining = len(self.grid.normal_tiles())
-        tiles_text = self.font.render(
-            f"TILES  {remaining:02d}", True, _HUD_COLOR
-        )
-        self.screen.blit(tiles_text, (WINDOW_SIZE[0] - tiles_text.get_width() - 20, 16))
+        # Draw polished void holes over disappeared tiles (not raw black)
+        self.tile_manager.draw_disappeared_holes(self.screen, self.background_surface)
 
-        # Per-player status (bottom)
-        for i, player in enumerate(self.players):
-            label = f"P{player.player_id}"
-            if player.state == ELIMINATED:
-                pt = int(player.alive_time)
-                pm, ps = divmod(pt, 60)
-                text = f"{label}  ELIMINATED  {pm:02d}:{ps:02d}"
-                color = (180, 60, 60)
-            else:
-                pt = int(player.alive_time)
-                pm, ps = divmod(pt, 60)
-                text = f"{label}  {pm:02d}:{ps:02d}"
-                color = player.color
-            surf = self.font.render(text, True, color)
-            x = 20 + i * (WINDOW_SIZE[0] // 2)
-            self.screen.blit(surf, (x, WINDOW_SIZE[1] - 40))
+    def _draw_walkable_debug(self):
+        if not (DEBUG_VISUALS_ENABLED and DEBUG_DRAW_WALKABLE) or self.walkable_mask is None:
+            return
 
-    def _draw_game_over(self):
-        # Translucent overlay
-        overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 160))
-        self.screen.blit(overlay, (0, 0))
+        if self.walkable_debug_surface is None:
+            color = (*DEBUG_WALKABLE_COLOR, 90)
+            self.walkable_debug_surface = self.walkable_mask.to_surface(
+                setcolor=color, unsetcolor=(0, 0, 0, 0)
+            )
 
-        # "GAME OVER"
-        go_surf = self.font_big.render("GAME OVER", True, _GAMEOVER_COLOR)
-        self.screen.blit(
-            go_surf,
-            (
-                (WINDOW_SIZE[0] - go_surf.get_width())  // 2,
-                (WINDOW_SIZE[1] - go_surf.get_height()) // 2 - 40,
-            ),
-        )
-
-        # Survived time — show best
-        best_time = max(p.alive_time for p in self.players)
-        t = int(best_time)
-        minutes, seconds = divmod(t, 60)
-        survived_surf = self.font.render(
-            f"Survived  {minutes:02d}:{seconds:02d}", True, _HUD_COLOR
-        )
-        self.screen.blit(
-            survived_surf,
-            (
-                (WINDOW_SIZE[0] - survived_surf.get_width())  // 2,
-                (WINDOW_SIZE[1] - survived_surf.get_height()) // 2 + 30,
-            ),
-        )
-
-        # Restart hint
-        restart_surf = self.font.render("Press  R  to restart", True, (180, 180, 180))
-        self.screen.blit(
-            restart_surf,
-            (
-                (WINDOW_SIZE[0] - restart_surf.get_width())  // 2,
-                (WINDOW_SIZE[1] - restart_surf.get_height()) // 2 + 80,
-            ),
-        )
-
-    # ── Pre-rendered overlays ─────────────────────────────────────────────
-
-    def _build_shadow(self) -> pygame.Surface:
-        """Soft elliptical shadow drawn beneath the platform (numpy)."""
-        import numpy as np
-
-        hw = ISO_TILE_W // 2
-        hh = ISO_TILE_H // 2
-
-        # Ellipse radii — wide & shallow, matching the isometric footprint
-        rx = int((GRID_COLS + GRID_ROWS) * hw * 0.55)
-        ry = int((GRID_COLS + GRID_ROWS) * hh * 0.38)
-        w, h = rx * 2, ry * 2
-
-        # Per-pixel elliptical distance → alpha
-        ys = np.linspace(-1, 1, h).reshape(-1, 1)
-        xs = np.linspace(-1, 1, w).reshape(1, -1)
-        dist = np.sqrt(xs ** 2 + ys ** 2)            # 0 at centre, 1 at edge
-        alpha = np.clip(1.0 - dist, 0, 1) ** 1.8     # smooth falloff
-        alpha = (alpha * 50).astype(np.uint8)         # max 50 — subtle
-
-        pixels = np.zeros((h, w, 4), dtype=np.uint8)
-        pixels[:, :, 3] = alpha                       # black with varying alpha
-
-        shadow = pygame.image.frombuffer(pixels.tobytes(), (w, h), "RGBA").convert_alpha()
-
-        # Position: centred horizontally, vertically at grid's visual centre + depth offset
-        grid_bottom = (ISO_GRID_OFFSET_Y
-                       + ((GRID_COLS - 1) + (GRID_ROWS - 1)) * hh
-                       + ISO_TILE_H + ISO_TILE_DEPTH)
-        cx = WINDOW_SIZE[0] // 2
-        cy = (ISO_GRID_OFFSET_Y + grid_bottom) // 2 + ISO_TILE_DEPTH
-        self._shadow_rect = shadow.get_rect(center=(cx, cy))
-        return shadow
-
-    def _build_vignette(self) -> pygame.Surface:
-        """Smooth radial vignette — dark at edges, transparent in centre (numpy)."""
-        import numpy as np
-
-        w, h = WINDOW_SIZE
-        ys = np.linspace(-1, 1, h).reshape(-1, 1)
-        xs = np.linspace(-1, 1, w).reshape(1, -1)
-        dist = np.sqrt(xs ** 2 + ys ** 2) / math.sqrt(2)
-        alpha = np.clip((dist - 0.4) / 0.6, 0, 1) ** 1.8
-        alpha = (alpha * 120).astype(np.uint8)
-
-        pixels = np.zeros((h, w, 4), dtype=np.uint8)
-        pixels[:, :, 3] = alpha
-
-        return pygame.image.frombuffer(pixels.tobytes(), (w, h), "RGBA").convert_alpha()
-
-    def _bake_vignette_into_background(self) -> None:
-        """Composite the vignette onto the background surface once."""
-        vignette = self._build_vignette()
-        if self.background_surface is None:
-            self.background_surface = pygame.Surface(WINDOW_SIZE).convert()
-            self.background_surface.fill(BACKGROUND_COLOR)
-        self.background_surface.blit(vignette, (0, 0))
-
-    # ── Restart ───────────────────────────────────────────────────────────
-
-    def _restart(self):
-        self.grid.reset()
-        self.players[0].reset(start_col=3, start_row=2)
-        self.players[1].reset(start_col=6, start_row=3)
-        self.hazards.reset()
-        self._difficulty_timer = 0.0
-        self._current_spawn_interval = 1.0 / TILES_PER_SECOND
-        self.grid.set_spawn_interval(self._current_spawn_interval)
-        self._game_over = False
-
-    # ── Main loop ─────────────────────────────────────────────────────────
+        self.screen.blit(self.walkable_debug_surface, (0, 0))
 
     def run(self):
         while self.running:
             dt = self.clock.tick(TARGET_FPS) / 1000.0
             self.handle_events()
-            self.update(dt)
+            keys = pygame.key.get_pressed()
+            self.update(dt, keys)
             self.draw()
 
+        if hasattr(self, "audio"):
+            self.audio.stop_music()
         pygame.quit()
+
+
+# Backward compatibility for older imports.
+Game = GameManager

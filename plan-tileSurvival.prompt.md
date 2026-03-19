@@ -13,15 +13,59 @@ and Pygame.
 - Analytics: Google Analytics
 
 ## Current State (as of March 2026)
-Foundation phase complete:
-- `main.py` — entry point, instantiates and runs Game
-- `game.py` — core game loop, event handling, draw; `update()` is a placeholder
-- `assets.py` — TMX tilemap + background image loading (pytmx)
-- `settings.py` — constants (window size, FPS, paths)
-- `Assets/maps/level 1.tmx` — 40×30 tile map (32px tiles), single ground layer
-- `tilesets/tilesets/` — multiple tileset PNGs available (A2_Ground in use)
+Foundation phase complete, with major UI/UX polish implemented:
 
-**Missing:** Player, Tile grid, game mechanics, collision, UI — everything gameplay.
+**Core Modules:**
+- `main.py` — entry point, orchestrates scene flow (`TitleScreen` → `ModeSelectionScreen` → `GameManager`)
+- `game.py` — core game loop (`GameManager` class) handling TMX map rendering, animated water, and updating players/AI
+- `scenes.py` — UI screens (Title and Mode Selection) with particle effects and fading transitions
+- `player.py` — physics, sub-pixel scaling, masking/bounds logic (`_is_over_platform`), and sprite animations
+- `ai_player.py` — AI integration utilizing lookahead vector raycasting against the `walkable_mask` to navigate the TMX map
+- `settings.py` — robust configuration constants (physics, `WALKABLE_LAYER_NAMES`, UI styling, particles)
+- `assets.py` — TMX tilemap loading (`pytmx`) + background/water animations
+- `tile_system.py` — TMX-based tile disappearance with states (Normal → Warning → Crumbling → Disappeared), debris particles, sound effects, and graceful period
+- `ui.py` — Redesigned GameHUD with styled panels, elimination/victory screens with animations
+
+**New Assets:**
+- `Assets/sounds/` — `tile_warning.wav`, `tile_disappear.wav`, `player_fall.wav` (placeholder sounds)
+- `Assets/fonts/` — directory ready for PressStart2P.ttf, Orbitron-Regular.ttf
+
+**Recent Implementations (March 2026):**
+
+1. **Tile Disappearance System (Category 1)**
+   - Added `TileState.CRUMBLING` between WARNING and DISAPPEARED
+   - `TILE_CRUMBLE_DURATION = 350ms` for smooth darkening transition
+   - `DebrisParticle` class: 4–6 colored squares fly outward with gravity
+   - Sound effects on warning and disappear triggers
+   - 3-second grace period before first tile disappears
+   - Polished void holes (dark diamond with subtle inner shadow)
+
+2. **In-Game HUD Redesign (Category 2)**
+   - Three styled panels: Score (gold border), Timer (white border), Alive (green/orange/red)
+   - Arcade font hierarchy loaded from `assets/fonts/`
+   - Timer urgency styling: red pulsing border/text when time is low
+   - Score animation: scale to 120% + gold flash on increase
+   - Alive counter color states: green → orange → red (last player)
+
+3. **TitleScreen & ModeSelectionScreen Overhaul (Category 3)**
+   - Font hierarchy: Display/Heading/Body/Small fonts with fallback
+   - Title animation: letter drop with bounce, color cycling, periodic shake
+   - Input box: rounded rect, gold border, blinking cursor
+   - Mode cards: 460×145px with per-mode colored borders, hover lift, click scale
+   - Header slide-in: "Welcome, [Name]!" slides down while fading
+
+4. **Elimination & Victory Screen Fix**
+   - Replaced overflowing `impact` 72px font with properly sized HUD font (42px)
+   - Auto-scale safety: title shrinks if >80% screen width
+   - Pulsing colored title with drop shadow
+   - Centered panel card layout with stats
+   - Blinking restart prompt after fade-in
+
+**Recent Architectural Shifts:**
+- Pivot from a strict 2D array tile grid to pixel-precise `walkable_mask` collisions based on TMX layers.
+- Resolved large merge conflicts by retaining the remote animated water and TMX rendering pipeline.
+- Re-implemented AI and Player logic onto the new TMX architecture using masks instead of array indices.
+- Implemented a 2-stage pre-game scene flow before diving into gameplay.
 
 ---
 
@@ -37,17 +81,23 @@ Foundation phase complete:
 - [x] Single player (1 player only)
 
 ### Design Decisions
-- Grid: 10×6 tiles at 64×64px = 640×384px, centered at (320, 168) on 1280×720
-- Visuals: Pixel-art/custom assets (to be provided)
-- Players: 1 player for Week 1
+- Grid/Map System: Moving away from arbitrary 2D arrays to vector-based, pixel-precise `walkable_mask` collision driven by `pytmx` Object layers ("Platforms").
+- Visuals: TMX Map, Animated Water layers (`Assets/maps/level 1.tmx`), and character sprite sheets containing run, jump, drown.
+- UI: Sequential front-end (`TitleScreen` → `ModeSelectionScreen`) implemented to handle state before the core loop starts.
+- Mechanics: Custom sub-pixel scaling and gravity calculations handle jumps, movement, and bounds checking (`_is_over_platform()`).
 
-### Classes to Build
-- `Tile` — state (NORMAL/WARNING/DISAPPEARED), timer, draw
-- `TileGrid` — 10×6 grid, random disappear scheduler, update/draw
-- `Player` — position (snapped to tile), input handling, fall detection, animations
-- Update `Game.update()` + `Game.draw()` to drive all the above
+### Classes / Structure (Built and Working)
+- `scenes.py` — `TitleScreen` and `ModeSelectionScreen`
+- `ai_player.py` — Vector raycasting for pathfinding over TMX walkable masks
+- `Player` — position, input handling, physics (jump, sub-pixel gravity), rendering sprites
+- `GameManager` (formerly `Game`) — drives UI flow, TMX map rendering, and updates
+- `settings.py` — Constants configuration
 
-### Tile State Machine
+### High-Priority PENDING AUDIT (Integrating legacy array concepts into TMX Masking without breaking pipeline)
+- Dynamic Tile disappearance system logic built over the TMX object layer.
+- Ensure Tile State Machine visuals are supported (Warning → Disappeared).
+
+### Tile State Machine (Pending adaptation to TMX)
 ```
 NORMAL ──(timer expires)──> WARNING ──(flash duration)──> DISAPPEARED
   ^                                                             |
@@ -71,7 +121,7 @@ NORMAL ──(timer expires)──> WARNING ──(flash duration)──> DISAPP
 ## Week 3 — AI & Multiplayer
 
 ### Goals
-- [ ] Basic AI player (avoids disappearing tiles, random safe-tile movement)
+- [x] Basic AI player (avoids disappearing tiles, random safe-tile movement)
 - [ ] LAN multiplayer via Python sockets (non-blocking)
 - [ ] Player state synchronization across network
 - [ ] Networking bug fixes + optimization

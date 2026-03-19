@@ -1,262 +1,242 @@
 """
-hazards.py — Bullet and Trap hazards for Week 2.
-
-Bullets:  Fly in straight lines across the grid (random edge → opposite edge).
-Traps:    Bounce along tile rows/cols; occupy a tile and eliminate on contact.
-
-Both hazard types kill any player they overlap with (by checking grid col/row).
+Hazard system for Grid Survival.
+Implements bullets and moving traps that threaten players.
 """
 
 import random
-from typing import Optional
-
 import pygame
+from typing import List, Tuple
+from settings import WINDOW_SIZE
 
-from settings import (
-    BULLET_COLOR,
-    BULLET_SIZE,
-    BULLET_SPAWN_TIME,
-    BULLET_SPEED,
-    GRID_COLS,
-    GRID_ROWS,
-    ISO_GRID_OFFSET_X,
-    ISO_GRID_OFFSET_Y,
-    ISO_TILE_H,
-    ISO_TILE_W,
-    TRAP_COLOR,
-    TRAP_SIZE,
-    TRAP_SPAWN_TIME,
-    TRAP_SPEED,
-    WINDOW_SIZE,
-)
-from player import ELIMINATED, JUMPING
-
-
-def _tile_centre(col: int, row: int) -> tuple[float, float]:
-    """Screen centre of a tile's top diamond face."""
-    return (
-        ISO_GRID_OFFSET_X + (col - row) * (ISO_TILE_W // 2),
-        ISO_GRID_OFFSET_Y + (col + row) * (ISO_TILE_H // 2) + ISO_TILE_H // 2,
-    )
-
-
-# ── Bullet ───────────────────────────────────────────────────────────────────
 
 class Bullet:
-    """A projectile that flies from one grid edge to the opposite."""
-
-    def __init__(self, start_col: int, start_row: int,
-                 dcol: int, drow: int):
-        self.col_f: float = float(start_col)
-        self.row_f: float = float(start_row)
-        self.dcol = dcol
-        self.drow = drow
-        self.alive = True
-        self._update_screen_pos()
-
-    def _update_screen_pos(self):
-        self.x, self.y = _tile_centre(self.col_f, self.row_f)
-
-    @property
-    def grid_col(self) -> int:
-        return int(round(self.col_f))
-
-    @property
-    def grid_row(self) -> int:
-        return int(round(self.row_f))
-
+    """Projectile hazard that moves in a straight line."""
+    
+    def __init__(self, position: Tuple[float, float], direction: pygame.Vector2, speed: float = 300):
+        self.position = pygame.Vector2(position)
+        self.direction = direction.normalize() if direction.length() > 0 else pygame.Vector2(1, 0)
+        self.speed = speed
+        self.radius = 8
+        self.color = (255, 50, 50)
+        self.active = True
+    
     def update(self, dt: float):
-        speed = BULLET_SPEED / ((ISO_TILE_W + ISO_TILE_H) / 2)  # tiles/s
-        self.col_f += self.dcol * speed * dt
-        self.row_f += self.drow * speed * dt
-        self._update_screen_pos()
-
-        # Kill when fully off-grid
-        if (self.col_f < -1 or self.col_f > GRID_COLS
-                or self.row_f < -1 or self.row_f > GRID_ROWS):
-            self.alive = False
-
+        """Update bullet position."""
+        self.position += self.direction * self.speed * dt
+        
+        # Deactivate if off screen
+        if (self.position.x < -50 or self.position.x > WINDOW_SIZE[0] + 50 or
+            self.position.y < -50 or self.position.y > WINDOW_SIZE[1] + 50):
+            self.active = False
+    
     def draw(self, surface: pygame.Surface):
-        ix, iy = int(self.x), int(self.y)
-        r = BULLET_SIZE
-        pts = [
-            (ix, iy - r),
-            (ix + r, iy),
-            (ix, iy + r),
-            (ix - r, iy),
-        ]
-        pygame.draw.polygon(surface, BULLET_COLOR, pts)
-        pygame.draw.polygon(surface, (255, 255, 255), pts, 1)
+        """Draw bullet."""
+        if self.active:
+            pygame.draw.circle(surface, self.color, (int(self.position.x), int(self.position.y)), self.radius)
+            # Draw trail effect
+            trail_color = (255, 100, 100, 128)
+            trail_pos = self.position - self.direction * 15
+            pygame.draw.circle(surface, trail_color, (int(trail_pos.x), int(trail_pos.y)), self.radius // 2)
+    
+    def get_rect(self) -> pygame.Rect:
+        """Get collision rect."""
+        return pygame.Rect(
+            int(self.position.x - self.radius),
+            int(self.position.y - self.radius),
+            self.radius * 2,
+            self.radius * 2
+        )
+    
+    def check_collision(self, player_rect: pygame.Rect) -> bool:
+        """Check if bullet hits player."""
+        if not self.active:
+            return False
+        return self.get_rect().colliderect(player_rect)
 
 
-# ── Trap ─────────────────────────────────────────────────────────────────────
-
-class Trap:
-    """A hazard that moves along a row or column, bouncing at edges."""
-
-    def __init__(self, col: int, row: int, dcol: int, drow: int):
-        self.col_f: float = float(col)
-        self.row_f: float = float(row)
-        self.dcol = dcol
-        self.drow = drow
-        self.alive = True
-        self._lifetime: float = 0.0
-        self._max_lifetime: float = 20.0  # auto-remove after 20 s
-        self._update_screen_pos()
-
-    def _update_screen_pos(self):
-        self.x, self.y = _tile_centre(self.col_f, self.row_f)
-
-    @property
-    def grid_col(self) -> int:
-        return int(round(self.col_f))
-
-    @property
-    def grid_row(self) -> int:
-        return int(round(self.row_f))
-
+class MovingTrap:
+    """Moving hazard that patrols between two points."""
+    
+    def __init__(self, start_pos: Tuple[float, float], end_pos: Tuple[float, float], speed: float = 150):
+        self.start_pos = pygame.Vector2(start_pos)
+        self.end_pos = pygame.Vector2(end_pos)
+        self.position = pygame.Vector2(start_pos)
+        self.speed = speed
+        self.size = 32
+        self.color = (200, 50, 200)
+        self.active = True
+        self.moving_to_end = True
+        self.direction = (self.end_pos - self.start_pos).normalize() if (self.end_pos - self.start_pos).length() > 0 else pygame.Vector2(1, 0)
+    
     def update(self, dt: float):
-        speed = TRAP_SPEED / ((ISO_TILE_W + ISO_TILE_H) / 2)
-        self.col_f += self.dcol * speed * dt
-        self.row_f += self.drow * speed * dt
-
-        # Bounce at grid edges
-        if self.col_f <= 0:
-            self.col_f = 0
-            self.dcol = abs(self.dcol)
-        elif self.col_f >= GRID_COLS - 1:
-            self.col_f = GRID_COLS - 1
-            self.dcol = -abs(self.dcol)
-
-        if self.row_f <= 0:
-            self.row_f = 0
-            self.drow = abs(self.drow)
-        elif self.row_f >= GRID_ROWS - 1:
-            self.row_f = GRID_ROWS - 1
-            self.drow = -abs(self.drow)
-
-        self._update_screen_pos()
-        self._lifetime += dt
-        if self._lifetime >= self._max_lifetime:
-            self.alive = False
-
+        """Update trap position."""
+        if self.moving_to_end:
+            self.position += self.direction * self.speed * dt
+            if self.position.distance_to(self.end_pos) < 5:
+                self.moving_to_end = False
+                self.direction = (self.start_pos - self.end_pos).normalize()
+        else:
+            self.position += self.direction * self.speed * dt
+            if self.position.distance_to(self.start_pos) < 5:
+                self.moving_to_end = True
+                self.direction = (self.end_pos - self.start_pos).normalize()
+    
     def draw(self, surface: pygame.Surface):
-        ix, iy = int(self.x), int(self.y)
-        s = TRAP_SIZE
-        pts = [
-            (ix, iy - s),
-            (ix + s, iy),
-            (ix, iy + s),
-            (ix - s, iy),
-        ]
-        pygame.draw.polygon(surface, TRAP_COLOR, pts)
-        pygame.draw.polygon(surface, (255, 200, 255), pts, 1)
+        """Draw trap."""
+        if self.active:
+            rect = pygame.Rect(
+                int(self.position.x - self.size // 2),
+                int(self.position.y - self.size // 2),
+                self.size,
+                self.size
+            )
+            pygame.draw.rect(surface, self.color, rect)
+            pygame.draw.rect(surface, (255, 100, 255), rect, 3)
+            # Draw spikes
+            points = [
+                (rect.centerx, rect.top),
+                (rect.left, rect.centery),
+                (rect.centerx, rect.bottom),
+                (rect.right, rect.centery)
+            ]
+            for point in points:
+                pygame.draw.circle(surface, (255, 255, 0), point, 4)
+    
+    def get_rect(self) -> pygame.Rect:
+        """Get collision rect."""
+        return pygame.Rect(
+            int(self.position.x - self.size // 2),
+            int(self.position.y - self.size // 2),
+            self.size,
+            self.size
+        )
+    
+    def check_collision(self, player_rect: pygame.Rect) -> bool:
+        """Check if trap hits player."""
+        if not self.active:
+            return False
+        return self.get_rect().colliderect(player_rect)
 
-
-# ── HazardManager ────────────────────────────────────────────────────────────
 
 class HazardManager:
-    """Spawns and manages all active hazards."""
-
-    def __init__(self, grid):
-        self.grid = grid
-        self.bullets: list[Bullet] = []
-        self.traps: list[Trap] = []
-        self._bullet_timer: float = 0.0
-        self._trap_timer: float = 0.0
-        self._bullet_interval: float = BULLET_SPAWN_TIME
-        self._trap_interval: float = TRAP_SPAWN_TIME
-
+    """Manages all hazards in the game with difficulty scaling."""
+    
+    def __init__(self):
+        self.bullets: List[Bullet] = []
+        self.traps: List[MovingTrap] = []
+        self.time_elapsed = 0.0
+        self.bullet_spawn_timer = 0.0
+        self.trap_spawn_timer = 0.0
+        
+        # Difficulty scaling
+        self.bullet_spawn_interval = 3.0  # seconds
+        self.trap_spawn_interval = 8.0  # seconds
+        self.min_bullet_interval = 1.0
+        self.min_trap_interval = 5.0
+        self.difficulty_scale_rate = 0.98
+        
+        # Hazard activation threshold
+        self.hazard_start_time = 15.0  # Start spawning after 15 seconds
+    
+    def update(self, dt: float):
+        """Update all hazards and spawn new ones."""
+        self.time_elapsed += dt
+        
+        # Only spawn hazards after threshold time
+        if self.time_elapsed < self.hazard_start_time:
+            return
+        
+        # Update existing hazards
+        for bullet in self.bullets[:]:
+            bullet.update(dt)
+            if not bullet.active:
+                self.bullets.remove(bullet)
+        
+        for trap in self.traps:
+            trap.update(dt)
+        
+        # Spawn new bullets
+        self.bullet_spawn_timer += dt
+        if self.bullet_spawn_timer >= self.bullet_spawn_interval:
+            self.bullet_spawn_timer = 0.0
+            self._spawn_bullet()
+            # Increase difficulty
+            self.bullet_spawn_interval = max(
+                self.min_bullet_interval,
+                self.bullet_spawn_interval * self.difficulty_scale_rate
+            )
+        
+        # Spawn new traps
+        self.trap_spawn_timer += dt
+        if self.trap_spawn_timer >= self.trap_spawn_interval and len(self.traps) < 4:
+            self.trap_spawn_timer = 0.0
+            self._spawn_trap()
+            # Increase difficulty
+            self.trap_spawn_interval = max(
+                self.min_trap_interval,
+                self.trap_spawn_interval * self.difficulty_scale_rate
+            )
+    
+    def _spawn_bullet(self):
+        """Spawn a bullet from a random edge."""
+        edge = random.choice(['top', 'bottom', 'left', 'right'])
+        
+        if edge == 'top':
+            pos = (random.randint(50, WINDOW_SIZE[0] - 50), -20)
+            direction = pygame.Vector2(random.uniform(-0.5, 0.5), 1)
+        elif edge == 'bottom':
+            pos = (random.randint(50, WINDOW_SIZE[0] - 50), WINDOW_SIZE[1] + 20)
+            direction = pygame.Vector2(random.uniform(-0.5, 0.5), -1)
+        elif edge == 'left':
+            pos = (-20, random.randint(50, WINDOW_SIZE[1] - 50))
+            direction = pygame.Vector2(1, random.uniform(-0.5, 0.5))
+        else:  # right
+            pos = (WINDOW_SIZE[0] + 20, random.randint(50, WINDOW_SIZE[1] - 50))
+            direction = pygame.Vector2(-1, random.uniform(-0.5, 0.5))
+        
+        self.bullets.append(Bullet(pos, direction))
+    
+    def _spawn_trap(self):
+        """Spawn a moving trap with random patrol path."""
+        # Create patrol path within playable area
+        margin = 100
+        start_x = random.randint(margin, WINDOW_SIZE[0] - margin)
+        start_y = random.randint(margin, WINDOW_SIZE[1] - margin)
+        
+        # End point is offset from start
+        offset_x = random.randint(-200, 200)
+        offset_y = random.randint(-200, 200)
+        end_x = max(margin, min(WINDOW_SIZE[0] - margin, start_x + offset_x))
+        end_y = max(margin, min(WINDOW_SIZE[1] - margin, start_y + offset_y))
+        
+        self.traps.append(MovingTrap((start_x, start_y), (end_x, end_y)))
+    
+    def draw(self, surface: pygame.Surface):
+        """Draw all hazards."""
+        for bullet in self.bullets:
+            bullet.draw(surface)
+        for trap in self.traps:
+            trap.draw(surface)
+    
+    def check_player_collision(self, player_rect: pygame.Rect) -> bool:
+        """Check if any hazard hits the player."""
+        for bullet in self.bullets:
+            if bullet.check_collision(player_rect):
+                bullet.active = False
+                return True
+        
+        for trap in self.traps:
+            if trap.check_collision(player_rect):
+                return True
+        
+        return False
+    
     def reset(self):
+        """Reset all hazards."""
         self.bullets.clear()
         self.traps.clear()
-        self._bullet_timer = 0.0
-        self._trap_timer = 0.0
-        self._bullet_interval = BULLET_SPAWN_TIME
-        self._trap_interval = TRAP_SPAWN_TIME
-
-    # ── Spawning ─────────────────────────────────────────────────────────
-
-    def _spawn_bullet(self):
-        """Spawn a bullet from a random grid edge aimed inward."""
-        side = random.choice(["top", "bottom", "left", "right"])
-        if side == "top":
-            col = random.randint(0, GRID_COLS - 1)
-            self.bullets.append(Bullet(col, -1, 0, 1))
-        elif side == "bottom":
-            col = random.randint(0, GRID_COLS - 1)
-            self.bullets.append(Bullet(col, GRID_ROWS, 0, -1))
-        elif side == "left":
-            row = random.randint(0, GRID_ROWS - 1)
-            self.bullets.append(Bullet(-1, row, 1, 0))
-        else:
-            row = random.randint(0, GRID_ROWS - 1)
-            self.bullets.append(Bullet(GRID_COLS, row, -1, 0))
-
-    def _spawn_trap(self):
-        """Spawn a trap at a random edge tile moving along its axis."""
-        if random.random() < 0.5:
-            # Horizontal trap
-            row = random.randint(0, GRID_ROWS - 1)
-            col = 0 if random.random() < 0.5 else GRID_COLS - 1
-            dcol = 1 if col == 0 else -1
-            self.traps.append(Trap(col, row, dcol, 0))
-        else:
-            # Vertical trap
-            col = random.randint(0, GRID_COLS - 1)
-            row = 0 if random.random() < 0.5 else GRID_ROWS - 1
-            drow = 1 if row == 0 else -1
-            self.traps.append(Trap(col, row, 0, drow))
-
-    # ── Collision ────────────────────────────────────────────────────────
-
-    def _check_collisions(self, players):
-        """Eliminate any player standing on the same tile as a hazard."""
-        for player in players:
-            if player.state in (ELIMINATED,):
-                continue
-            # Jumping players are above hazards — immune
-            if player.state == JUMPING:
-                continue
-            for bullet in self.bullets:
-                if (bullet.alive
-                        and bullet.grid_col == player.col
-                        and bullet.grid_row == player.row):
-                    player.state = ELIMINATED
-            for trap in self.traps:
-                if (trap.alive
-                        and trap.grid_col == player.col
-                        and trap.grid_row == player.row):
-                    player.state = ELIMINATED
-
-    # ── Update / Draw ────────────────────────────────────────────────────
-
-    def update(self, dt: float, players):
-        # Spawn timers
-        self._bullet_timer += dt
-        if self._bullet_timer >= self._bullet_interval:
-            self._bullet_timer -= self._bullet_interval
-            self._spawn_bullet()
-
-        self._trap_timer += dt
-        if self._trap_timer >= self._trap_interval:
-            self._trap_timer -= self._trap_interval
-            self._spawn_trap()
-
-        # Update all hazards
-        for b in self.bullets:
-            b.update(dt)
-        for t in self.traps:
-            t.update(dt)
-
-        # Remove dead
-        self.bullets = [b for b in self.bullets if b.alive]
-        self.traps = [t for t in self.traps if t.alive]
-
-        self._check_collisions(players)
-
-    def draw(self, surface: pygame.Surface):
-        for b in self.bullets:
-            b.draw(surface)
-        for t in self.traps:
-            t.draw(surface)
+        self.time_elapsed = 0.0
+        self.bullet_spawn_timer = 0.0
+        self.trap_spawn_timer = 0.0
+        self.bullet_spawn_interval = 3.0
+        self.trap_spawn_interval = 8.0
