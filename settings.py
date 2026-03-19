@@ -118,7 +118,7 @@ AI_LOOKAHEAD_DISTANCE = 42
 AI_EDGE_MARGIN_WEIGHT = 0.06
 
 # Opening scene audio
-MUSIC_PATH = BASE_DIR / "Soundtrack" / "TileSuv2.mp3"
+MUSIC_PATH = ASSETS_DIR / "Audio"/ "Background" / "Grid survival 1.mp3"
 MUSIC_VOLUME = 0.45
 
 # ─────────────────────────────────────────────────────────────────────────────

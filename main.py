@@ -1,5 +1,4 @@
 import pygame
-
 from audio import get_audio
 from game import GameManager
 from scenes import ModeSelectionScreen, TitleScreen, PlayerSelectionScreen
