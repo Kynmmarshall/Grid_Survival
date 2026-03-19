@@ -1,0 +1,59 @@
+import pygame
+
+from animation import SpriteAnimation, load_frames_from_directory
+from settings import (
+    DEBUG_DRAW_PLAYER_FOOTBOX,
+    DEBUG_PLAYER_FOOTBOX_COLOR,
+    DEBUG_VISUALS_ENABLED,
+    PLAYER_ANIMATION_PATHS,
+    PLAYER_DEFAULT_DIRECTION,
+    PLAYER_FRAME_DURATION,
+    PLAYER_FALL_GRAVITY,
+    PLAYER_FALL_MAX_SPEED,
+    PLAYER_SINK_SPEED,
+    PLAYER_SCALE,
+    PLAYER_SPEED,
+    PLAYER_START_POS,
+    PLAYER_JUMP_VELOCITY,
+    PLAYER_JUMP_GRAVITY,
+    PLAYER_MAX_FALL_SPEED,
+    WINDOW_SIZE,
+)
+
+
+class Player:
+    """Animated player entity with directional movement."""
+
+    def __init__(self, position=PLAYER_START_POS, controls=None):
+        self.is_ai = False
+        self.position = pygame.Vector2(position)
+        self.speed = PLAYER_SPEED
+        self.state = "idle"
+        self.facing = PLAYER_DEFAULT_DIRECTION
+        self.velocity = pygame.Vector2(0, 0)
+        self.animations = self._load_animations()
+        self.current_animation = self.animations[self.state][self.facing]
+        self.rect = self.current_animation.image.get_rect(center=position)
+        self._feet_mask = None
+        self._feet_mask_count = 0
+        self.falling = False
+        self.fall_velocity = 0.0
+        self.fall_draw_behind = False
+        self.drowning = False
+        self.drown_animation_done = False
+        self.drown_surface_y = None
+        
+        # Jump mechanics
+        self.jumping = False
+        self.jump_velocity = 0.0
+        self.on_ground = True
+        
+        # Control scheme (for multiplayer)
+        self.controls = controls or {
+            'up': pygame.K_UP,
+            'down': pygame.K_DOWN,
+            'left': pygame.K_LEFT,
+            'right': pygame.K_RIGHT,
+            'jump': pygame.K_SPACE
+        }
+# still in progress while adding lacking character sprites
