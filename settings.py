@@ -11,7 +11,23 @@ CHARACTER_BASE = ASSETS_DIR / "Characters" / "Caveman"
 
 WINDOW_SIZE = (1280, 720)
 WINDOW_TITLE = "GRID SURVIVAL"
-BACKGROUND_COLOR = (18, 18, 22)
+
+# Define Color Palette
+COLOR_PALETTE = {
+    "background": (18, 18, 22),
+    "hud_bg": (20, 20, 20, 180),
+    "hud_border": (220, 220, 220),       # White/Grey
+    "hud_border_score": (255, 200, 0),   # Gold
+    "text_primary": (255, 255, 255),
+    "text_secondary": (200, 200, 200),
+    "accent": (255, 200, 0),             # Gold
+    "urgent": (220, 40, 40),             # Red
+    "success": (50, 220, 80),            # Lime Green
+    "warning": (255, 160, 0),            # Orange
+    "danger": (220, 50, 50),             # Red
+}
+
+BACKGROUND_COLOR = COLOR_PALETTE["background"]
 TARGET_FPS = 60
 
 # Map scaling behavior (auto_fit keeps legacy behavior; manual lets you zoom tiles)
@@ -23,13 +39,13 @@ PLAYER_SCALE = 0.2
 PLAYER_START_POS = (WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)
 PLAYER_SPEED = 200
 PLAYER_DEFAULT_DIRECTION = "down"
-PLAYER_FALL_GRAVITY = 800
+PLAYER_FALL_GRAVITY = 1200         # Increased from 800
 PLAYER_FALL_MAX_SPEED = 1000
 PLAYER_SINK_SPEED = 80
 
 # Jump mechanics
-PLAYER_JUMP_VELOCITY = -400  # Initial upward velocity
-PLAYER_JUMP_GRAVITY = 1200  # Gravity during jump
+PLAYER_JUMP_VELOCITY = -650        # Increased from -400 (more snappy)
+PLAYER_JUMP_GRAVITY = 2000         # Increased from 1200 (falls faster)
 PLAYER_MAX_FALL_SPEED = 600  # Terminal velocity during jump
 PLAYER_JUMP_KEY = pygame.K_SPACE  # Default jump key
 
@@ -153,23 +169,23 @@ FONT_SIZE_LARGE = 48   # for timer when urgent
 TIMER_WARNING_THRESHOLD = 10
 
 # HUD panel colors
-HUD_PANEL_BG = (20, 20, 20, 180)
+HUD_PANEL_BG = COLOR_PALETTE["hud_bg"]
 HUD_PANEL_RADIUS = 12
 HUD_PANEL_BORDER_WIDTH = 2
 HUD_PANEL_PADDING_H = 12
 HUD_PANEL_PADDING_V = 8
 
-HUD_SCORE_BORDER_COLOR = (255, 200, 0)       # GOLD
-HUD_TIMER_BORDER_COLOR = (220, 220, 220)     # WHITE
-HUD_ALIVE_BORDER_COLOR_ALL = (50, 220, 80)   # LIME GREEN
-HUD_ALIVE_BORDER_COLOR_ONE = (255, 160, 0)   # ORANGE
-HUD_ALIVE_BORDER_COLOR_LAST = (220, 50, 50)  # RED
+HUD_SCORE_BORDER_COLOR = COLOR_PALETTE["hud_border_score"]     # GOLD
+HUD_TIMER_BORDER_COLOR = COLOR_PALETTE["hud_border"]           # WHITE
+HUD_ALIVE_BORDER_COLOR_ALL = COLOR_PALETTE["success"]          # LIME GREEN
+HUD_ALIVE_BORDER_COLOR_ONE = COLOR_PALETTE["warning"]          # ORANGE
+HUD_ALIVE_BORDER_COLOR_LAST = COLOR_PALETTE["danger"]          # RED
 
-HUD_TIMER_URGENT_COLOR = (220, 40, 40)       # RED when urgent
-HUD_VALUE_COLOR = (255, 255, 255)            # WHITE
-HUD_LABEL_COLOR_SCORE = (255, 200, 0)
-HUD_LABEL_COLOR_TIMER = (220, 220, 220)
-HUD_LABEL_COLOR_ALIVE = (50, 220, 80)
+HUD_TIMER_URGENT_COLOR = COLOR_PALETTE["urgent"]     # RED when urgent
+HUD_VALUE_COLOR = COLOR_PALETTE["text_primary"]      # WHITE
+HUD_LABEL_COLOR_SCORE = COLOR_PALETTE["accent"]
+HUD_LABEL_COLOR_TIMER = COLOR_PALETTE["text_secondary"]
+HUD_LABEL_COLOR_ALIVE = COLOR_PALETTE["success"]
 
 # Score animation
 SCORE_ANIM_SCALE_UP_DURATION = 0.2   # seconds
