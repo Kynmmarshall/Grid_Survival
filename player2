@@ -57,3 +57,8 @@ class Player:
             'jump': pygame.K_SPACE
         }
 # still in progress while adding lacking character sprites
+
+
+
+
+
