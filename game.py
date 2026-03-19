@@ -118,6 +118,10 @@ class GameManager:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:  # Left click
+                    if self.hud.mute_rect and self.hud.mute_rect.collidepoint(event.pos):
+                        self.audio.toggle_mute()
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_l:
                     for player in self.players:
@@ -215,7 +219,7 @@ class GameManager:
         self.hazard_manager.draw(self.screen)
 
         # Draw HUD
-        self.hud.draw(self.screen)
+        self.hud.draw(self.screen, is_muted=self.audio.is_muted)
 
         # Draw elimination screen if game over
         if self.elimination_screen:
