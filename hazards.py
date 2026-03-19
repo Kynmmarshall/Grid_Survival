@@ -5,7 +5,9 @@ Implements bullets and moving traps that threaten players.
 
 import random
 import pygame
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+
+from collision_manager import CollisionManager
 from settings import WINDOW_SIZE
 
 
@@ -121,7 +123,7 @@ class MovingTrap:
 class HazardManager:
     """Manages all hazards in the game with difficulty scaling."""
     
-    def __init__(self):
+    def __init__(self, collision_manager: Optional[CollisionManager] = None):
         self.bullets: List[Bullet] = []
         self.traps: List[MovingTrap] = []
         self.time_elapsed = 0.0
@@ -137,6 +139,7 @@ class HazardManager:
         
         # Hazard activation threshold
         self.hazard_start_time = 15.0  # Start spawning after 15 seconds
+        self.collision_manager = collision_manager
     
     def update(self, dt: float):
         """Update all hazards and spawn new ones."""
@@ -218,15 +221,19 @@ class HazardManager:
         for trap in self.traps:
             trap.draw(surface)
     
-    def check_player_collision(self, player_rect: pygame.Rect) -> bool:
+    def check_player_collision(self, player) -> bool:
         """Check if any hazard hits the player."""
         for bullet in self.bullets:
-            if bullet.check_collision(player_rect):
-                bullet.active = False
-                return True
+            if self.collision_manager:
+                if self.collision_manager.bullet_hits_player(bullet, player):
+                    return True
+            else:
+                if bullet.check_collision(player.rect):
+                    bullet.active = False
+                    return True
         
         for trap in self.traps:
-            if trap.check_collision(player_rect):
+            if trap.check_collision(player.rect):
                 return True
         
         return False
@@ -240,3 +247,5 @@ class HazardManager:
         self.trap_spawn_timer = 0.0
         self.bullet_spawn_interval = 3.0
         self.trap_spawn_interval = 8.0
+        if self.collision_manager:
+            self.collision_manager.reset_caches()

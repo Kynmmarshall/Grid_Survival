@@ -7,6 +7,9 @@ from settings import (
     WALKABLE_LAYER_NAMES,
     WALKABLE_OBJECT_CLASS_NAMES,
     WALKABLE_ISO_TOP_FRACTION,
+    DESTRUCTIBLE_LAYER_NAMES,
+    MAP_SCALE_MODE,
+    MAP_MANUAL_SCALE,
 )
 
 try:
@@ -47,16 +50,33 @@ def _tile_to_pixel(x, y, layer, tmx_data):
     return int(round(pixel_x)), int(round(pixel_y))
 
 
-def _render_tmx_to_surface(tmx_data) -> pygame.Surface:
-    """Draw all visible tiles from the TMX data onto a surface."""
+def _render_tmx_to_surface(
+    tmx_data,
+    *,
+    include_layers: list[str] | None = None,
+    exclude_layers: list[str] | None = None,
+) -> pygame.Surface:
+    """Draw filtered TMX layers onto a surface."""
+
     map_width, map_height = _calculate_surface_size(tmx_data)
     surface = pygame.Surface((map_width, map_height), pygame.SRCALPHA)
 
+    include = {name.lower() for name in include_layers or [] if name}
+    exclude = {name.lower() for name in exclude_layers or [] if name}
+    use_include = bool(include_layers)
+
     for layer in tmx_data.visible_layers:
-        if hasattr(layer, "tiles"):
-            for x, y, image in layer.tiles():
-                pos = _tile_to_pixel(x, y, layer, tmx_data)
-                surface.blit(image, pos)
+        if not hasattr(layer, "tiles"):
+            continue
+        layer_name = getattr(layer, "name", "").lower()
+        if use_include and layer_name not in include:
+            continue
+        if exclude and layer_name in exclude:
+            continue
+
+        for x, y, image in layer.tiles():
+            pos = _tile_to_pixel(x, y, layer, tmx_data)
+            surface.blit(image, pos)
 
     return surface
 
@@ -147,40 +167,90 @@ def _render_walkable_surface(tmx_data, layer_names, object_class_names):
     return surface
 
 
+def _determine_scaling(raw_width: int, raw_height: int, window_size) -> tuple[float, float]:
+    if raw_width <= 0 or raw_height <= 0:
+        return 1.0, 1.0
+
+    mode = (MAP_SCALE_MODE or "").lower()
+    if mode == "manual":
+        manual_scale = max(0.1, float(MAP_MANUAL_SCALE))
+        return manual_scale, manual_scale
+
+    # Legacy behavior: stretch independently to fill the window.
+    return (
+        window_size[0] / raw_width,
+        window_size[1] / raw_height,
+    )
+
+
+def _blit_scaled(surface: pygame.Surface, window_size, scale_x: float, scale_y: float):
+    scaled_width = max(1, int(round(surface.get_width() * scale_x)))
+    scaled_height = max(1, int(round(surface.get_height() * scale_y)))
+    if scaled_width == surface.get_width() and scaled_height == surface.get_height():
+        scaled = surface.copy()
+    else:
+        scaled = pygame.transform.smoothscale(surface, (scaled_width, scaled_height))
+
+    canvas = pygame.Surface(window_size, pygame.SRCALPHA)
+    offset_x = (window_size[0] - scaled_width) // 2
+    offset_y = (window_size[1] - scaled_height) // 2
+    canvas.blit(scaled, (offset_x, offset_y))
+    return canvas, (offset_x, offset_y), (scaled_width, scaled_height)
+
+
 def load_tilemap_surface(window_size):
     """Load the TMX tilemap, scale it, and build the walkable mask."""
     if load_pygame is None:
         print("Install pytmx (pip install pytmx) to render Tiled maps.")
-        return None, None, None, None
+        return None, None, None, None, 1.0, 1.0, (0, 0)
 
     if not MAP_PATH.exists():
         print(f"Map file not found: {MAP_PATH}")
-        return None, None, None, None
+        return None, None, None, None, 1.0, 1.0, (0, 0)
 
     tmx_data = load_pygame(MAP_PATH.as_posix())
-    raw_surface = _render_tmx_to_surface(tmx_data)
-    if raw_surface.get_width() == 0 or raw_surface.get_height() == 0:
-        scale_x = scale_y = 1.0
-    else:
-        scale_x = window_size[0] / raw_surface.get_width()
-        scale_y = window_size[1] / raw_surface.get_height()
+    destructible_layers = DESTRUCTIBLE_LAYER_NAMES or []
+    raw_surface = _render_tmx_to_surface(
+        tmx_data,
+        exclude_layers=destructible_layers if destructible_layers else None,
+    )
 
-    scaled_surface = pygame.transform.smoothscale(raw_surface, window_size)
+    scale_x, scale_y = _determine_scaling(raw_surface.get_width(), raw_surface.get_height(), window_size)
+    scaled_surface, offset, scaled_size = _blit_scaled(raw_surface, window_size, scale_x, scale_y)
+
 
     walkable_surface_raw = _render_walkable_surface(
         tmx_data, WALKABLE_LAYER_NAMES, WALKABLE_OBJECT_CLASS_NAMES
     )
-    walkable_surface = pygame.transform.smoothscale(walkable_surface_raw, window_size)
-    walkable_bounds = walkable_surface.get_bounding_rect()
+    if walkable_surface_raw.get_size() != raw_surface.get_size():
+        # Ensure raw walkable data matches the TMX render size for consistent scaling.
+        walkable_surface_raw = pygame.transform.smoothscale(
+            walkable_surface_raw,
+            raw_surface.get_size(),
+        )
+    # Scale walkable surface using the same dimensions to keep masks aligned.
+    walkable_scaled = pygame.transform.smoothscale(walkable_surface_raw, scaled_size)
+    walkable_canvas = pygame.Surface(window_size, pygame.SRCALPHA)
+    walkable_canvas.blit(walkable_scaled, offset)
+
+    walkable_bounds = walkable_canvas.get_bounding_rect()
     if walkable_bounds.width == 0 or walkable_bounds.height == 0:
         walkable_bounds = None
     walkable_mask = (
-        pygame.mask.from_surface(walkable_surface)
-        if walkable_surface.get_width() and walkable_surface.get_height()
+        pygame.mask.from_surface(walkable_canvas)
+        if walkable_canvas.get_width() and walkable_canvas.get_height()
         else None
     )
 
-    return scaled_surface, tmx_data, walkable_mask, walkable_bounds
+    return (
+        scaled_surface,
+        tmx_data,
+        walkable_mask,
+        walkable_bounds,
+        scale_x,
+        scale_y,
+        offset,
+    )
 
 
 def load_background_surface(window_size):

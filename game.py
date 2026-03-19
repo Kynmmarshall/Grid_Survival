@@ -2,7 +2,8 @@ import pygame
 
 from ai_player import AIPlayer
 from assets import load_background_surface, load_tilemap_surface
-from audio import AudioManager
+from audio import get_audio
+from collision_manager import CollisionManager
 from player import Player
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
@@ -23,21 +24,17 @@ from settings import (
 )
 
 
-def _load_sound_safe(path: str):
-    """Load a sound file gracefully; returns None if unavailable."""
-    try:
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
-        return pygame.mixer.Sound(path)
-    except (pygame.error, FileNotFoundError, OSError) as exc:
-        print(f"[Game] Warning: could not load sound '{path}': {exc}")
-        return None
-
-
 class GameManager:
     """Main game application wrapper with full feature integration."""
 
-    def __init__(self, screen=None, clock=None, player_name: str = "Player", game_mode: str = MODE_VS_COMPUTER):
+    def __init__(
+        self,
+        screen=None,
+        clock=None,
+        player_name: str = "Player",
+        game_mode: str = MODE_VS_COMPUTER,
+        selected_characters: list[str] | None = None,
+    ):
         if screen is None or clock is None:
             pygame.init()
         self.screen = screen or pygame.display.set_mode(WINDOW_SIZE)
@@ -46,6 +43,7 @@ class GameManager:
         self.running = True
         self.player_name = player_name
         self.game_mode = game_mode
+        self.selected_characters = selected_characters or []
 
         # Load assets
         self.background_surface = load_background_surface(WINDOW_SIZE)
@@ -54,27 +52,27 @@ class GameManager:
             self.tmx_data,
             self.walkable_mask,
             self.walkable_bounds,
+            self.map_scale_x,
+            self.map_scale_y,
+            self.map_offset,
         ) = load_tilemap_surface(WINDOW_SIZE)
         self.walkable_debug_surface = None
         self.original_walkable_mask = self.walkable_mask.copy() if self.walkable_mask else None
 
-        # Calculate scale factors for TMX tile manager
-        if self.tmx_data and self.map_surface:
-            from assets import _calculate_surface_size
-            raw_width, raw_height = _calculate_surface_size(self.tmx_data)
-            scale_x = WINDOW_SIZE[0] / raw_width if raw_width > 0 else 1.0
-            scale_y = WINDOW_SIZE[1] / raw_height if raw_height > 0 else 1.0
-        else:
-            scale_x = scale_y = 1.0
-
         # Initialize game systems
-        self.tile_manager = TMXTileManager(self.tmx_data, scale_x, scale_y)
-        self.hazard_manager = HazardManager()
+        offset = self.map_offset if self.map_offset else (0, 0)
+        scale_x = self.map_scale_x if self.map_scale_x else 1.0
+        scale_y = self.map_scale_y if self.map_scale_y else 1.0
+        self.tile_manager = TMXTileManager(
+            self.tmx_data,
+            scale_x,
+            scale_y,
+            offset,
+        )
+        self.collision_manager = CollisionManager()
+        self.hazard_manager = HazardManager(self.collision_manager)
         self.hud = GameHUD()
         self.water = AnimatedWater()
-
-        # Sound effects
-        self._snd_player_fall = _load_sound_safe(SOUND_PLAYER_FALL)
 
         # Initialize players based on game mode
         self.players = []
@@ -82,9 +80,10 @@ class GameManager:
         self.elimination_screen = None
 
         if self.game_mode == MODE_VS_COMPUTER:
-            use_ai = USE_AI_PLAYER
-            self.players.append(AIPlayer() if use_ai else Player())
-            self.hud.set_player_info(player_name, 1, 1)
+            primary_char = self._character_choice(0)
+            self.players.append(Player(character_name=primary_char))
+            if USE_AI_PLAYER:
+                self.players.append(AIPlayer())
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
             player1_controls = {
                 'up': pygame.K_w,
@@ -100,15 +99,19 @@ class GameManager:
                 'right': pygame.K_RIGHT,
                 'jump': pygame.K_RSHIFT
             }
-            self.players.append(Player(controls=player1_controls))
-            self.players.append(Player(controls=player2_controls))
-            self.hud.set_player_info(player_name, 2, 2)
+            self.players.append(
+                Player(controls=player1_controls, character_name=self._character_choice(0))
+            )
+            self.players.append(
+                Player(controls=player2_controls, character_name=self._character_choice(1))
+            )
         else:
-            self.players.append(Player())
-            self.hud.set_player_info(player_name, 1, 1)
+            self.players.append(Player(character_name=self._character_choice(0)))
+
+        self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
         self.game_over = False
-        self.audio = AudioManager()
+        self.audio = get_audio()
         self.audio.play_music()
 
     def handle_events(self):
@@ -156,14 +159,13 @@ class GameManager:
 
             # Play fall sound when player starts falling
             if not was_falling_before and player.is_falling():
-                if self._snd_player_fall:
-                    self._snd_player_fall.play()
+                self.audio.play_sfx(SOUND_PLAYER_FALL)
 
             # Check water contact
             self._check_water_contact(player)
 
             # Check hazard collisions
-            if self.hazard_manager.check_player_collision(player.rect):
+            if self.hazard_manager.check_player_collision(player):
                 self._eliminate_player(player, "hit by hazard")
 
             # Check if player fell off screen
@@ -274,15 +276,14 @@ class GameManager:
         self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
 
     def _draw_tmx_map_with_tiles(self):
-        """Draw TMX map, then draw void holes over disappeared tiles."""
+        """Draw TMX map layers, letting missing tiles reveal the background."""
         if not self.tmx_data or not self.map_surface:
             return
 
         # Draw the full map surface
         self.screen.blit(self.map_surface, (0, 0))
 
-        # Draw polished void holes over disappeared tiles (not raw black)
-        self.tile_manager.draw_disappeared_holes(self.screen, self.background_surface)
+        self.tile_manager.draw_active_tiles(self.screen)
 
     def _draw_walkable_debug(self):
         if not (DEBUG_VISUALS_ENABLED and DEBUG_DRAW_WALKABLE) or self.walkable_mask is None:
@@ -295,6 +296,13 @@ class GameManager:
             )
 
         self.screen.blit(self.walkable_debug_surface, (0, 0))
+
+    def _character_choice(self, index: int) -> str | None:
+        if not self.selected_characters:
+            return None
+        if 0 <= index < len(self.selected_characters):
+            return self.selected_characters[index]
+        return self.selected_characters[-1]
 
     def run(self):
         while self.running:
