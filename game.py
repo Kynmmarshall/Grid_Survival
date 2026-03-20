@@ -152,6 +152,9 @@ class GameManager:
         # Update players
         for player in self.players[:]:
             if player in self.eliminated_players:
+                # Keep updating death animation if active
+                if hasattr(player, 'state') and player.state == "death":
+                     player._update_death(dt)
                 continue
 
             was_falling_before = player.is_falling()
@@ -250,6 +253,9 @@ class GameManager:
         if player not in self.eliminated_players:
             self.eliminated_players.append(player)
             print(f"Player eliminated: {reason}")
+            # Trigger death state if available
+            if hasattr(player, 'die'):
+                player.die()
 
     def _trigger_game_over(self):
         """Trigger game over state."""
