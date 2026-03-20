@@ -86,6 +86,21 @@ This report documents a comprehensive audit of the Grid Survival codebase agains
 
 ---
 
+## WEEK 4: POLISH & REFINEMENT (LATE MARCH)
+
+### ✅ Implemented & Verified
+
+| Feature | Status | Location | Notes |
+|---------|--------|----------|-------|
+| **Z-Axis Physics** | ✅ Working | [`player.py`](player.py) | 2.5D jumping (up/down z-axis) with shadow rendering |
+| **Physics Tuning** | ✅ Working | [`settings.py`](settings.py) | Increased gravity/velocity for weightier feel |
+| **Color Palette** | ✅ Working | [`settings.py`](settings.py) | Centralized dictionary for unified theme |
+| **Audio Mute** | ✅ Working | [`audio.py`](audio.py) | Toggle mute logic + HUD button integration |
+| **Explosion FX** | ✅ Working | [`hazards.py`](hazards.py) | Shockwave rings, particle drag, size fading |
+| **Game Over Stats** | ✅ Working | [`ui.py`](ui.py) | Display Score and Time on death screen |
+
+---
+
 ## WEEK 3: AI & MULTIPLAYER
 
 ### ✅ Already Working (Verified)
