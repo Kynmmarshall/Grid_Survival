@@ -10,7 +10,7 @@ import pygame
 from settings import ASSETS_DIR
 
 DEFAULT_MUSIC_PATH = ASSETS_DIR / "Audio" / "Background" / "Grid survival 1.mp3"
-SFX_DIR = ASSETS_DIR / "Audio" / "sfx"
+SFX_DIR = ASSETS_DIR / "sounds"
 
 
 class AudioManager:
