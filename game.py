@@ -1,3 +1,5 @@
+import math
+
 import pygame
 
 from ai_player import AIPlayer
@@ -16,6 +18,7 @@ from settings import (
     DEBUG_WALKABLE_COLOR,
     MODE_VS_COMPUTER,
     MODE_LOCAL_MULTIPLAYER,
+    PLAYER_START_POS,
     TARGET_FPS,
     USE_AI_PLAYER,
     WINDOW_SIZE,
@@ -44,6 +47,8 @@ class GameManager:
         self.player_name = player_name
         self.game_mode = game_mode
         self.selected_characters = selected_characters or []
+        slot_count = self._player_slot_count()
+        spawn_positions = iter(self._spawn_positions(slot_count))
 
         # Load assets
         self.background_surface = load_background_surface(WINDOW_SIZE)
@@ -81,9 +86,16 @@ class GameManager:
 
         if self.game_mode == MODE_VS_COMPUTER:
             primary_char = self._character_choice(0)
-            self.players.append(Player(character_name=primary_char))
+            self.players.append(
+                Player(
+                    position=next(spawn_positions, PLAYER_START_POS),
+                    character_name=primary_char,
+                )
+            )
             if USE_AI_PLAYER:
-                self.players.append(AIPlayer())
+                self.players.append(
+                    AIPlayer(position=next(spawn_positions, PLAYER_START_POS))
+                )
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
             player1_controls = {
                 'up': pygame.K_w,
@@ -99,14 +111,29 @@ class GameManager:
                 'right': pygame.K_RIGHT,
                 'jump': pygame.K_RSHIFT
             }
+            player1_pos = next(spawn_positions, PLAYER_START_POS)
+            player2_pos = next(spawn_positions, PLAYER_START_POS)
             self.players.append(
-                Player(controls=player1_controls, character_name=self._character_choice(0))
+                Player(
+                    position=player1_pos,
+                    controls=player1_controls,
+                    character_name=self._character_choice(0),
+                )
             )
             self.players.append(
-                Player(controls=player2_controls, character_name=self._character_choice(1))
+                Player(
+                    position=player2_pos,
+                    controls=player2_controls,
+                    character_name=self._character_choice(1),
+                )
             )
         else:
-            self.players.append(Player(character_name=self._character_choice(0)))
+            self.players.append(
+                Player(
+                    position=next(spawn_positions, PLAYER_START_POS),
+                    character_name=self._character_choice(0),
+                )
+            )
 
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
@@ -306,6 +333,29 @@ class GameManager:
             )
 
         self.screen.blit(self.walkable_debug_surface, (0, 0))
+
+    def _player_slot_count(self) -> int:
+        if self.game_mode == MODE_LOCAL_MULTIPLAYER:
+            return max(2, len(self.selected_characters))
+        if self.game_mode == MODE_VS_COMPUTER:
+            human_slots = max(1, len(self.selected_characters))
+            return human_slots + (1 if USE_AI_PLAYER else 0)
+        return max(1, len(self.selected_characters))
+
+    def _spawn_positions(self, count: int) -> list[tuple[int, int]]:
+        center = pygame.Vector2(PLAYER_START_POS)
+        if count <= 1:
+            return [(int(center.x), int(center.y))]
+
+        radius = 120
+        angle_step = (2 * math.pi) / count
+        positions: list[tuple[int, int]] = []
+        for idx in range(count):
+            angle = idx * angle_step
+            offset = pygame.Vector2(math.cos(angle), math.sin(angle)) * radius
+            pos = center + offset
+            positions.append((int(pos.x), int(pos.y)))
+        return positions
 
     def _character_choice(self, index: int) -> str | None:
         if not self.selected_characters:
