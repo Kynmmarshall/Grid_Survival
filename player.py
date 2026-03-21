@@ -1,5 +1,6 @@
 import pygame
 
+from audio import get_audio
 from animation import SpriteAnimation, load_frames_from_directory
 from character_manager import DEFAULT_CHARACTER_NAME, build_animation_paths
 from settings import (
@@ -19,6 +20,7 @@ from settings import (
     PLAYER_JUMP_VELOCITY,
     PLAYER_JUMP_GRAVITY,
     PLAYER_MAX_FALL_SPEED,
+    SOUND_PLAYER_JUMP,
     WINDOW_SIZE,
 )
 
@@ -64,6 +66,7 @@ class Player:
             'right': pygame.K_d,
             'jump': pygame.K_SPACE
         }
+        self.audio = get_audio()
 
     def _load_animations(self):
         animations = {}
@@ -185,6 +188,8 @@ class Player:
             self.jumping = True
             self.z_velocity = PLAYER_JUMP_VELOCITY
             self.on_ground = False
+            if self.audio:
+                self.audio.play_sfx(SOUND_PLAYER_JUMP, volume=0.65)
 
         desired_facing = (
             self._determine_facing(move_vector)
