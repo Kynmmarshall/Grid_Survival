@@ -48,7 +48,7 @@ class GameManager:
         self.game_mode = game_mode
         self.selected_characters = selected_characters or []
         slot_count = self._player_slot_count()
-        spawn_positions = iter(self._spawn_positions(slot_count))
+        spawn_positions = iter(self._initial_spawns(slot_count))
 
         # Load assets
         self.background_surface = load_background_surface(WINDOW_SIZE)
@@ -83,6 +83,10 @@ class GameManager:
         self.players = []
         self.eliminated_players = []
         self.elimination_screen = None
+        self._spawn_adjusted = False
+        self._spawn_rescue_window = 1.0
+        self._time_since_start = 0.0
+        self._pending_ai_spawn = False
 
         if self.game_mode == MODE_VS_COMPUTER:
             primary_char = self._character_choice(0)
@@ -93,9 +97,7 @@ class GameManager:
                 )
             )
             if USE_AI_PLAYER:
-                self.players.append(
-                    AIPlayer(position=next(spawn_positions, PLAYER_START_POS))
-                )
+                self._pending_ai_spawn = True
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
             player1_controls = {
                 'up': pygame.K_w,
@@ -135,6 +137,9 @@ class GameManager:
                 )
             )
 
+        self._ensure_players_on_walkable_surface()
+        self._maybe_spawn_pending_ai(initial=True)
+
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
         self.game_over = False
@@ -166,7 +171,13 @@ class GameManager:
                 self.elimination_screen.update(dt)
             return
 
+        self._time_since_start += dt
+
         # Update game systems
+        if not self._spawn_adjusted and self.walkable_mask:
+            self._ensure_players_on_walkable_surface()
+        self._maybe_spawn_pending_ai()
+
         self.water.update(dt)
         self.tile_manager.update(dt)
 
@@ -179,9 +190,14 @@ class GameManager:
         # Update players
         for player in self.players[:]:
             if player in self.eliminated_players:
+                if self._time_since_start <= self._spawn_rescue_window:
+                    self.eliminated_players.remove(player)
+                    rescued = self._rescue_player_to_safe_tile(player)
+                    if rescued:
+                        continue
                 # Keep updating death animation if active
                 if hasattr(player, 'state') and player.state == "death":
-                     player._update_death(dt)
+                    player._update_death(dt)
                 continue
 
             was_falling_before = player.is_falling()
@@ -191,8 +207,15 @@ class GameManager:
             else:
                 player.update(dt, keys, self.walkable_mask, self.walkable_bounds)
 
+            just_started_falling = not was_falling_before and player.is_falling()
+            rescued = False
+            if self._time_since_start <= self._spawn_rescue_window and player.is_falling():
+                rescued = self._rescue_player_to_safe_tile(player)
+                if rescued:
+                    continue
+
             # Play fall sound when player starts falling
-            if not was_falling_before and player.is_falling():
+            if just_started_falling and not rescued:
                 self.audio.play_sfx(SOUND_PLAYER_FALL)
 
             # Check water contact
@@ -257,6 +280,132 @@ class GameManager:
 
         pygame.display.flip()
 
+    def _ensure_players_on_walkable_surface(self):
+        """Make sure every player spawn point is on a valid tile before play starts."""
+        if not self.walkable_mask:
+            return
+
+        occupied: set[tuple[int, int]] = set()
+        walkable_center = self._walkable_center()
+        for player in self.players:
+            desired = (int(round(player.position.x)), int(round(player.position.y)))
+            if desired in occupied or not self._is_spawn_position_valid(player, desired):
+                desired = self._find_valid_fallback(player, occupied, walkable_center)
+            self._apply_spawn_position(player, desired)
+            occupied.add(desired)
+        self._align_ai_spawn_with_human()
+        self._spawn_adjusted = True
+
+    def _is_spawn_position_valid(self, player, position: tuple[int, int]) -> bool:
+        return player._is_over_platform(pygame.Vector2(position), self.walkable_mask)
+
+    def _find_valid_fallback(
+        self,
+        player,
+        occupied: set[tuple[int, int]],
+        origin: pygame.Vector2,
+    ) -> tuple[int, int]:
+        step_radius = 20
+        max_radius = 400
+        angle_step = 15
+        for radius in range(0, max_radius + step_radius, step_radius):
+            for angle_deg in range(0, 360, angle_step):
+                angle_rad = math.radians(angle_deg)
+                offset = pygame.Vector2(math.cos(angle_rad), math.sin(angle_rad)) * radius
+                candidate = (int(round(origin.x + offset.x)), int(round(origin.y + offset.y)))
+                if candidate in occupied:
+                    continue
+                if self._is_spawn_position_valid(player, candidate):
+                    return candidate
+        return (int(round(origin.x)), int(round(origin.y)))
+
+    def _apply_spawn_position(self, player, position: tuple[int, int]):
+        player.position = pygame.Vector2(position)
+        player.spawn_position = pygame.Vector2(position)
+        player.rect.center = position
+
+    def _walkable_center(self) -> pygame.Vector2:
+        if self.walkable_bounds and self.walkable_bounds.width > 0 and self.walkable_bounds.height > 0:
+            return pygame.Vector2(self.walkable_bounds.center)
+        return pygame.Vector2(PLAYER_START_POS)
+
+    def _align_ai_spawn_with_human(self):
+        if not self.walkable_mask:
+            return
+        human = next((p for p in self.players if not getattr(p, "is_ai", False)), None)
+        ai_players = [p for p in self.players if getattr(p, "is_ai", False)]
+        if human is None or not ai_players:
+            return
+
+        human_origin = pygame.Vector2(round(human.position.x), round(human.position.y))
+        base_occupied = {
+            (int(round(p.position.x)), int(round(p.position.y)))
+            for p in self.players
+            if not getattr(p, "is_ai", False)
+        }
+
+        for ai in ai_players:
+            occupied = base_occupied.copy()
+            for other_ai in ai_players:
+                if other_ai is ai:
+                    continue
+                occupied.add((int(round(other_ai.position.x)), int(round(other_ai.position.y))))
+            target = self._find_valid_fallback(ai, occupied, human_origin)
+            if target:
+                self._apply_spawn_position(ai, target)
+                base_occupied.add(target)
+
+    def _maybe_spawn_pending_ai(self, initial: bool = False):
+        if not self._pending_ai_spawn:
+            return
+        if not self.walkable_mask:
+            return
+        human = next((p for p in self.players if not getattr(p, "is_ai", False)), None)
+        if human is None:
+            return
+
+        ai_player = AIPlayer(position=human.position)
+        occupied = {
+            (int(round(p.position.x)), int(round(p.position.y)))
+            for p in self.players
+        }
+        origin = pygame.Vector2(round(human.position.x), round(human.position.y))
+        target = self._find_valid_fallback(ai_player, occupied, origin)
+        self._apply_spawn_position(ai_player, target)
+        self.players.append(ai_player)
+        self._pending_ai_spawn = False
+        self._align_ai_spawn_with_human()
+        if not initial:
+            alive_count = len(self.players) - len(self.eliminated_players)
+            self.hud.set_player_info(self.player_name, alive_count, len(self.players))
+
+    def _rescue_player_to_safe_tile(self, player) -> bool:
+        if not self.walkable_mask:
+            return False
+        occupied = {
+            (int(round(p.position.x)), int(round(p.position.y)))
+            for p in self.players
+            if p is not player and p not in self.eliminated_players
+        }
+        walkable_center = self._walkable_center()
+        safe_position = self._find_valid_fallback(player, occupied, walkable_center)
+        if not safe_position:
+            return False
+        self._apply_spawn_position(player, safe_position)
+        player.falling = False
+        player.fall_velocity = 0.0
+        player.drowning = False
+        player.drown_animation_done = False
+        player.drown_surface_y = None
+        player.jumping = False
+        player.z = 0.0
+        player.z_velocity = 0.0
+        player.on_ground = True
+        player.velocity.update(0, 0)
+        if hasattr(player, "_set_state"):
+            player._set_state("idle", player.facing)
+        return True
+
     def _check_water_contact(self, player):
         if not self.water.has_surface():
             return
@@ -306,10 +455,13 @@ class GameManager:
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
         self.hud.reset()
+        self._spawn_adjusted = False
+        self._time_since_start = 0.0
 
         for player in self.players:
             player.reset()
 
+        self._ensure_players_on_walkable_surface()
         self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
 
     def _draw_tmx_map_with_tiles(self):
@@ -356,6 +508,31 @@ class GameManager:
             pos = center + offset
             positions.append((int(pos.x), int(pos.y)))
         return positions
+
+    def _vs_computer_spawns(self, count: int) -> list[tuple[int, int]]:
+        center = pygame.Vector2(PLAYER_START_POS)
+        offsets = [
+            pygame.Vector2(-90, 0),
+            pygame.Vector2(90, 0),
+            pygame.Vector2(0, -90),
+            pygame.Vector2(0, 90),
+            pygame.Vector2(-130, -60),
+            pygame.Vector2(130, -60),
+            pygame.Vector2(-130, 60),
+            pygame.Vector2(130, 60),
+        ]
+        if count <= len(offsets):
+            positions: list[tuple[int, int]] = []
+            for idx in range(count):
+                pos = center + offsets[idx]
+                positions.append((int(round(pos.x)), int(round(pos.y))))
+            return positions
+        return self._spawn_positions(count)
+
+    def _initial_spawns(self, count: int) -> list[tuple[int, int]]:
+        if self.game_mode == MODE_VS_COMPUTER:
+            return self._vs_computer_spawns(count)
+        return self._spawn_positions(count)
 
     def _character_choice(self, index: int) -> str | None:
         if not self.selected_characters:

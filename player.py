@@ -30,7 +30,8 @@ class Player:
 
     def __init__(self, position=PLAYER_START_POS, controls=None, character_name: str | None = None):
         self.is_ai = False
-        self.position = pygame.Vector2(position)
+        self.spawn_position = pygame.Vector2(position)
+        self.position = self.spawn_position.copy()
         self.speed = PLAYER_SPEED
         self.state = "idle"
         self.facing = PLAYER_DEFAULT_DIRECTION
@@ -306,13 +307,13 @@ class Player:
                 )
 
     def reset(self):
-        self.position = pygame.Vector2(PLAYER_START_POS)
+        self.position = self.spawn_position.copy()
         self.velocity.update(0, 0)
         self.state = "idle"
         self.facing = PLAYER_DEFAULT_DIRECTION
         self.current_animation = self.animations[self.state][self.facing]
         self.current_animation.reset()
-        self.rect.center = PLAYER_START_POS
+        self.rect.center = (round(self.position.x), round(self.position.y))
         self.falling = False
         self.fall_velocity = 0.0
         self.fall_draw_behind = False

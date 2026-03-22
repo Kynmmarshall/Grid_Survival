@@ -148,8 +148,8 @@ TILE_CRUMBLE_DURATION = 0.350  # 350ms
 TILE_GRACE_PERIOD = 3.0
 
 # Sound file paths
-SOUND_TILE_WARNING = str(ASSETS_DIR / "Audio" / "SFX" / "tile_warning.wav")
-SOUND_TILE_DISAPPEAR = str(ASSETS_DIR / "Audio" / "SFX" / "tile_disappear.wav")
+SOUND_TILE_WARNING = str(ASSETS_DIR / "Audio" / "SFX" / "hit.wav")
+SOUND_TILE_DISAPPEAR = str(ASSETS_DIR / "Audio" / "SFX" / "destroy.wav")
 SOUND_PLAYER_FALL = str(ASSETS_DIR / "Audio" / "SFX" / "fall.wav")
 SOUND_PLAYER_JUMP = str(ASSETS_DIR / "Audio" / "SFX" / "jump.wav")
 
