@@ -8,6 +8,13 @@ import random
 
 import pygame
 
+from animation import SpriteAnimation, load_frames_from_directory
+from audio import get_audio
+from character_manager import (
+    DEFAULT_CHARACTER_NAME,
+    available_characters,
+    build_animation_paths,
+)
 from settings import (
     # Audio
     MUSIC_PATH,
@@ -86,6 +93,9 @@ from settings import (
     FONT_SIZE_HEADING,
     FONT_SIZE_BODY,
     FONT_SIZE_SMALL,
+    # Player previews
+    PLAYER_FRAME_DURATION,
+    PLAYER_SCALE,
 )
 
 
@@ -128,6 +138,7 @@ class TitleScreen:
         self.screen = screen
         self.clock = clock
         self.width, self.height = WINDOW_SIZE
+        self.audio = get_audio()
 
         # Font hierarchy
         self._font_display = _load_font(FONT_PATH_DISPLAY, FONT_SIZE_DISPLAY, bold=True)
@@ -168,17 +179,12 @@ class TitleScreen:
     # ── music ──────────────────────────────────────────────────────────────
 
     def _start_music(self) -> None:
-        try:
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
-            if MUSIC_PATH.exists():
-                pygame.mixer.music.load(str(MUSIC_PATH))
-                pygame.mixer.music.set_volume(MUSIC_VOLUME)
-                pygame.mixer.music.play(-1)
-            else:
-                print(f"Music file not found: {MUSIC_PATH}")
-        except pygame.error as err:
-            print(f"Music init/load failed: {err}")
+        self.audio.play_music(
+            track=MUSIC_PATH,
+            loop=True,
+            fade_ms=1500,
+            volume=MUSIC_VOLUME,
+        )
 
     # ── title letter setup ─────────────────────────────────────────────────
 
@@ -287,7 +293,7 @@ class TitleScreen:
 
     def _draw_input(self) -> None:
         # Label
-        label = self._font_small.render("ENTER YOUR NAME NIGGA:", True, INPUT_LABEL_COLOR)
+        label = self._font_small.render("ENTER YOUR NAME :", True, INPUT_LABEL_COLOR)
         self.screen.blit(label, label.get_rect(center=(self.width // 2, 310)))
 
         # Input box
@@ -709,3 +715,312 @@ class ModeSelectionScreen:
 
                 self._fade(False)
                 return self._clicked_mode
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PlayerSelectionScreen
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class PlayerSelectionScreen:
+    """Allow one or more players to choose their character previews."""
+
+    CARD_WIDTH = 190
+    CARD_HEIGHT = 250
+    CARD_SPACING_X = 36
+    CARD_SPACING_Y = 30
+    BACKGROUND_COLOR = (12, 14, 26)
+    CARD_BG = (34, 38, 52)
+    CARD_BORDER = (70, 80, 110)
+    CARD_ACTIVE_BORDER = (110, 200, 255)
+    PLAYER_COLORS = [
+        (255, 220, 120),
+        (130, 210, 255),
+        (255, 150, 210),
+        (150, 255, 190),
+    ]
+    BUTTON_SIZE = (260, 62)
+    BUTTON_IDLE = (90, 150, 255)
+    BUTTON_DISABLED = (70, 70, 90)
+
+    def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock,
+                 game_mode: str, num_players: int = 1):
+        self.screen = screen
+        self.clock = clock
+        self.width, self.height = WINDOW_SIZE
+        self.game_mode = game_mode
+        self.num_players = max(1, num_players)
+        self.characters = available_characters() or [DEFAULT_CHARACTER_NAME]
+        self.previews = self._load_previews()
+        self.card_rects: list[pygame.Rect] = []
+        self.selection: list[int | None] = [None] * self.num_players
+        self.locked_in = [False] * self.num_players
+        self.current_player = 0
+        self.active_card_idx: int | None = None
+        self.done = False
+        self.cancelled = False
+
+        self.font_title = _load_font(FONT_PATH_HEADING, 34, bold=True)
+        self.font_body = _load_font(FONT_PATH_BODY, 20)
+        self.font_small = _load_font(FONT_PATH_SMALL, 18)
+
+        self.button_rect = pygame.Rect(0, 0, *self.BUTTON_SIZE)
+        self.button_rect.centerx = self.width // 2
+        self.button_rect.bottom = self.height - 28
+        self.mode_label = self._mode_label()
+
+    # ── lifecycle ──────────────────────────────────────────────────────────
+
+    def run(self):
+        while True:
+            dt = self.clock.tick(TARGET_FPS) / 1000.0
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.cancelled = True
+                    self.done = True
+                else:
+                    self._handle_event(event)
+
+            if self.done:
+                break
+
+            self._update_animations(dt)
+            self._draw()
+            pygame.display.flip()
+
+        if self.cancelled:
+            return None
+        return self._build_result()
+
+    # ── setup helpers ─────────────────────────────────────────────────────
+
+    def _mode_label(self) -> str:
+        if self.game_mode == MODE_LOCAL_MULTIPLAYER:
+            return "Local Multiplayer"
+        if self.game_mode == MODE_VS_COMPUTER:
+            return "Single Player"
+        if self.game_mode == MODE_ONLINE_MULTIPLAYER:
+            return "Online Multiplayer"
+        return "Custom Mode"
+
+    def _load_previews(self):
+        previews = []
+        for name in self.characters:
+            paths = build_animation_paths(name)
+            front_idle = paths.get("idle", {}).get("down")
+            front_run = paths.get("run", {}).get("down")
+            previews.append({
+                "name": name,
+                "animations": {
+                    "idle": self._create_animation(front_idle),
+                    "run": self._create_animation(front_run),
+                },
+            })
+        return previews
+
+    def _create_animation(self, directory):
+        frames = []
+        if directory is not None:
+            try:
+                frames = load_frames_from_directory(directory, scale=PLAYER_SCALE)
+            except (FileNotFoundError, ValueError, pygame.error):
+                frames = []
+        if not frames:
+            placeholder = pygame.Surface((96, 96), pygame.SRCALPHA)
+            placeholder.fill((0, 0, 0, 0))
+            pygame.draw.rect(placeholder, (200, 200, 208), placeholder.get_rect(), border_radius=18)
+            frames = [placeholder]
+        return SpriteAnimation(frames, frame_duration=PLAYER_FRAME_DURATION, loop=True)
+
+    # ── event handling ─────────────────────────────────────────────────────
+
+    def _handle_event(self, event):
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.cancelled = True
+                self.done = True
+                return
+            if event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self._confirm_selection()
+            elif event.key in (pygame.K_LEFT, pygame.K_a):
+                self._move_selection(-1)
+            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                self._move_selection(1)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.button_rect.collidepoint(event.pos):
+                self._confirm_selection()
+                return
+            for idx, rect in enumerate(self.card_rects):
+                if rect.collidepoint(event.pos):
+                    self._activate_card(idx)
+                    break
+
+    def _move_selection(self, delta: int):
+        if not self._can_interact():
+            return
+        if not self.characters:
+            return
+        base_idx = self.active_card_idx
+        if base_idx is None:
+            choice = self.selection[self.current_player]
+            base_idx = choice if choice is not None else 0
+        new_idx = (base_idx + delta) % len(self.characters)
+        self._activate_card(new_idx)
+
+    def _activate_card(self, idx: int):
+        if not self._can_interact():
+            return
+        if not (0 <= idx < len(self.characters)):
+            return
+        if idx != self.active_card_idx:
+            run_anim = self.previews[idx]["animations"].get("run")
+            if run_anim:
+                run_anim.reset()
+        self.active_card_idx = idx
+        self.selection[self.current_player] = idx
+
+    def _confirm_selection(self):
+        if not self._can_lock_current_player():
+            return
+        choice = self.selection[self.current_player]
+        if choice is None:
+            return
+        self.locked_in[self.current_player] = True
+        self.active_card_idx = None
+        self.current_player += 1
+        if self.current_player >= self.num_players:
+            self.done = True
+
+    def _can_interact(self) -> bool:
+        return not self.done and self.current_player < self.num_players
+
+    def _can_lock_current_player(self) -> bool:
+        if not self._can_interact():
+            return False
+        return self.selection[self.current_player] is not None
+
+    # ── drawing ────────────────────────────────────────────────────────────
+
+    def _draw(self):
+        self.screen.fill(self.BACKGROUND_COLOR)
+        self._draw_header()
+        self._draw_cards()
+        self._draw_button()
+        self._draw_tips()
+
+    def _draw_header(self):
+        title = "CHOOSE YOUR SURVIVOR" if self.num_players == 1 else "ASSEMBLE YOUR CREW"
+        title_surf = self.font_title.render(title, True, (255, 220, 120))
+        self.screen.blit(title_surf, title_surf.get_rect(center=(self.width // 2, 70)))
+
+        mode_surf = self.font_body.render(self.mode_label.upper(), True, (180, 180, 190))
+        self.screen.blit(mode_surf, mode_surf.get_rect(center=(self.width // 2, 110)))
+
+        if not self.done:
+            prompt = f"Player {self.current_player + 1}: Click a character to preview their run"
+        else:
+            prompt = "All players locked in!"
+        prompt_color = (200, 200, 210) if not self.done else (130, 215, 150)
+        prompt_surf = self.font_small.render(prompt, True, prompt_color)
+        self.screen.blit(prompt_surf, prompt_surf.get_rect(center=(self.width // 2, 138)))
+
+    def _draw_cards(self):
+        total = len(self.previews)
+        if total == 0:
+            self.card_rects = []
+            return
+        cards_per_row = min(4, max(1, total))
+        rows = math.ceil(total / cards_per_row)
+        total_width = cards_per_row * self.CARD_WIDTH + (cards_per_row - 1) * self.CARD_SPACING_X
+        start_x = self.width // 2 - total_width // 2
+        grid_top = 170
+        self.card_rects = [pygame.Rect(0, 0, 0, 0)] * total
+
+        for idx, preview in enumerate(self.previews):
+            row = idx // cards_per_row
+            col = idx % cards_per_row
+            x = start_x + col * (self.CARD_WIDTH + self.CARD_SPACING_X)
+            y = grid_top + row * (self.CARD_HEIGHT + self.CARD_SPACING_Y)
+            rect = pygame.Rect(x, y, self.CARD_WIDTH, self.CARD_HEIGHT)
+            self.card_rects[idx] = rect
+            self._draw_card(rect, idx, preview)
+
+    def _draw_card(self, rect: pygame.Rect, idx: int, preview: dict):
+        hovered = rect.collidepoint(pygame.mouse.get_pos())
+        border_color = self.CARD_BORDER
+        locked_players = [i for i, choice in enumerate(self.selection) if choice == idx and self.locked_in[i]]
+        pending = (
+            not self.done
+            and self.current_player < self.num_players
+            and self.selection[self.current_player] == idx
+            and not self.locked_in[self.current_player]
+        )
+        if locked_players:
+            player_index = locked_players[-1]
+            border_color = self.PLAYER_COLORS[player_index % len(self.PLAYER_COLORS)]
+        elif idx == self.active_card_idx or pending:
+            border_color = self.CARD_ACTIVE_BORDER
+        elif hovered:
+            border_color = tuple(min(255, c + 30) for c in self.CARD_BORDER)
+
+        pygame.draw.rect(self.screen, self.CARD_BG, rect, border_radius=18)
+        pygame.draw.rect(self.screen, border_color, rect, 3, border_radius=18)
+
+        anim_state = "run" if (idx == self.active_card_idx or pending) else "idle"
+        animation = preview["animations"].get(anim_state) or preview["animations"].get("idle")
+        if animation:
+            frame = animation.image
+            frame_rect = frame.get_rect(center=(rect.centerx, rect.top + rect.height // 2))
+            self.screen.blit(frame, frame_rect)
+
+        name_surf = self.font_body.render(preview["name"], True, (240, 240, 245))
+        self.screen.blit(name_surf, name_surf.get_rect(center=(rect.centerx, rect.bottom - 28)))
+
+        label_y = rect.top + 12
+        for player_index in locked_players:
+            label = f"P{player_index + 1} READY"
+            color = self.PLAYER_COLORS[player_index % len(self.PLAYER_COLORS)]
+            label_surf = self.font_small.render(label, True, color)
+            self.screen.blit(label_surf, label_surf.get_rect(center=(rect.centerx, label_y)))
+            label_y += label_surf.get_height() + 4
+
+    def _draw_button(self):
+        enabled = self._can_lock_current_player()
+        color = self.BUTTON_IDLE if enabled else self.BUTTON_DISABLED
+        pygame.draw.rect(self.screen, color, self.button_rect, border_radius=18)
+        pygame.draw.rect(self.screen, (20, 20, 30), self.button_rect, 2, border_radius=18)
+
+        if not self.done:
+            label = f"Select Player {self.current_player + 1}"
+        else:
+            label = "Continue"
+        text_color = (0, 0, 0) if enabled else (200, 200, 210)
+        label_surf = self.font_body.render(label, True, text_color)
+        self.screen.blit(label_surf, label_surf.get_rect(center=self.button_rect.center))
+
+    def _draw_tips(self):
+        tips = ["Click a card to preview the run animation", "Press Enter or the button to lock in"]
+        if self.num_players > 1:
+            tips.append("Each player locks in separately")
+        for idx, text in enumerate(tips):
+            surf = self.font_small.render(text, True, (170, 170, 185))
+            self.screen.blit(surf, (32, self.height - 110 + idx * 24))
+
+    # ── animation/update helpers ───────────────────────────────────────────
+
+    def _update_animations(self, dt: float):
+        for preview in self.previews:
+            for animation in preview["animations"].values():
+                if animation:
+                    animation.update(dt)
+
+    def _build_result(self) -> list[str]:
+        if not self.selection:
+            return [DEFAULT_CHARACTER_NAME]
+        resolved = []
+        for idx in self.selection:
+            if idx is None or not (0 <= idx < len(self.characters)):
+                resolved.append(DEFAULT_CHARACTER_NAME)
+            else:
+                resolved.append(self.characters[idx])
+        return resolved

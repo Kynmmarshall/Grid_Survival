@@ -13,7 +13,7 @@ from dataclasses import dataclass, asdict
 
 @dataclass
 class PlayerState:
-    """Player state for network synchronization."""
+    """Updated player state with timestamp for interpolation."""
     x: float
     y: float
     facing: str
@@ -21,7 +21,7 @@ class PlayerState:
     falling: bool
     drowning: bool
     eliminated: bool
-
+    timestamp: float = 0.0  # Added to track packet timing
 
 class NetworkManager:
     """Base network manager for multiplayer."""
