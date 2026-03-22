@@ -23,10 +23,15 @@ class AIPlayer(Player):
         self._decision_timer = 0.0
         self._current_direction = pygame.Vector2(0, 0)
 
+        # 🔥 Smooth movement additions
+        self._desired_direction = pygame.Vector2(0, 0)
+        self._smooth_speed = 5.0
+
     def reset(self):
         super().reset()
         self._decision_timer = 0.0
         self._current_direction.update(0, 0)
+        self._desired_direction.update(0, 0)
 
     def update_ai(self, dt: float, walkable_mask, walkable_bounds):
         self._decision_timer += dt
@@ -39,12 +44,27 @@ class AIPlayer(Player):
 
         if needs_new_direction:
             self._decision_timer = 0.0
-            self._current_direction = self._choose_direction(walkable_mask, walkable_bounds)
+            self._desired_direction = self._choose_direction(walkable_mask, walkable_bounds)
+
+        # 🔥 Smooth interpolation toward desired direction
+        self._current_direction = self._current_direction.lerp(
+            self._desired_direction,
+            min(1, dt * self._smooth_speed)
+        )
+
+        # Prevent jitter
+        if self._current_direction.length() < 0.05:
+            self._current_direction.update(0, 0)
+
+        # Normalize movement
+        move_dir = self._current_direction
+        if move_dir.length_squared() > 0:
+            move_dir = move_dir.normalize()
 
         # AI doesn't jump for now
         self._update_with_move_vector(
             dt,
-            self._current_direction,
+            move_dir,
             walkable_mask,
             walkable_bounds,
             jump_pressed=False,

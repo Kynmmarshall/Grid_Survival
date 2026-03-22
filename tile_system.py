@@ -10,30 +10,16 @@ import pygame
 from enum import Enum
 from typing import List, Dict, Tuple, Optional
 
+from audio import get_audio
 from settings import (
     WINDOW_SIZE,
     WALKABLE_LAYER_NAMES,
+    DESTRUCTIBLE_LAYER_NAMES,
     TILE_CRUMBLE_DURATION,
     TILE_GRACE_PERIOD,
     SOUND_TILE_WARNING,
     SOUND_TILE_DISAPPEAR,
 )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Sound loader helper
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_sound(path: str) -> Optional[pygame.mixer.Sound]:
-    """Load a sound file gracefully; returns None if unavailable."""
-    try:
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
-        sound = pygame.mixer.Sound(path)
-        return sound
-    except (pygame.error, FileNotFoundError, OSError) as exc:
-        print(f"[TileSystem] Warning: could not load sound '{path}': {exc}")
-        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,7 +82,8 @@ class TMXTile:
     """Individual TMX tile with state management and visual effects."""
 
     def __init__(self, grid_x: int, grid_y: int, pixel_x: int, pixel_y: int,
-                 tile_width: int, tile_height: int, gid: int):
+                 tile_width: int, tile_height: int, gid: int,
+                 image: Optional[pygame.Surface] = None):
         self.grid_x = grid_x
         self.grid_y = grid_y
         self.pixel_x = pixel_x
@@ -104,6 +91,7 @@ class TMXTile:
         self.tile_width = tile_width
         self.tile_height = tile_height
         self.gid = gid
+        self.image = image
 
         self.state = TileState.NORMAL
         self.warning_timer = 0.0
@@ -251,10 +239,15 @@ class TMXTileManager:
     Works with the existing TMX map data and walkable mask.
     """
 
-    def __init__(self, tmx_data, scale_x: float = 1.0, scale_y: float = 1.0):
+    def __init__(self, tmx_data, scale_x: float = 1.0, scale_y: float = 1.0,
+                 offset: Optional[Tuple[int, int]] = None):
         self.tmx_data = tmx_data
         self.scale_x = scale_x
         self.scale_y = scale_y
+        if offset:
+            self.offset_x, self.offset_y = offset
+        else:
+            self.offset_x = self.offset_y = 0
         self.tiles: Dict[Tuple[int, int], TMXTile] = {}
         self.disappeared_tiles: List[TMXTile] = []
 
@@ -271,9 +264,8 @@ class TMXTileManager:
         self.grace_timer = 0.0
         self.grace_period = TILE_GRACE_PERIOD
 
-        # Sound effects
-        self._snd_warning = _load_sound(SOUND_TILE_WARNING)
-        self._snd_disappear = _load_sound(SOUND_TILE_DISAPPEAR)
+        # Audio access
+        self.audio = get_audio()
 
         # Build tile registry from TMX data
         self._build_tile_registry()
@@ -284,7 +276,8 @@ class TMXTileManager:
         """Build registry of walkable tiles from TMX data."""
         if not self.tmx_data:
             return
-        target_layers = {name.lower() for name in WALKABLE_LAYER_NAMES}
+        source_layers = DESTRUCTIBLE_LAYER_NAMES or WALKABLE_LAYER_NAMES
+        target_layers = {name.lower() for name in source_layers}
 
         for layer in self.tmx_data.layers:
             if getattr(layer, "name", "").lower() not in target_layers:
@@ -296,12 +289,24 @@ class TMXTileManager:
                 if gid == 0:
                     continue
                 pixel_x, pixel_y = self._tile_to_pixel(x, y, layer)
-                scaled_x = int(pixel_x * self.scale_x)
-                scaled_y = int(pixel_y * self.scale_y)
+                scaled_x = int(pixel_x * self.scale_x) + self.offset_x
+                scaled_y = int(pixel_y * self.scale_y) + self.offset_y
                 scaled_width = int(self.tmx_data.tilewidth * self.scale_x)
                 scaled_height = int(self.tmx_data.tileheight * self.scale_y)
-                tile = TMXTile(x, y, scaled_x, scaled_y, scaled_width, scaled_height, gid)
+                image = self._get_scaled_tile_image(gid)
+                tile = TMXTile(x, y, scaled_x, scaled_y, scaled_width, scaled_height, gid, image)
                 self.tiles[(x, y)] = tile
+    def _get_scaled_tile_image(self, gid: int) -> Optional[pygame.Surface]:
+        if gid == 0 or not self.tmx_data:
+            return None
+        image = self.tmx_data.get_tile_image_by_gid(gid)
+        if image is None:
+            return None
+        target_width = max(1, int(round(image.get_width() * self.scale_x)))
+        target_height = max(1, int(round(image.get_height() * self.scale_y)))
+        if target_width == image.get_width() and target_height == image.get_height():
+            return image.copy()
+        return pygame.transform.smoothscale(image, (target_width, target_height))
 
     def _tile_to_pixel(self, x: int, y: int, layer) -> Tuple[int, int]:
         """Convert TMX grid coordinates to isometric pixel coordinates."""
@@ -343,8 +348,7 @@ class TMXTileManager:
             just_disappeared = tile.update(dt)
             if just_disappeared:
                 self.disappeared_tiles.append(tile)
-                if self._snd_disappear:
-                    self._snd_disappear.play()
+                self.audio.play_sfx(SOUND_TILE_DISAPPEAR)
 
         # Trigger new tile warnings based on difficulty
         if self.disappear_timer >= self.current_interval:
@@ -378,8 +382,7 @@ class TMXTileManager:
 
         for tile in tiles_to_warn:
             tile.set_warning()
-            if self._snd_warning:
-                self._snd_warning.play()
+            self.audio.play_sfx(SOUND_TILE_WARNING)
 
     # ── drawing ────────────────────────────────────────────────────────────
 
@@ -393,19 +396,14 @@ class TMXTileManager:
             # Draw particles for any tile that has them (crumbling or just disappeared)
             tile.draw_particles(surface)
 
-    def draw_disappeared_holes(self, surface: pygame.Surface, background_surface=None):
-        """
-        Draw the 'hole' for disappeared tiles.
-        Instead of a raw black square, we draw a very dark void diamond
-        that blends with the background.
-        """
+    def draw_active_tiles(self, surface: pygame.Surface):
+        """Draw tiles that have not disappeared yet."""
         for tile in self.tiles.values():
             if tile.state == TileState.DISAPPEARED:
-                points = tile.get_diamond_points()
-                # Draw a dark void (near-black with slight blue tint for depth)
-                pygame.draw.polygon(surface, (8, 8, 14), points)
-                # Draw a subtle inner shadow border
-                pygame.draw.polygon(surface, (20, 20, 30), points, 2)
+                continue
+            if tile.image:
+                surface.blit(tile.image, (tile.pixel_x, tile.pixel_y))
+
 
     # ── walkable mask ──────────────────────────────────────────────────────
 
