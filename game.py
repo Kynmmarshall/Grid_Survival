@@ -472,9 +472,14 @@ class GameManager:
         if not self.tmx_data or not self.map_surface:
             return
 
-        # Draw the full map surface
+        # self.map_surface contains non-destructible layers (Bottom)
+        # We need to ensure that the platform tiles (Top) are drawn by tile_manager
+        # and that the background (starry void) is visible where platform tiles are missing.
+        
+        # 1. Draw static background/bottom layers
         self.screen.blit(self.map_surface, (0, 0))
 
+        # 2. Draw active platform tiles (destructible)
         self.tile_manager.draw_active_tiles(self.screen)
 
     def _draw_walkable_debug(self):
