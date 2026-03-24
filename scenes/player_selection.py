@@ -475,48 +475,114 @@ class PlayerSelectionScreen:
                 self.screen.blit(text_surf, text_rect)
 
     def _draw_summary(self) -> None:
-        panel_rect = pygame.Rect(0, self.height - SUMMARY_PANEL_HEIGHT, self.width, SUMMARY_PANEL_HEIGHT)
-        panel_surface = pygame.Surface(panel_rect.size, pygame.SRCALPHA)
-        panel_surface.fill((12, 16, 26, 238))
-        self.screen.blit(panel_surface, panel_rect.topleft)
-
-        if self.num_players == 1:
-            instructions = "Click to preview running animation. Press ENTER or LOCK IN to confirm."
-        else:
-            instructions = "Player {0}: preview with click/arrows, then LOCK IN. BACKSPACE undoes last lock.".format(self.current_player + 1)
-        instr_surf = self._font_small.render(instructions, True, INSTRUCTION_COLOR)
-        self.screen.blit(instr_surf, instr_surf.get_rect(midtop=(self.width // 2, panel_rect.top + 10)))
-
-        picks = [name or "—" for name in self.selections]
-        picks_text = " | ".join(f"P{i + 1}: {choice}" for i, choice in enumerate(picks))
-        color = CONFIRMED_COLOR if all(name is not None for name in self.selections[:self.current_player]) else PREVIEW_COLOR
-        picks_surf = self._font_body.render(picks_text, True, color)
-        self.screen.blit(picks_surf, picks_surf.get_rect(center=(self.width // 2, panel_rect.top + 52)))
-
         mouse_pos = pygame.mouse.get_pos()
         self._draw_buttons(mouse_pos)
+        
+        # Styled Tooltip Box
+        if self.num_players == 1:
+            instructions = "Click to preview • ENTER to Lock In"
+        else:
+            if self.current_player < self.num_players:
+                instructions = f"Player {self.current_player + 1}: Select your hero"
+            else:
+                 instructions = "Ready to start!"
+
+        text_surf = self._font_small.render(instructions, True, (200, 230, 255))
+        
+        # Background for tooltip
+        bg_width = text_surf.get_width() + 50
+        bg_height = 36
+        bg_rect = pygame.Rect(0, 0, bg_width, bg_height)
+        bg_rect.midbottom = (self.width // 2, self.height - 25)
+        
+        # Translucent dark pill shape
+        s = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(s, (10, 15, 30, 200), s.get_rect(), border_radius=18)
+        # Thin glowing border
+        pygame.draw.rect(s, (60, 100, 140, 150), s.get_rect(), 1, border_radius=18)
+        
+        self.screen.blit(s, bg_rect.topleft)
+        self.screen.blit(text_surf, text_surf.get_rect(center=bg_rect.center))
 
     def _draw_buttons(self, mouse_pos: tuple) -> None:
-        # Back button
+        # Back Button (simple style)
         back_hover = self._back_button_rect.collidepoint(mouse_pos)
-        back_bg = BUTTON_BG_HOVER if back_hover else BUTTON_BG
-        _draw_rounded_rect(self.screen, self._back_button_rect, back_bg, CARD_BORDER_IDLE, 2, BUTTON_RADIUS)
-        back_text = self._font_body.render("BACK", True, BUTTON_TEXT)
+        back_bg = (40, 50, 70) if back_hover else (30, 35, 50)
+        _draw_rounded_rect(self.screen, self._back_button_rect, back_bg, (80, 90, 110), 1, BUTTON_RADIUS)
+        back_text = self._font_body.render("BACK", True, (200, 200, 220))
         self.screen.blit(back_text, back_text.get_rect(center=self._back_button_rect.center))
 
-        # Lock button
+        # Lock / Action Button (Glowing Styled)
         lock_enabled = self.active_index is not None and self.current_player < self.num_players
-        lock_hover = lock_enabled and self._lock_button_rect.collidepoint(mouse_pos)
-        if not lock_enabled:
-            lock_bg = BUTTON_BG_DISABLED
-            text_color = BUTTON_TEXT_DISABLED
+        lock_rect = self._lock_button_rect
+        is_hover = lock_enabled and lock_rect.collidepoint(mouse_pos)
+        
+        if self.current_player >= self.num_players:
+            # All selected? maybe change text to START? 
+            # Logic says returns selection when num_players reached, so this state might be transient/last frame
+            label = "START GAME"
+            base_color = (80, 220, 100) # Green
         else:
-            lock_bg = BUTTON_BG_HOVER if lock_hover else BUTTON_BG
-            text_color = BUTTON_TEXT
-        label = "LOCK IN" if self.current_player < self.num_players - 1 else "FINALIZE"
-        _draw_rounded_rect(self.screen, self._lock_button_rect, lock_bg, CARD_BORDER_IDLE, 2, BUTTON_RADIUS)
-        lock_text = self._font_body.render(label, True, text_color)
-        self.screen.blit(lock_text, lock_text.get_rect(center=self._lock_button_rect.center))
+            label = "SELECT HERO" # Changed from LOCK IN to generic action text or keep LOCK IN
+            label = "CONFIRM"
+            base_color = (255, 180, 40) # Gold/Amber default
+
+            # Try to match active character color if possible
+            if self.active_index is not None and 0 <= self.active_index < len(self.cards):
+                char_name = self.cards[self.active_index]["name"]
+                meta = CHARACTER_METADATA.get(char_name)
+                if meta:
+                    base_color = meta["color"]
+
+        if not lock_enabled:
+            # Disabled state
+            _draw_rounded_rect(self.screen, lock_rect, (30, 30, 35), (60, 60, 70), 2, BUTTON_RADIUS)
+            text_surf = self._font_body.render("SELECT HERO", True, (100, 100, 100))
+            self.screen.blit(text_surf, text_surf.get_rect(center=lock_rect.center))
+        else:
+            # Active State
+            # 1. Glow behind
+            if is_hover:
+                 glow_rect = lock_rect.inflate(16, 16)
+                 s = pygame.Surface(glow_rect.size, pygame.SRCALPHA)
+                 # Soft glow
+                 pygame.draw.rect(s, (*base_color, 60), s.get_rect(), border_radius=BUTTON_RADIUS+8)
+                 self.screen.blit(s, glow_rect.topleft, special_flags=pygame.BLEND_ADD)
+            
+            # 2. Button Body
+            bg_color = (base_color[0]//4, base_color[1]//4, base_color[2]//4)
+            if is_hover:
+                bg_color = (base_color[0]//2, base_color[1]//2, base_color[2]//2)
+            
+            _draw_rounded_rect(self.screen, lock_rect, bg_color, base_color, 2, BUTTON_RADIUS)
+            
+            # 3. Text
+            text_surf = self._font_body.render(label, True, (255, 255, 255))
+            self.screen.blit(text_surf, text_surf.get_rect(center=lock_rect.center))
+
+            # 4. Player Indicator Badge (Floating above)
+            if self.current_player < self.num_players:
+                p_idx = self.current_player + 1
+                badge_radius = 18
+                badge_center = (lock_rect.centerx, lock_rect.top - 10)
+                
+                # Badge Glow
+                pygame.draw.circle(self.screen, (0, 0, 0, 100), badge_center, badge_radius + 2)
+                
+                # Badge Circle
+                # Cycle colors or specific P1/P2 colors?
+                # P1: Blue, P2: Red, P3: Green, P4: Yellow
+                p_colors = [(60, 140, 255), (255, 60, 60), (60, 255, 100), (255, 220, 40)]
+                p_color = p_colors[(p_idx - 1) % 4]
+                
+                pygame.draw.circle(self.screen, p_color, badge_center, badge_radius)
+                pygame.draw.circle(self.screen, (255,255,255), badge_center, badge_radius, 2)
+                
+                # 'P1' Text
+                p_text = self._font_heading.render(f"P{p_idx}", True, (255, 255, 255))
+                # Scale down slightly
+                ts = pygame.transform.scale(p_text, (int(p_text.get_width()*0.6), int(p_text.get_height()*0.6)))
+                self.screen.blit(ts, ts.get_rect(center=badge_center))
 
     def _draw(self) -> None:
         self._draw_background()
