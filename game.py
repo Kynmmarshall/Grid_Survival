@@ -21,7 +21,6 @@ from settings import (
     PLAYER_START_POS,
     TARGET_FPS,
     USE_AI_PLAYER,
-    AI_DEFAULT_DIFFICULTY,
     WINDOW_SIZE,
     WINDOW_TITLE,
     SOUND_PLAYER_FALL,
@@ -38,7 +37,6 @@ class GameManager:
         player_name: str = "Player",
         game_mode: str = MODE_VS_COMPUTER,
         selected_characters: list[str] | None = None,
-        ai_difficulty: int = AI_DEFAULT_DIFFICULTY,
     ):
         if screen is None or clock is None:
             pygame.init()
@@ -49,7 +47,6 @@ class GameManager:
         self.player_name = player_name
         self.game_mode = game_mode
         self.selected_characters = selected_characters or []
-        self.ai_difficulty = max(1, min(5, ai_difficulty))
         slot_count = self._player_slot_count()
         spawn_positions = iter(self._initial_spawns(slot_count))
 
@@ -367,7 +364,7 @@ class GameManager:
         if human is None:
             return
 
-        ai_player = AIPlayer(position=human.position, difficulty=self.ai_difficulty)
+        ai_player = AIPlayer(position=human.position)
         occupied = {
             (int(round(p.position.x)), int(round(p.position.y)))
             for p in self.players
@@ -529,6 +526,7 @@ class GameManager:
             for idx in range(count):
                 pos = center + offsets[idx]
                 positions.append((int(round(pos.x)), int(round(pos.y))))
+            return positions
         return self._spawn_positions(count)
 
     def _initial_spawns(self, count: int) -> list[tuple[int, int]]:
