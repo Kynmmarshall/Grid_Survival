@@ -7,6 +7,8 @@ from assets import load_background_surface, load_tilemap_surface
 from audio import get_audio
 from collision_manager import CollisionManager
 from player import Player
+from orbs import OrbManager
+from powers import get_power_for_character, power_key_for_player
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
@@ -81,6 +83,7 @@ class GameManager:
         self.hazard_manager = HazardManager(self.collision_manager)
         self.hud = GameHUD()
         self.water = AnimatedWater()
+        self.orb_manager = OrbManager()
 
         # Initialize players based on game mode
         self.players = []
@@ -142,6 +145,7 @@ class GameManager:
 
         self._ensure_players_on_walkable_surface()
         self._maybe_spawn_pending_ai(initial=True)
+        self._configure_powers_for_players()
 
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
@@ -163,6 +167,8 @@ class GameManager:
                         player.reset()
                 elif event.key == pygame.K_r and self.game_over:
                     self._restart_game()
+                else:
+                    self._handle_power_key(event.key)
 
     def update(self, dt: float, keys):
         if keys[pygame.K_ESCAPE]:
@@ -189,6 +195,8 @@ class GameManager:
 
         self.hazard_manager.update(dt)
         self.hud.update(dt)
+        for player in self.players:
+            player._immune_to_hazards = False
 
         # Update players
         for player in self.players[:]:
@@ -209,6 +217,9 @@ class GameManager:
                 player.update_ai(dt, self.walkable_mask, self.walkable_bounds)
             else:
                 player.update(dt, keys, self.walkable_mask, self.walkable_bounds)
+
+            if player.power:
+                player.power.update(dt, player)
 
             just_started_falling = not was_falling_before and player.is_falling()
             rescued = False
@@ -231,6 +242,14 @@ class GameManager:
             # Check if player fell off screen
             if player.position.y > WINDOW_SIZE[1] + 100:
                 self._eliminate_player(player, "fell off")
+
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            if player.power:
+                player.power.apply_to_game(self)
+
+        self.orb_manager.update(dt, self.walkable_bounds, self.players, self)
 
         # Update player count in HUD
         alive_count = len(self.players) - len(self.eliminated_players)
@@ -267,12 +286,22 @@ class GameManager:
         # Draw walkable debug overlay
         self._draw_walkable_debug()
 
+        # Draw orbs floating above the arena
+        self.orb_manager.draw(self.screen)
+
         # Draw players in front of map
         for player in players_front:
             player.draw(self.screen)
 
         # Draw hazards
         self.hazard_manager.draw(self.screen)
+
+        # Draw active power visuals
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            if player.power:
+                player.power.draw(self.screen, player)
 
         # Draw HUD
         self.hud.draw(self.screen, is_muted=self.audio.is_muted)
@@ -376,6 +405,7 @@ class GameManager:
         target = self._find_valid_fallback(ai_player, occupied, origin)
         self._apply_spawn_position(ai_player, target)
         self.players.append(ai_player)
+        self._configure_power_for_player(ai_player, len(self.players) - 1)
         self._pending_ai_spawn = False
         self._align_ai_spawn_with_human()
         if not initial:
@@ -429,12 +459,27 @@ class GameManager:
 
     def _eliminate_player(self, player, reason: str):
         """Mark a player as eliminated."""
+        if self._can_block_elimination(player, reason):
+            return
         if player not in self.eliminated_players:
             self.eliminated_players.append(player)
             print(f"Player eliminated: {reason}")
             # Trigger death state if available
             if hasattr(player, 'die'):
                 player.die()
+
+    def _can_block_elimination(self, player, reason: str) -> bool:
+        hazard_reasons = {"hit by hazard", "fell off"}
+        if reason in hazard_reasons and hasattr(player, "has_active_shield"):
+            if player.has_active_shield():
+                return True
+        if reason == "hit by hazard" and getattr(player, "_immune_to_hazards", False):
+            return True
+        if reason == "hit by hazard" and getattr(player, "power", None):
+            on_hit = getattr(player.power, "on_hazard_hit", None)
+            if callable(on_hit) and on_hit():
+                return True
+        return False
 
     def _trigger_game_over(self):
         """Trigger game over state."""
@@ -457,14 +502,18 @@ class GameManager:
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
+        self.orb_manager.reset()
         self.hud.reset()
         self._spawn_adjusted = False
         self._time_since_start = 0.0
 
         for player in self.players:
             player.reset()
+            if player.power:
+                player.power.reset()
 
         self._ensure_players_on_walkable_surface()
+        self._configure_powers_for_players()
         self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
 
     def _draw_tmx_map_with_tiles(self):
@@ -493,6 +542,28 @@ class GameManager:
             )
 
         self.screen.blit(self.walkable_debug_surface, (0, 0))
+
+    def _configure_powers_for_players(self):
+        for idx, player in enumerate(self.players):
+            self._configure_power_for_player(player, idx)
+
+    def _configure_power_for_player(self, player, slot_index: int):
+        if getattr(player, "power", None):
+            return
+        character = getattr(player, "character_name", None)
+        power = get_power_for_character(character)
+        key = None
+        if not getattr(player, "is_ai", False):
+            key = power_key_for_player(slot_index)
+        player.attach_power(power, key)
+
+    def _handle_power_key(self, key: int):
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            if getattr(player, "power_key", None) == key:
+                if player.try_use_power():
+                    break
 
     def _initial_spawns(self, slot_count: int) -> list[tuple[int, int]]:
         # Hardcoded grid positions on the platform (10x6 platform at x=7, y=9)

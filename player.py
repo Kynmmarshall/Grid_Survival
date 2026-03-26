@@ -22,6 +22,8 @@ from settings import (
     PLAYER_MAX_FALL_SPEED,
     SOUND_PLAYER_JUMP,
     WINDOW_SIZE,
+    POWER_ORBS_REQUIRED,
+    ORB_SHIELD_WARNING,
 )
 
 
@@ -68,6 +70,20 @@ class Player:
             'jump': pygame.K_SPACE
         }
         self.audio = get_audio()
+        self.power = None
+        self.power_key = None
+        self.power_orb_charges = 0
+        self.passive_speed_multiplier = 1.0
+        self.passive_jump_multiplier = 1.0
+        self._power_speed_boost = 1.0
+        self._power_jump_boost = 1.0
+        self._orb_speed_boost = 1.0
+        self._shield_timer = 0.0
+        self._shield_warning_threshold = ORB_SHIELD_WARNING
+        self._freeze_timer = 0.0
+        self._status_flash_timer = 0.0
+        self._immune_to_hazards = False
+        self._power_alpha = 255
 
     def _load_animations(self):
         animations = {}
@@ -83,6 +99,53 @@ class Player:
                     loop=loop,
                 )
         return animations
+
+    def attach_power(self, power, key: int | None):
+        self.power = power
+        self.power_key = key
+        if power:
+            self.passive_speed_multiplier = getattr(power, "speed_multiplier", 1.0) or 1.0
+            self.passive_jump_multiplier = getattr(power, "jump_multiplier", 1.0) or 1.0
+        else:
+            self.passive_speed_multiplier = 1.0
+            self.passive_jump_multiplier = 1.0
+
+    def add_power_orb_charge(self, amount: int = 1) -> int:
+        self.power_orb_charges = min(POWER_ORBS_REQUIRED, self.power_orb_charges + amount)
+        return self.power_orb_charges
+
+    def try_use_power(self) -> bool:
+        if not self.power or self.power_orb_charges < POWER_ORBS_REQUIRED:
+            return False
+        if self.power.try_activate(self):
+            self.power_orb_charges -= POWER_ORBS_REQUIRED
+            return True
+        return False
+
+    def add_shield(self, duration: float):
+        self._shield_timer = max(duration, self._shield_timer)
+
+    def has_active_shield(self) -> bool:
+        return self._shield_timer > 0
+
+    def apply_freeze(self, duration: float):
+        self._freeze_timer = duration
+
+    def is_frozen(self) -> bool:
+        return self._freeze_timer > 0
+
+    def _speed_multiplier(self) -> float:
+        return self.passive_speed_multiplier * self._power_speed_boost * self._orb_speed_boost
+
+    def _jump_multiplier(self) -> float:
+        return self.passive_jump_multiplier * self._power_jump_boost
+
+    def _tick_status_effects(self, dt: float):
+        if self._shield_timer > 0:
+            self._shield_timer = max(0.0, self._shield_timer - dt)
+        if self._freeze_timer > 0:
+            self._freeze_timer = max(0.0, self._freeze_timer - dt)
+        self._status_flash_timer += dt
 
     def _set_state(self, state: str, direction: str):
         if self.state == state and self.facing == direction:
@@ -146,9 +209,13 @@ class Player:
         return self.rect.inflate(shrink_x, shrink_y)
 
     def update(self, dt: float, keys, walkable_mask, walkable_bounds):
+        self._tick_status_effects(dt)
         move_vector = self._input_vector(keys)
-        # ... (rest is handled inside _update_with_move_vector)
-        self._update_with_move_vector(dt, move_vector, walkable_mask, walkable_bounds, self._check_jump_input(keys))
+        jump_pressed = self._check_jump_input(keys)
+        if self.is_frozen():
+            move_vector = pygame.Vector2(0, 0)
+            jump_pressed = False
+        self._update_with_move_vector(dt, move_vector, walkable_mask, walkable_bounds, jump_pressed)
 
     def _update_with_move_vector(
         self,
@@ -161,6 +228,8 @@ class Player:
         if self.state == "death":
             self._update_death(dt)
             return
+
+        current_speed = self.speed * self._speed_multiplier()
 
         if self.falling:
             self._update_fall(dt)
@@ -187,7 +256,7 @@ class Player:
         # Initiate jump
         if jump_pressed and self.on_ground:
             self.jumping = True
-            self.z_velocity = PLAYER_JUMP_VELOCITY
+            self.z_velocity = PLAYER_JUMP_VELOCITY * self._jump_multiplier()
             self.on_ground = False
             if self.audio:
                 self.audio.play_sfx(SOUND_PLAYER_JUMP, volume=0.65)
@@ -201,8 +270,8 @@ class Player:
         left_playable = False
         if move_vector.length_squared() > 0:
             move_vector = move_vector.normalize()
-            displacement = move_vector * self.speed * dt
-            self.velocity = move_vector * self.speed
+            displacement = move_vector * current_speed * dt
+            self.velocity = move_vector * current_speed
             left_playable = not self._attempt_move(displacement, walkable_mask)
             self._set_state("run", desired_facing)
         else:
@@ -284,7 +353,18 @@ class Player:
         # Apply Z-offset to draw position
         draw_rect = self.rect.copy()
         draw_rect.y -= round(self.z)
-        surface.blit(self.current_animation.image, draw_rect.topleft)
+        frame = self.current_animation.image
+        if self._power_alpha != 255:
+            frame = frame.copy()
+            frame.set_alpha(self._power_alpha)
+        surface.blit(frame, draw_rect.topleft)
+
+        if self._shield_timer > 0:
+            self._draw_shield_overlay(surface, draw_rect)
+        if self.is_frozen():
+            self._draw_freeze_overlay(surface, draw_rect)
+        if self.power_orb_charges > 0:
+            self._draw_power_orb_icons(surface)
 
         if DEBUG_VISUALS_ENABLED and DEBUG_DRAW_PLAYER_FOOTBOX:
             feet_rect = self._feet_rect(self.position)
@@ -324,6 +404,15 @@ class Player:
         self.z = 0.0
         self.z_velocity = 0.0
         self.on_ground = True
+        self.power_orb_charges = 0
+        self._shield_timer = 0.0
+        self._freeze_timer = 0.0
+        self._orb_speed_boost = 1.0
+        self._power_speed_boost = 1.0
+        self._power_jump_boost = 1.0
+        self._status_flash_timer = 0.0
+        self._immune_to_hazards = False
+        self._power_alpha = 255
         self._refresh_collision_shape(force=True)
 
     def _feet_mask_for_rect(self, rect: pygame.Rect) -> pygame.mask.Mask:
@@ -380,7 +469,7 @@ class Player:
         # 3. Handle Horizontal Movement (Air Control)
         if move_vector.length_squared() > 0:
             move_vector = move_vector.normalize()
-            displacement = move_vector * self.speed * dt
+            displacement = move_vector * (self.speed * self._speed_multiplier()) * dt
             
             # Update facing direction visually
             self.facing = self._determine_facing(move_vector)
@@ -462,3 +551,32 @@ class Player:
         if self.position.y > max_center_y:
             self.position.y = max_center_y
             self.velocity.y = 0.0
+
+    def _draw_shield_overlay(self, surface: pygame.Surface, draw_rect: pygame.Rect):
+        radius = max(draw_rect.width, draw_rect.height) // 2 + 8
+        warn = self._shield_timer <= self._shield_warning_threshold
+        pulse = (int(self._status_flash_timer * 8) % 2 == 0)
+        alpha = 140 if not warn else (70 if pulse else 160)
+        color = (70, 200, 255) if not warn else (255, 200, 110)
+        shield_surf = pygame.Surface((radius * 2 + 4, radius * 2 + 4), pygame.SRCALPHA)
+        pygame.draw.circle(shield_surf, (*color, alpha), (radius + 2, radius + 2), radius, 4)
+        surface.blit(shield_surf, (draw_rect.centerx - radius - 2, draw_rect.centery - radius - 2))
+
+    def _draw_freeze_overlay(self, surface: pygame.Surface, draw_rect: pygame.Rect):
+        frost = pygame.Surface(draw_rect.size, pygame.SRCALPHA)
+        alpha = 90 if int(self._status_flash_timer * 5) % 2 == 0 else 130
+        frost.fill((150, 200, 255, alpha))
+        surface.blit(frost, draw_rect.topleft)
+
+    def _draw_power_orb_icons(self, surface: pygame.Surface):
+        spacing = 14
+        total = POWER_ORBS_REQUIRED
+        start_x = self.rect.centerx - ((total - 1) * spacing) / 2
+        y = self.rect.top - 14
+        for idx in range(total):
+            cx = int(start_x + idx * spacing)
+            cy = int(y)
+            filled = idx < self.power_orb_charges
+            color = (200, 80, 255) if filled else (90, 60, 120)
+            pygame.draw.circle(surface, color, (cx, cy), 4)
+            pygame.draw.circle(surface, (255, 255, 255), (cx, cy), 4, 1)

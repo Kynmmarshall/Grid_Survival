@@ -23,7 +23,13 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from settings import WINDOW_SIZE
+from settings import (
+    WINDOW_SIZE,
+    ORB_LIFETIME,
+    ORB_SHIELD_DURATION,
+    ORB_FREEZE_DURATION,
+    POWER_ORBS_REQUIRED,
+)
 
 W, H = WINDOW_SIZE
 
@@ -72,6 +78,7 @@ class MagicOrb:
         self._spin_angle = 0.0
         self._alpha = 0           # fades in from 0 → 255
         self._collect_flash = 0.0  # >0 → play collect flash animation
+        self._lifetime = ORB_LIFETIME
 
         color, label, glow = _ORB_VISUALS[orb_type]
         self.color = color
@@ -84,6 +91,12 @@ class MagicOrb:
         self._alpha = min(255, int(self._age / 0.4 * 255))   # 0.4s fade-in
         if self._collect_flash > 0:
             self._collect_flash -= dt
+        self._lifetime -= dt
+        if self._lifetime <= 0:
+            self.active = False
+        elif self._lifetime <= 2.0:
+            fade = max(0.0, self._lifetime / 2.0)
+            self._alpha = int(self._alpha * fade)
 
     def get_draw_y(self) -> float:
         """Bobbing Y position."""
@@ -160,23 +173,18 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
         return "SPEED BOOST  +50%"
 
     elif orb_type == OrbType.SHIELD:
-        # One-hit shield — same flag as robot armour
-        collector._orb_shield = True
-        return "SHIELD  next hit blocked"
+        collector.add_shield(ORB_SHIELD_DURATION)
+        return f"SHIELD {int(ORB_SHIELD_DURATION)}s of protection"
 
     elif orb_type == OrbType.FREEZE:
-        # Freeze tiles and hazards for 3 s — reuse wizard logic
-        game._orb_freeze_timer = 3.0
-        return "FREEZE  tiles & hazards frozen"
+        collector.apply_freeze(ORB_FREEZE_DURATION)
+        return f"FREEZE can't move for {int(ORB_FREEZE_DURATION)}s"
 
     elif orb_type == OrbType.POWER:
-        # Instantly recharge all powers
-        if hasattr(collector, 'powers'):
-            for pw in collector.powers:
-                pw.cooldown_remaining = 0.0
-        elif hasattr(collector, 'power'):
-            collector.power.cooldown_remaining = 0.0
-        return "POWER  all abilities recharged"
+        if hasattr(collector, 'add_power_orb_charge'):
+            charges = collector.add_power_orb_charge()
+            return f"POWER CHARGE {charges}/{POWER_ORBS_REQUIRED}"
+        return "POWER CHARGE"
 
     elif orb_type == OrbType.BOMB:
         # Smash every WARNING tile immediately
@@ -269,12 +277,6 @@ class OrbManager:
                 if player._orb_speed_timer <= 0:
                     player._orb_speed_boost = 1.0
                     del player._orb_speed_timer
-
-        # Tick freeze
-        if hasattr(game, '_orb_freeze_timer'):
-            game._orb_freeze_timer -= dt
-            if game._orb_freeze_timer <= 0:
-                del game._orb_freeze_timer
 
         # Notification fade
         if self._notification_timer > 0:

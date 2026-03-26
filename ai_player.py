@@ -127,6 +127,19 @@ class AIPlayer(Player):
         self._last_escape_vector.update(0, 0)
 
     def update_ai(self, dt: float, walkable_mask, walkable_bounds):
+        self._tick_status_effects(dt)
+        if self.is_frozen():
+            self._current_direction.update(0, 0)
+            self._desired_direction.update(0, 0)
+            self._update_with_move_vector(
+                dt,
+                pygame.Vector2(0, 0),
+                walkable_mask,
+                walkable_bounds,
+                jump_pressed=False,
+            )
+            return
+
         self._decision_timer += dt
 
         emergency = self._emergency_vector(walkable_mask, walkable_bounds)
