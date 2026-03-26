@@ -8,6 +8,7 @@ MAP_PATH = ASSETS_DIR / "maps" / "level_1.tmx"
 BACKGROUND_PATH = ASSETS_DIR / "Background" / "background.jpg"
 
 CHARACTER_BASE = ASSETS_DIR / "Characters" / "Caveman"
+PLAYER_PORTRAIT_DIR = ASSETS_DIR / "Characters" / "portrait"
 
 WINDOW_SIZE = (1280, 720)
 WINDOW_TITLE = "GRID SURVIVAL"
@@ -138,6 +139,13 @@ ORB_SHIELD_DURATION = 20.0
 ORB_SHIELD_WARNING = 4.0
 ORB_FREEZE_DURATION = 10.0
 POWER_ORBS_REQUIRED = 1
+ORB_ICON_PATHS = {
+	"speed": str(ASSETS_DIR / "orbs" / "speed.png"),
+	"shield": str(ASSETS_DIR / "orbs" / "shield.png"),
+	"freeze": str(ASSETS_DIR / "orbs" / "freeze.png"),
+	"power": str(ASSETS_DIR / "orbs" / "power.png"),
+	"bomb": str(ASSETS_DIR / "orbs" / "bomb.png"),
+}
 
 # Opening scene audio
 MUSIC_PATH = ASSETS_DIR / "Audio"/ "Background" / "Grid survival 1.mp3"
