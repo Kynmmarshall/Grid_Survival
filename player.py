@@ -189,12 +189,6 @@ class Player:
     def is_frozen(self) -> bool:
         return self._freeze_timer > 0
 
-    def _speed_multiplier(self) -> float:
-        return self.passive_speed_multiplier * self._power_speed_boost * self._orb_speed_boost
-
-    def _jump_multiplier(self) -> float:
-        return self.passive_jump_multiplier * self._power_jump_boost
-
     def _tick_status_effects(self, dt: float):
         if self._shield_timer > 0:
             self._shield_timer = max(0.0, self._shield_timer - dt)
@@ -212,6 +206,19 @@ class Player:
             self._active_orb_indefinite = False
             self._active_orb_duration = 0.0
         self._status_flash_timer += dt
+
+    def _speed_multiplier(self) -> float:
+        """Combine all speed buffs into a single multiplier."""
+        base = self.passive_speed_multiplier or 1.0
+        power = self._power_speed_boost or 1.0
+        orb = self._orb_speed_boost or 1.0
+        return max(0.0, base * power * orb)
+
+    def _jump_multiplier(self) -> float:
+        """Combine jump buffs before applying jump velocity."""
+        base = self.passive_jump_multiplier or 1.0
+        power = self._power_jump_boost or 1.0
+        return max(0.0, base * power)
 
     def _set_state(self, state: str, direction: str):
         if self.state == state and self.facing == direction:
@@ -621,12 +628,12 @@ class Player:
 
     def _draw_shield_overlay(self, surface: pygame.Surface, draw_rect: pygame.Rect):
         warn = self._shield_timer <= self._shield_warning_threshold
-        base_color = (90, 220, 255) if not warn else (255, 210, 110)
+        base_color = (70, 200, 240) if not warn else (230, 180, 90)
         texture = _get_shield_effect_surface()
         if texture:
             max_dim = max(draw_rect.width, draw_rect.height)
-            pulse = 1.08 + 0.08 * math.sin(self._status_flash_timer * 4.0)
-            target = int((max_dim + 60) * pulse)
+            pulse = 0.98 + 0.02 * math.sin(self._status_flash_timer * 4.0)
+            target = int((max_dim + 20) * pulse)
             target = max(10, target)
             scaled = pygame.transform.smoothscale(texture, (target, target))
             angle = (self._status_flash_timer * 50.0) % 360
@@ -635,25 +642,15 @@ class Player:
             tint = pygame.Surface(effect.get_size(), pygame.SRCALPHA)
             tint.fill((*base_color, 255))
             effect.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-            if warn:
-                blink = 0.2 + 0.8 * (0.5 + 0.5 * math.sin(self._status_flash_timer * 16.0))
-            else:
-                blink = 0.8 + 0.2 * (0.5 + 0.5 * math.sin(self._status_flash_timer * 6.0))
-            alpha = int(120 + 120 * blink)
-            effect.set_alpha(max(40, min(255, alpha)))
+            alpha = 190 if not warn else 150
+            effect.set_alpha(alpha)
             effect_rect = effect.get_rect(center=draw_rect.center)
             surface.blit(effect, effect_rect)
-
-            glow_radius = max_dim + 30
-            glow_surface = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
-            pygame.draw.circle(glow_surface, (*base_color, 60), (glow_radius, glow_radius), glow_radius)
-            glow_surface = pygame.transform.rotozoom(glow_surface, 0, 1.0 + 0.04 * math.sin(self._status_flash_timer * 2.0))
-            surface.blit(glow_surface, glow_surface.get_rect(center=draw_rect.center), special_flags=pygame.BLEND_ADD)
             return
 
         radius = max(draw_rect.width, draw_rect.height) // 2 + 8
         pulse = (int(self._status_flash_timer * 8) % 2 == 0)
-        alpha = 140 if not warn else (70 if pulse else 160)
+        alpha = 40 if not warn else (20 if pulse else 70)
         shield_surf = pygame.Surface((radius * 2 + 4, radius * 2 + 4), pygame.SRCALPHA)
         pygame.draw.circle(shield_surf, (*base_color, alpha), (radius + 2, radius + 2), radius, 4)
         surface.blit(shield_surf, (draw_rect.centerx - radius - 2, draw_rect.centery - radius - 2))
