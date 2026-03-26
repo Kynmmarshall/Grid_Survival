@@ -69,7 +69,8 @@ class Player:
             'down': pygame.K_s,
             'left': pygame.K_a,
             'right': pygame.K_d,
-            'jump': pygame.K_SPACE
+            'jump': pygame.K_SPACE,
+            'power': pygame.K_q,
         }
         self.audio = get_audio()
         self.power = None

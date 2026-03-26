@@ -110,14 +110,16 @@ class GameManager:
                 'down': pygame.K_s,
                 'left': pygame.K_a,
                 'right': pygame.K_d,
-                'jump': pygame.K_SPACE
+                'jump': pygame.K_SPACE,
+                'power': pygame.K_q,
             }
             player2_controls = {
                 'up': pygame.K_UP,
                 'down': pygame.K_DOWN,
                 'left': pygame.K_LEFT,
                 'right': pygame.K_RIGHT,
-                'jump': pygame.K_RSHIFT
+                'jump': pygame.K_RSHIFT,
+                'power': pygame.K_SLASH,
             }
             player1_pos = next(spawn_positions, PLAYER_START_POS)
             player2_pos = next(spawn_positions, PLAYER_START_POS)
@@ -256,10 +258,8 @@ class GameManager:
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
 
         # Check game over condition — either everyone eliminated or no one remains on the platform.
-        if alive_count == 0:
-            self._trigger_game_over()
-        elif (self._time_since_start > self._spawn_rescue_window and
-              not self._any_player_on_platform()):
+        platform_empty = not self._any_player_on_platform()
+        if alive_count == 0 or platform_empty:
             self._trigger_game_over()
 
     def draw(self):
@@ -576,7 +576,11 @@ class GameManager:
         power = get_power_for_character(character)
         key = None
         if not getattr(player, "is_ai", False):
-            key = power_key_for_player(slot_index)
+            controls = getattr(player, "controls", None)
+            override = None
+            if isinstance(controls, dict):
+                override = controls.get('power')
+            key = override or power_key_for_player(slot_index)
         player.attach_power(power, key)
 
     def _handle_power_key(self, key: int):

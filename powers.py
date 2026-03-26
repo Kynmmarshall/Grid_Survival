@@ -387,18 +387,23 @@ class NinjaPower(CharacterPower):
     def _resolve_safe_landing(self, game, player):
         mask = getattr(game, "walkable_mask", None)
         hazards = getattr(game, "hazard_manager", None)
+        tiles = getattr(game, "tile_manager", None)
         radius = max(player.rect.width, player.rect.height) * 0.35
+
         for pos in self._candidate_landing_positions():
-            if mask is not None and not player._is_over_platform(pygame.Vector2(pos), mask):
+            if not self._position_has_solid_tile(pos, player, mask, tiles):
                 continue
-            if hazards and not hazards.is_position_safe(pos, radius):
+            if not self._position_is_hazard_free(pos, hazards, radius):
                 continue
             self._place_player(player, pos)
             self._pending_land_fix = False
             return
 
-        # Fallback: return to original position if no safe tile found
-        self._place_player(player, self._dash_start)
+        backup = self._find_backup_tile(game, radius)
+        if backup is not None:
+            self._place_player(player, backup)
+        else:
+            self._place_player(player, self._dash_start)
         self._pending_land_fix = False
 
     def _candidate_landing_positions(self):
@@ -413,6 +418,63 @@ class NinjaPower(CharacterPower):
             pos = pygame.Vector2(pos)
         player.position = pos
         player.rect.center = (round(pos.x), round(pos.y))
+
+    def _find_backup_tile(self, game, radius: float):
+        tile_manager = getattr(game, "tile_manager", None)
+        hazards = getattr(game, "hazard_manager", None)
+        if not tile_manager:
+            return None
+        from tile_system import TileState
+        best_pos = None
+        best_dist = float('inf')
+        for tile in tile_manager.tiles.values():
+            if tile.state in (TileState.CRUMBLING, TileState.DISAPPEARED):
+                continue
+            candidate = pygame.Vector2(tile._iso_center())
+            if not self._position_is_hazard_free(candidate, hazards, radius):
+                continue
+            dist = candidate.distance_to(self._dash_start)
+            if dist < best_dist:
+                best_dist = dist
+                best_pos = candidate
+        return best_pos
+
+    def _position_has_solid_tile(self, pos, player, mask, tile_manager) -> bool:
+        point = pygame.Vector2(pos)
+        mask_ok = True
+        if mask is not None:
+            mask_ok = player._is_over_platform(point, mask)
+            if not mask_ok:
+                return False
+        if not tile_manager:
+            return mask_ok
+        tile = self._tile_for_point(tile_manager, point)
+        if tile is None:
+            return mask_ok
+        from tile_system import TileState
+        return tile.state not in (TileState.CRUMBLING, TileState.DISAPPEARED)
+
+    def _tile_for_point(self, tile_manager, point: pygame.Vector2):
+        if not tile_manager:
+            return None
+        for tile in tile_manager.tiles.values():
+            if self._point_inside_tile(tile, point):
+                return tile
+        return None
+
+    def _point_inside_tile(self, tile, point: pygame.Vector2) -> bool:
+        cx, cy = tile._iso_center()
+        half_w = max(1.0, tile.tile_width / 2)
+        half_h = max(1.0, tile.tile_height / 2)
+        dx = abs(point.x - cx)
+        dy = abs(point.y - cy)
+        return (dx / half_w + dy / half_h) <= 1.0
+
+    def _position_is_hazard_free(self, pos, hazards, radius: float) -> bool:
+        if not hazards:
+            return True
+        vec = pygame.Vector2(pos)
+        return hazards.is_position_safe((vec.x, vec.y), radius)
 
     def _find_owner(self, game):
         for p in game.players:
