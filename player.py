@@ -1,3 +1,5 @@
+from typing import Optional
+
 import pygame
 
 from audio import get_audio
@@ -84,6 +86,10 @@ class Player:
         self._status_flash_timer = 0.0
         self._immune_to_hazards = False
         self._power_alpha = 255
+        self._active_orb_label: str | None = None
+        self._active_orb_timer = 0.0
+        self._active_orb_indefinite = False
+        self._active_orb_duration = 0.0
 
     def _load_animations(self):
         animations = {}
@@ -110,6 +116,33 @@ class Player:
             self.passive_speed_multiplier = 1.0
             self.passive_jump_multiplier = 1.0
 
+    def set_active_orb(self, label: str, duration: float | None = None):
+        self._active_orb_label = label
+        if duration is None:
+            self._active_orb_timer = 0.0
+            self._active_orb_indefinite = True
+            self._active_orb_duration = 0.0
+        else:
+            self._active_orb_timer = max(0.0, duration)
+            self._active_orb_indefinite = False
+            self._active_orb_duration = self._active_orb_timer
+
+    def clear_active_orb(self, label: str | None = None):
+        if label and self._active_orb_label != label:
+            return
+        self._active_orb_label = None
+        self._active_orb_timer = 0.0
+        self._active_orb_indefinite = False
+        self._active_orb_duration = 0.0
+
+    def get_active_orb_status(self) -> tuple[Optional[str], float, bool, float]:
+        return (
+            self._active_orb_label,
+            self._active_orb_timer,
+            self._active_orb_indefinite,
+            self._active_orb_duration,
+        )
+
     def add_power_orb_charge(self, amount: int = 1) -> int:
         self.power_orb_charges = min(POWER_ORBS_REQUIRED, self.power_orb_charges + amount)
         return self.power_orb_charges
@@ -119,6 +152,8 @@ class Player:
             return False
         if self.power.try_activate(self):
             self.power_orb_charges -= POWER_ORBS_REQUIRED
+            if self.power_orb_charges <= 0:
+                self.clear_active_orb("Power Charge")
             return True
         return False
 
@@ -145,6 +180,17 @@ class Player:
             self._shield_timer = max(0.0, self._shield_timer - dt)
         if self._freeze_timer > 0:
             self._freeze_timer = max(0.0, self._freeze_timer - dt)
+        if self._active_orb_label and not self._active_orb_indefinite:
+            if self._active_orb_timer > 0:
+                self._active_orb_timer = max(0.0, self._active_orb_timer - dt)
+                if self._active_orb_timer == 0:
+                    self._active_orb_label = None
+                    self._active_orb_duration = 0.0
+        if self._active_orb_label == "Power Charge" and self.power_orb_charges <= 0:
+            self._active_orb_label = None
+            self._active_orb_timer = 0.0
+            self._active_orb_indefinite = False
+            self._active_orb_duration = 0.0
         self._status_flash_timer += dt
 
     def _set_state(self, state: str, direction: str):
@@ -413,6 +459,7 @@ class Player:
         self._status_flash_timer = 0.0
         self._immune_to_hazards = False
         self._power_alpha = 255
+        self.clear_active_orb()
         self._refresh_collision_shape(force=True)
 
     def _feet_mask_for_rect(self, rect: pygame.Rect) -> pygame.mask.Mask:

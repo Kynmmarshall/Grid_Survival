@@ -31,7 +31,19 @@ from settings import (
     HUD_LABEL_COLOR_ALIVE,
     SCORE_ANIM_SCALE_UP_DURATION,
     SCORE_ANIM_SCALE_DOWN_DURATION,
+    POWER_ORBS_REQUIRED,
 )
+
+ORB_ICON_COLORS = {
+    "Speed Boost": (60, 230, 220),
+    "Shield": (255, 210, 50),
+    "Frozen": (90, 150, 255),
+    "Power Charge": (200, 80, 255),
+    "Bomb Detonation": (255, 90, 70),
+}
+CARD_TIMER_BG = (30, 30, 45)
+CARD_TIMER_FILL = (255, 200, 80)
+CARD_TIMER_BORDER = (55, 55, 70)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -90,6 +102,7 @@ class GameHUD:
         self._font_label = _load_font(FONT_PATH_HUD, FONT_SIZE_LABEL)
         self._font_value = _load_font(FONT_PATH_HUD, FONT_SIZE_VALUE, bold=True)
         self._font_large = _load_font(FONT_PATH_HUD, FONT_SIZE_LARGE, bold=True)
+        self._font_card_small = _load_font(FONT_PATH_HUD, max(10, FONT_SIZE_LABEL - 2))
 
         self.survival_time = 0.0
         self.score = 0
@@ -171,11 +184,12 @@ class GameHUD:
         remaining_in_minute = 60 - (self.survival_time % 60)
         return remaining_in_minute <= TIMER_WARNING_THRESHOLD
 
-    def draw(self, surface: pygame.Surface, is_muted: bool = False):
+    def draw(self, surface: pygame.Surface, players: List, is_muted: bool = False):
         """Draw HUD elements."""
         self._draw_score_panel(surface)
         self._draw_timer_panel(surface)
         self._draw_mute_button(surface, is_muted)
+        self._draw_player_cards(surface, players)
         if self.total_players > 1:
             self._draw_alive_panel(surface)
 
@@ -308,6 +322,177 @@ class GameHUD:
         vx = panel_rect.centerx - value_surf.get_width() // 2
         vy = ly + label_surf.get_height() + HUD_PANEL_PADDING_V
         surface.blit(value_surf, (vx, vy))
+
+    def _draw_player_cards(self, surface: pygame.Surface, players: List):
+        if not players:
+            return
+        active_players = [p for p in players if not getattr(p, '_eliminated', False)]
+        render_players = active_players or players
+        card_w, card_h = 260, 120
+        rects = self._player_card_rects(len(render_players), card_w, card_h)
+        palette = [
+            (255, 200, 0),
+            (80, 220, 255),
+            (255, 120, 140),
+            (140, 255, 160),
+        ]
+        for idx, player in enumerate(render_players):
+            if idx >= len(rects):
+                break
+            color = palette[idx % len(palette)]
+            self._draw_player_card(surface, rects[idx], player, idx, color)
+
+    def _player_card_rects(self, count: int, width: int, height: int) -> List[pygame.Rect]:
+        margin = 20
+        top_y = 160
+        bottom_y = WINDOW_SIZE[1] - height - margin
+        anchors = [
+            (margin, top_y),
+            (WINDOW_SIZE[0] - width - margin, top_y),
+            (margin, bottom_y),
+            (WINDOW_SIZE[0] - width - margin, bottom_y),
+        ]
+        rects: List[pygame.Rect] = []
+        if count <= len(anchors):
+            for idx in range(count):
+                x, y = anchors[idx]
+                rects.append(pygame.Rect(x, y, width, height))
+            return rects
+
+        columns = min(3, count)
+        spacing_x = (WINDOW_SIZE[0] - 2 * margin - width) / max(1, columns - 1)
+        rows = math.ceil(count / columns)
+        positions_y = [top_y, bottom_y]
+        for row in range(rows):
+            y = positions_y[row % len(positions_y)] if rows > 1 else top_y
+            for col in range(columns):
+                idx = row * columns + col
+                if idx >= count:
+                    break
+                x = int(margin + col * spacing_x)
+                rects.append(pygame.Rect(x, y, width, height))
+        return rects
+
+    def _draw_player_card(self, surface: pygame.Surface, rect: pygame.Rect,
+                           player, index: int, border_color: tuple):
+        if player is None:
+            return
+        _draw_panel(surface, rect, HUD_PANEL_BG, border_color,
+                    HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
+
+        portrait = self._headshot_surface(player, 70, border_color)
+        portrait_rect = portrait.get_rect()
+        portrait_rect.topleft = (rect.left + 14, rect.top + 12)
+        surface.blit(portrait, portrait_rect)
+
+        text_x = portrait_rect.right + 12
+        text_y = rect.top + 12
+        label = self._font_card_small.render(f"P{index + 1}", True, border_color)
+        surface.blit(label, (text_x, text_y))
+        name = getattr(player, "character_name", "Unknown")
+        name_surf = self._font_card_small.render(name, True, HUD_VALUE_COLOR)
+        surface.blit(name_surf, (text_x + label.get_width() + 8, text_y))
+
+        icon_y = rect.top + 56
+        power_color = getattr(getattr(player, "power", None), "COLOR", border_color)
+        self._draw_power_icon(surface, (text_x + 18, icon_y), power_color)
+
+        charges = getattr(player, "power_orb_charges", 0)
+        self._draw_charge_pips(surface, (text_x + 68, icon_y), charges, border_color)
+
+        orb_label = None
+        orb_timer = 0.0
+        orb_infinite = False
+        orb_duration = 0.0
+        if hasattr(player, "get_active_orb_status"):
+            status = player.get_active_orb_status()
+            if status:
+                orb_label, orb_timer, orb_infinite, orb_duration = status
+        orb_color = self._orb_color_for_label(orb_label)
+        self._draw_orb_icon(surface, (text_x + 130, icon_y), orb_color, bool(orb_label))
+
+        self._draw_orb_timer_line(surface, rect, orb_color, orb_label,
+                                  orb_timer, orb_infinite, orb_duration)
+
+    def _headshot_surface(self, player, size: int, border_color: tuple) -> pygame.Surface:
+        portrait = pygame.Surface((size, size), pygame.SRCALPHA)
+        frame = getattr(getattr(player, "current_animation", None), "image", None)
+        if frame:
+            crop_height = max(1, int(frame.get_height() * 0.45))
+            head_rect = pygame.Rect(0, 0, frame.get_width(), crop_height)
+            head = frame.subsurface(head_rect).copy()
+            head = pygame.transform.smoothscale(head, (size, size))
+        else:
+            head = pygame.Surface((size, size), pygame.SRCALPHA)
+        mask = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(mask, (255, 255, 255, 255), (size // 2, size // 2), size // 2)
+        head.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        portrait.blit(head, (0, 0))
+        pygame.draw.circle(portrait, border_color, (size // 2, size // 2), size // 2, 2)
+        return portrait
+
+    def _draw_power_icon(self, surface: pygame.Surface, center: tuple[int, int], color: tuple):
+        radius = 14
+        icon = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        cx = cy = radius
+        points = [
+            (cx, cy - radius),
+            (cx + radius, cy),
+            (cx, cy + radius),
+            (cx - radius, cy),
+        ]
+        pygame.draw.polygon(icon, color, points)
+        pygame.draw.polygon(icon, (255, 255, 255, 120), points, 2)
+        surface.blit(icon, icon.get_rect(center=center))
+
+    def _draw_charge_pips(self, surface: pygame.Surface, origin: tuple[int, int],
+                          charges: int, accent_color: tuple):
+        required = max(1, POWER_ORBS_REQUIRED)
+        radius = 6
+        spacing = radius * 2 + 6
+        start_x = origin[0]
+        y = origin[1]
+        for idx in range(required):
+            cx = start_x + idx * spacing
+            filled = idx < charges
+            color = accent_color if filled else (80, 80, 90)
+            pygame.draw.circle(surface, color, (cx, y), radius)
+            pygame.draw.circle(surface, (255, 255, 255, 60), (cx, y), radius, 1)
+
+    def _orb_color_for_label(self, label: Optional[str]) -> tuple:
+        if not label:
+            return (110, 110, 130)
+        return ORB_ICON_COLORS.get(label, (200, 200, 220))
+
+    def _draw_orb_icon(self, surface: pygame.Surface, center: tuple[int, int],
+                       color: tuple, active: bool):
+        radius = 14
+        orb = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        fill_color = color if active else (55, 55, 70)
+        pygame.draw.circle(orb, fill_color, (radius, radius), radius)
+        pygame.draw.circle(orb, (255, 255, 255, 90), (radius - 4, radius - 6), radius // 2)
+        pygame.draw.circle(orb, (255, 255, 255, 140), (radius, radius), radius, 2)
+        surface.blit(orb, orb.get_rect(center=center))
+
+    def _draw_orb_timer_line(self, surface: pygame.Surface, rect: pygame.Rect,
+                              color: tuple, label: Optional[str], timer: float,
+                              indefinite: bool, duration: float):
+        line_rect = pygame.Rect(rect.left + 16, rect.bottom - 12, rect.width - 32, 6)
+        pygame.draw.rect(surface, CARD_TIMER_BORDER, line_rect, border_radius=3)
+        inner = line_rect.inflate(-2, -2)
+        pygame.draw.rect(surface, CARD_TIMER_BG, inner, border_radius=3)
+
+        if not label:
+            return
+        if indefinite or duration <= 0:
+            pygame.draw.rect(surface, color or CARD_TIMER_FILL, inner, border_radius=3)
+            return
+        if timer <= 0:
+            return
+        progress = max(0.0, min(1.0, timer / duration))
+        fill_width = max(2, int(inner.width * progress))
+        fill_rect = pygame.Rect(inner.left, inner.top, fill_width, inner.height)
+        pygame.draw.rect(surface, color or CARD_TIMER_FILL, fill_rect, border_radius=3)
 
     def reset(self):
         """Reset HUD state."""
