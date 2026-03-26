@@ -255,8 +255,11 @@ class GameManager:
         alive_count = len(self.players) - len(self.eliminated_players)
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
 
-        # Check game over condition
+        # Check game over condition — either everyone eliminated or no one remains on the platform.
         if alive_count == 0:
+            self._trigger_game_over()
+        elif (self._time_since_start > self._spawn_rescue_window and
+              not self._any_player_on_platform()):
             self._trigger_game_over()
 
     def draw(self):
@@ -467,6 +470,25 @@ class GameManager:
             # Trigger death state if available
             if hasattr(player, 'die'):
                 player.die()
+
+    def _any_player_on_platform(self) -> bool:
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            if self._player_on_platform(player):
+                return True
+        return False
+
+    def _player_on_platform(self, player) -> bool:
+        if player.is_falling() or player.is_drowning():
+            return False
+        mask = self.walkable_mask
+        if mask is None:
+            return True
+        try:
+            return player._is_over_platform(player.position, mask)
+        except AttributeError:
+            return False
 
     def _can_block_elimination(self, player, reason: str) -> bool:
         hazard_reasons = {"hit by hazard", "fell off"}

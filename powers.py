@@ -319,6 +319,9 @@ class NinjaPower(CharacterPower):
         self.speed_multiplier = 1.25
         self._invisible = False
         self._ghost_alpha = 255
+        self._dash_start = pygame.Vector2(0, 0)
+        self._dash_direction = pygame.Vector2(1, 0)
+        self._pending_land_fix = False
 
     def activate(self, player):
         self.active = True
@@ -335,11 +338,17 @@ class NinjaPower(CharacterPower):
             "up":    pygame.Vector2(0, -1),
         }.get(player.facing, pygame.Vector2(1, 0))
 
-        player.position += facing_vec * self.DASH_DISTANCE
+        if facing_vec.length_squared() == 0:
+            facing_vec = pygame.Vector2(1, 0)
+        self._dash_direction = facing_vec.normalize()
+        self._dash_start = player.position.copy()
+        player.position += self._dash_direction * self.DASH_DISTANCE
+        player.rect.center = (round(player.position.x), round(player.position.y))
+        self._pending_land_fix = True
 
         # Shadow-smoke trail particles at origin
-        cx = player.rect.centerx - int(facing_vec.x * self.DASH_DISTANCE)
-        cy = player.rect.centery - int(facing_vec.y * self.DASH_DISTANCE)
+        cx = int(round(self._dash_start.x))
+        cy = int(round(self._dash_start.y))
         self._particles += _burst(cx, cy, (40, 180, 200), count=18,
                                   speed_min=30, speed_max=140, lifetime=0.5)
         # Also at landing spot
@@ -365,12 +374,45 @@ class NinjaPower(CharacterPower):
             player._power_alpha = self._ghost_alpha
 
     def apply_to_game(self, game):
-        # While invisible, skip hazard collision for the owner
-        if not self._invisible:
-            return
         owner = self._find_owner(game)
-        if owner:
+        if not owner:
+            return
+
+        if self._pending_land_fix:
+            self._resolve_safe_landing(game, owner)
+
+        if self._invisible:
             owner._immune_to_hazards = True
+
+    def _resolve_safe_landing(self, game, player):
+        mask = getattr(game, "walkable_mask", None)
+        hazards = getattr(game, "hazard_manager", None)
+        radius = max(player.rect.width, player.rect.height) * 0.35
+        for pos in self._candidate_landing_positions():
+            if mask is not None and not player._is_over_platform(pygame.Vector2(pos), mask):
+                continue
+            if hazards and not hazards.is_position_safe(pos, radius):
+                continue
+            self._place_player(player, pos)
+            self._pending_land_fix = False
+            return
+
+        # Fallback: return to original position if no safe tile found
+        self._place_player(player, self._dash_start)
+        self._pending_land_fix = False
+
+    def _candidate_landing_positions(self):
+        direction = self._dash_direction
+        if direction.length_squared() == 0:
+            return [self._dash_start.copy()]
+        fractions = [1.0, 0.85, 0.7, 0.5, 0.35, 0.2, 0.0]
+        return [self._dash_start + direction * (self.DASH_DISTANCE * frac) for frac in fractions]
+
+    def _place_player(self, player, pos):
+        if not isinstance(pos, pygame.Vector2):
+            pos = pygame.Vector2(pos)
+        player.position = pos
+        player.rect.center = (round(pos.x), round(pos.y))
 
     def _find_owner(self, game):
         for p in game.players:

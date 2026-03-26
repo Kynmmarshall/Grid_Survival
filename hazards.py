@@ -340,6 +340,21 @@ class HazardManager:
         
         return hit
     
+    def is_position_safe(self, position, radius: float = 24) -> bool:
+        """Return True if no active hazard overlaps the given point."""
+        rect = pygame.Rect(0, 0, int(radius * 2), int(radius * 2))
+        rect.center = (int(position[0]), int(position[1]))
+
+        for bullet in self.bullets:
+            if bullet.active and rect.colliderect(bullet.get_rect()):
+                return False
+
+        for trap in self.traps:
+            if rect.colliderect(trap.get_rect()):
+                return False
+
+        return True
+
     def reset(self):
         """Reset all hazards."""
         self.bullets.clear()
