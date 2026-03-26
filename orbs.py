@@ -144,12 +144,18 @@ class MagicOrb:
         except Exception:
             pass
 
+    def _collision_rect(self) -> pygame.Rect:
+        diameter = self.COLLECT_RADIUS * 2
+        rect = pygame.Rect(0, 0, diameter, diameter)
+        rect.center = (round(self.position.x), round(self.position.y))
+        return rect
+
     def check_collection(self, player) -> bool:
-        """Return True if *player* is close enough to collect this orb."""
+        """Return True if the player's hitbox overlaps this orb."""
         if not self.active:
             return False
-        dist = self.position.distance_to(player.position)
-        return dist <= self.COLLECT_RADIUS
+        player_rect = player.get_hitbox() if hasattr(player, "get_hitbox") else player.rect
+        return player_rect.colliderect(self._collision_rect())
 
     def collect(self):
         """Mark as collected and trigger flash."""
@@ -289,21 +295,46 @@ class OrbManager:
                 walkable_bounds is not None):
             self._spawn_timer = 0.0
             self._next_spawn = self._roll_interval() * self._spawn_scale
-            self._try_spawn(walkable_bounds)
+            self._try_spawn(walkable_bounds, getattr(game, "tile_manager", None))
 
-    def _try_spawn(self, walkable_bounds: pygame.Rect):
-        """Spawn a new orb at a random position within walkable_bounds."""
-        padding = 40
-        x = self._rng.randint(
-            walkable_bounds.left + padding,
-            max(walkable_bounds.left + padding + 1, walkable_bounds.right - padding)
-        )
-        y = self._rng.randint(
-            walkable_bounds.top + padding,
-            max(walkable_bounds.top + padding + 1, walkable_bounds.bottom - padding)
-        )
+    def _try_spawn(self, walkable_bounds: pygame.Rect,
+                   tile_manager) -> None:
+        """Spawn a new orb on an intact tile, falling back to bounds if needed."""
+        spawn_pos = self._spawn_position_from_tiles(tile_manager)
+        if spawn_pos is None:
+            spawn_pos = self._spawn_position_from_bounds(walkable_bounds)
+        if spawn_pos is None:
+            return
         orb_type = self._rng.choice(self._TYPE_POOL)
-        self.orbs.append(MagicOrb(orb_type, (x, y)))
+        self.orbs.append(MagicOrb(orb_type, spawn_pos))
+
+    def _spawn_position_from_tiles(self, tile_manager) -> tuple[float, float] | None:
+        if not tile_manager:
+            return None
+        from tile_system import TileState
+        viable = [
+            tile for tile in tile_manager.tiles.values()
+            if tile.state not in (TileState.DISAPPEARED, TileState.CRUMBLING)
+        ]
+        if not viable:
+            return None
+        tile = self._rng.choice(viable)
+        cx, cy = tile._iso_center()
+        jitter_x = self._rng.uniform(-tile.tile_width * 0.25, tile.tile_width * 0.25)
+        jitter_y = self._rng.uniform(-tile.tile_height * 0.15, tile.tile_height * 0.05)
+        return (cx + jitter_x, cy + jitter_y)
+
+    def _spawn_position_from_bounds(self, walkable_bounds: pygame.Rect | None) -> tuple[float, float] | None:
+        if walkable_bounds is None:
+            return None
+        padding = 40
+        left = walkable_bounds.left + padding
+        right = max(left + 1, walkable_bounds.right - padding)
+        top = walkable_bounds.top + padding
+        bottom = max(top + 1, walkable_bounds.bottom - padding)
+        x = float(self._rng.randint(left, right))
+        y = float(self._rng.randint(top, bottom))
+        return (x, y)
 
     def draw(self, surface: pygame.Surface):
         for orb in self.orbs:
