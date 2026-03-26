@@ -146,6 +146,7 @@ ORB_ICON_PATHS = {
 	"power": str(ASSETS_DIR / "orbs" / "power.png"),
 	"bomb": str(ASSETS_DIR / "orbs" / "bomb.png"),
 }
+SHIELD_EFFECT_PATH = ASSETS_DIR / "effects" / "shield.png"
 
 # Opening scene audio
 MUSIC_PATH = ASSETS_DIR / "Audio"/ "Background" / "Grid survival 1.mp3"

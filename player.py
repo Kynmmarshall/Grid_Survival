@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 import pygame
@@ -26,7 +27,25 @@ from settings import (
     WINDOW_SIZE,
     POWER_ORBS_REQUIRED,
     ORB_SHIELD_WARNING,
+    SHIELD_EFFECT_PATH,
 )
+
+
+_SHIELD_EFFECT_SURFACE: pygame.Surface | None = None
+
+
+def _get_shield_effect_surface() -> pygame.Surface | None:
+    global _SHIELD_EFFECT_SURFACE
+    if _SHIELD_EFFECT_SURFACE is not None:
+        return _SHIELD_EFFECT_SURFACE
+    if SHIELD_EFFECT_PATH and SHIELD_EFFECT_PATH.exists():
+        try:
+            _SHIELD_EFFECT_SURFACE = pygame.image.load(SHIELD_EFFECT_PATH.as_posix()).convert_alpha()
+        except Exception:
+            _SHIELD_EFFECT_SURFACE = None
+    else:
+        _SHIELD_EFFECT_SURFACE = None
+    return _SHIELD_EFFECT_SURFACE
 
 
 class Player:
@@ -601,13 +620,42 @@ class Player:
             self.velocity.y = 0.0
 
     def _draw_shield_overlay(self, surface: pygame.Surface, draw_rect: pygame.Rect):
-        radius = max(draw_rect.width, draw_rect.height) // 2 + 8
         warn = self._shield_timer <= self._shield_warning_threshold
+        base_color = (90, 220, 255) if not warn else (255, 210, 110)
+        texture = _get_shield_effect_surface()
+        if texture:
+            max_dim = max(draw_rect.width, draw_rect.height)
+            pulse = 1.08 + 0.08 * math.sin(self._status_flash_timer * 4.0)
+            target = int((max_dim + 60) * pulse)
+            target = max(10, target)
+            scaled = pygame.transform.smoothscale(texture, (target, target))
+            angle = (self._status_flash_timer * 50.0) % 360
+            rotated = pygame.transform.rotozoom(scaled, angle, 1.0)
+            effect = rotated.copy()
+            tint = pygame.Surface(effect.get_size(), pygame.SRCALPHA)
+            tint.fill((*base_color, 255))
+            effect.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            if warn:
+                blink = 0.2 + 0.8 * (0.5 + 0.5 * math.sin(self._status_flash_timer * 16.0))
+            else:
+                blink = 0.8 + 0.2 * (0.5 + 0.5 * math.sin(self._status_flash_timer * 6.0))
+            alpha = int(120 + 120 * blink)
+            effect.set_alpha(max(40, min(255, alpha)))
+            effect_rect = effect.get_rect(center=draw_rect.center)
+            surface.blit(effect, effect_rect)
+
+            glow_radius = max_dim + 30
+            glow_surface = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surface, (*base_color, 60), (glow_radius, glow_radius), glow_radius)
+            glow_surface = pygame.transform.rotozoom(glow_surface, 0, 1.0 + 0.04 * math.sin(self._status_flash_timer * 2.0))
+            surface.blit(glow_surface, glow_surface.get_rect(center=draw_rect.center), special_flags=pygame.BLEND_ADD)
+            return
+
+        radius = max(draw_rect.width, draw_rect.height) // 2 + 8
         pulse = (int(self._status_flash_timer * 8) % 2 == 0)
         alpha = 140 if not warn else (70 if pulse else 160)
-        color = (70, 200, 255) if not warn else (255, 200, 110)
         shield_surf = pygame.Surface((radius * 2 + 4, radius * 2 + 4), pygame.SRCALPHA)
-        pygame.draw.circle(shield_surf, (*color, alpha), (radius + 2, radius + 2), radius, 4)
+        pygame.draw.circle(shield_surf, (*base_color, alpha), (radius + 2, radius + 2), radius, 4)
         surface.blit(shield_surf, (draw_rect.centerx - radius - 2, draw_rect.centery - radius - 2))
 
     def _draw_freeze_overlay(self, surface: pygame.Surface, draw_rect: pygame.Rect):
