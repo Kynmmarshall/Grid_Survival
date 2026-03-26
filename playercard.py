@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Callable, List, Optional
 
 import pygame
@@ -258,7 +259,7 @@ class PlayerCardRenderer:
 
     def _portrait_image(self, player, size: int) -> pygame.Surface | None:
         name = getattr(player, "character_name", "").strip()
-        if not name or not PLAYER_PORTRAIT_DIR.exists():
+        if not name:
             return None
         key = (name.lower(), size)
         cached = self._portrait_cache.get(key)
@@ -277,6 +278,9 @@ class PlayerCardRenderer:
 
     def _resolve_portrait_path(self, name: str):
         base = name.strip()
+        directories = self._portrait_dirs()
+        if not directories:
+            return None
         variants = [
             base,
             base.replace(" ", "_"),
@@ -285,17 +289,33 @@ class PlayerCardRenderer:
             base.lower().replace(" ", "_"),
         ]
         seen = set()
-        for variant in variants:
-            variant = variant.strip()
-            if not variant:
-                continue
-            candidate = PLAYER_PORTRAIT_DIR / f"{variant}.png"
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            if candidate.exists():
-                return candidate
+        for directory in directories:
+            for variant in variants:
+                variant = variant.strip()
+                if not variant:
+                    continue
+                candidate = directory / f"{variant}.png"
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                if candidate.exists():
+                    return candidate
         return None
+
+    def _portrait_dirs(self) -> List[Path]:
+        dirs: List[Path] = []
+        primary = PLAYER_PORTRAIT_DIR
+        typo = primary.parent / "portait"
+        for directory in [primary, typo]:
+            if directory is None:
+                continue
+            try:
+                exists = directory.exists()
+            except Exception:
+                exists = False
+            if exists and directory not in dirs:
+                dirs.append(directory)
+        return dirs
 
     def _scale_square_surface(self, image: pygame.Surface, size: int) -> pygame.Surface:
         width, height = image.get_width(), image.get_height()
