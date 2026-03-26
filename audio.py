@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, Optional, Union
+import random
 
 import pygame
 
@@ -43,7 +44,7 @@ class AudioManager:
         restart: bool = True,
     ):
         self._ensure_mixer()
-        if not self._initialized:
+        if not self._initialized or self._is_muted:
             return
 
         music_path = self._resolve_music_path(track)
@@ -79,10 +80,12 @@ class AudioManager:
 
     def play_sfx(
         self,
-        identifier: Union[str, P or self._is_mutedath],
+        identifier: Union[str, Path],
         *,
         volume: float = 1.0,
         cache: bool = True,
+        volume_jitter: float = 0.0,
+        max_instances: Optional[int] = None,
     ):
         self._ensure_mixer()
         if not self._initialized:
@@ -99,9 +102,16 @@ class AudioManager:
                 sound = pygame.mixer.Sound(sound_path.as_posix())
                 if cache:
                     self._sfx_cache[sound_path] = sound
+            if max_instances is not None and max_instances > 0:
+                if sound.get_num_channels() >= max_instances:
+                    return
             channel = sound.play()
             if channel is not None:
-                channel.set_volume(self._clamp_volume(volume))
+                vol = volume
+                if volume_jitter > 0:
+                    jitter = random.uniform(-abs(volume_jitter), abs(volume_jitter))
+                    vol += jitter
+                channel.set_volume(self._clamp_volume(vol))
         except pygame.error as exc:
             print(f"[Audio] Failed to play SFX '{sound_path.name}': {exc}")
 

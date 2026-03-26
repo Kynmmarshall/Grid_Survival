@@ -176,19 +176,28 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
         # Temporary speed boost — store on player, game ticks it down
         collector._orb_speed_boost = 1.5
         collector._orb_speed_timer = 8.0
+        if hasattr(collector, "set_active_orb"):
+            collector.set_active_orb("Speed Boost", getattr(collector, "_orb_speed_timer", 8.0))
         return "SPEED BOOST  +50%"
 
     elif orb_type == OrbType.SHIELD:
         collector.add_shield(ORB_SHIELD_DURATION)
+        if hasattr(collector, "set_active_orb"):
+            remaining = getattr(collector, "_shield_timer", ORB_SHIELD_DURATION)
+            collector.set_active_orb("Shield", remaining)
         return f"SHIELD {int(ORB_SHIELD_DURATION)}s of protection"
 
     elif orb_type == OrbType.FREEZE:
         collector.apply_freeze(ORB_FREEZE_DURATION)
+        if hasattr(collector, "set_active_orb"):
+            collector.set_active_orb("Frozen", ORB_FREEZE_DURATION)
         return f"FREEZE can't move for {int(ORB_FREEZE_DURATION)}s"
 
     elif orb_type == OrbType.POWER:
         if hasattr(collector, 'add_power_orb_charge'):
             charges = collector.add_power_orb_charge()
+            if hasattr(collector, "set_active_orb"):
+                collector.set_active_orb("Power Charge", None)
             return f"POWER CHARGE {charges}/{POWER_ORBS_REQUIRED}"
         return "POWER CHARGE"
 
@@ -200,6 +209,8 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
             if tile.state == TileState.WARNING:
                 tile._start_crumble()
                 smashed += 1
+        if hasattr(collector, "set_active_orb"):
+            collector.set_active_orb("Bomb Detonation", 1.5)
         return f"BOMB  {smashed} tiles destroyed"
 
     return ""

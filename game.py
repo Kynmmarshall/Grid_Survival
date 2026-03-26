@@ -304,7 +304,7 @@ class GameManager:
                 player.power.draw(self.screen, player)
 
         # Draw HUD
-        self.hud.draw(self.screen, is_muted=self.audio.is_muted)
+        self.hud.draw(self.screen, self.players, is_muted=self.audio.is_muted)
 
         # Draw elimination screen if game over
         if self.elimination_screen:
