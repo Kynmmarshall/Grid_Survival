@@ -1,8 +1,11 @@
 import pygame
 from audio import get_audio
 from game import GameManager
+from network import NetworkHost, NetworkClient, get_local_ip
+from lan_prompts import prompt_host_or_join, prompt_ip_entry
+from host_waiting_screen import host_waiting_screen
 from scenes import ModeSelectionScreen, TitleScreen, PlayerSelectionScreen
-from settings import MODE_LOCAL_MULTIPLAYER, WINDOW_SIZE, WINDOW_TITLE
+from settings import MODE_LOCAL_MULTIPLAYER, MODE_ONLINE_MULTIPLAYER, WINDOW_SIZE, WINDOW_TITLE
 
 
 
@@ -28,7 +31,36 @@ def main():
                 # Back to title screen to edit the name or exit
                 break
 
-            num_players = 2 if game_mode == MODE_LOCAL_MULTIPLAYER else 1
+
+            if game_mode == MODE_ONLINE_MULTIPLAYER:
+                # LAN Multiplayer: prompt host/join
+                choice = prompt_host_or_join(screen, clock)
+                if choice is None:
+                    continue  # Back to mode selection
+                if choice == "host":
+                    network = NetworkHost()
+                    hosting = network.start_hosting()
+                    if not hosting:
+                        # Show error and return to mode selection
+                        continue
+                    host_ip = get_local_ip()
+                    # Show waiting/connected screen
+                    ok = host_waiting_screen(screen, clock, host_ip, network)
+                    if not ok:
+                        continue
+                else:
+                    ip = prompt_ip_entry(screen, clock)
+                    if not ip:
+                        continue
+                    network = NetworkClient()
+                    connected = network.connect_to_host(ip)
+                    if not connected:
+                        # Show error and return to mode selection
+                        continue
+                num_players = 2
+            else:
+                network = None
+                num_players = 2 if game_mode == MODE_LOCAL_MULTIPLAYER else 1
 
             while True:
                 char_select = PlayerSelectionScreen(
@@ -53,7 +85,8 @@ def main():
                     clock=clock,
                     player_name=player_name,
                     game_mode=game_mode,
-                    selected_characters=selected_characters
+                    selected_characters=selected_characters,
+                    network=network
                 ).run()
                 pygame.quit()
                 return

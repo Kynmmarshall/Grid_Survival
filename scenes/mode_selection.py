@@ -120,8 +120,8 @@ class ModeSelectionScreen:
             },
             {
                 "mode": MODE_ONLINE_MULTIPLAYER,
-                "title": "ONLINE MULTIPLAYER",
-                "desc": "Play with another player over LAN/Internet",
+                "title": "LAN MULTIPLAYER (HOST/JOIN)",
+                "desc": "Play with others on your local network (LAN)",
                 "key": "[3]",
                 "rect": pygame.Rect(0, start_y + (card_h + gap) * 2, card_w, card_h),
                 "hover_y": 0.0,

@@ -39,6 +39,7 @@ class GameManager:
         player_name: str = "Player",
         game_mode: str = MODE_VS_COMPUTER,
         selected_characters: list[str] | None = None,
+        network=None,
     ):
         if screen is None or clock is None:
             pygame.init()
@@ -49,6 +50,7 @@ class GameManager:
         self.player_name = player_name
         self.game_mode = game_mode
         self.selected_characters = selected_characters or []
+        self.network = network
         
         # Load assets
         self.background_surface = load_background_surface(WINDOW_SIZE)
@@ -199,6 +201,39 @@ class GameManager:
         self.hud.update(dt)
         for player in self.players:
             player._immune_to_hazards = False
+
+        # --- LAN Multiplayer Sync ---
+        if self.network:
+            # Assume 2 players: local is index 0, remote is index 1
+            from network import PlayerState
+            # Send local player state
+            local_player = self.players[0]
+            local_state = PlayerState(
+                x=local_player.position.x,
+                y=local_player.position.y,
+                facing=getattr(local_player, 'facing', 'down'),
+                state=getattr(local_player, 'state', 'idle'),
+                falling=getattr(local_player, 'falling', False),
+                drowning=getattr(local_player, 'drowning', False),
+                eliminated=local_player in self.eliminated_players,
+            )
+            self.network.send_player_state("0", local_state)
+            # Receive remote player state
+            messages = self.network.get_messages()
+            for msg in messages:
+                if msg.get('type') == 'player_state' and len(self.players) > 1:
+                    idx = 1 if msg['player_id'] == '1' else 0
+                    if idx < len(self.players):
+                        remote = self.players[idx]
+                        s = msg['state']
+                        remote.position.x = s['x']
+                        remote.position.y = s['y']
+                        remote.facing = s['facing']
+                        remote.state = s['state']
+                        remote.falling = s['falling']
+                        remote.drowning = s['drowning']
+                        if s['eliminated'] and remote not in self.eliminated_players:
+                            self.eliminated_players.append(remote)
 
         # Update players
         for player in self.players[:]:
