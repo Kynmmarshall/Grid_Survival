@@ -65,15 +65,48 @@ def prompt_host_or_join(screen, clock):
                         return "host" if i == 0 else "join"
 
 def prompt_ip_entry(screen, clock):
-    font = pygame.font.SysFont(None, 40)
+    width, height = WINDOW_SIZE
+    card_w, card_h = MODE_CARD_WIDTH, MODE_CARD_HEIGHT
+    font_title = _load_font(FONT_PATH_HEADING, 32, bold=True)
+    font_body = _load_font(FONT_PATH_BODY, 22)
+    font_small = _load_font(FONT_PATH_BODY, 18)
     input_str = ""
-    while True:
-        screen.fill((20, 20, 40))
-        prompt = font.render("Enter Host IP:", True, (255, 255, 255))
-        screen.blit(prompt, (screen.get_width() // 2 - prompt.get_width() // 2, 120))
-        input_surf = font.render(input_str + "_", True, (255, 255, 0))
-        screen.blit(input_surf, (screen.get_width() // 2 - input_surf.get_width() // 2, 200))
+    btn_w, btn_h = 160, 50
+    btn_gap = 20
+    card_rect = pygame.Rect(0, 0, card_w, card_h)
+    card_rect.center = (width // 2, height // 2)
+    btn_confirm = pygame.Rect(0, 0, btn_w, btn_h)
+    btn_back = pygame.Rect(0, 0, btn_w, btn_h)
+    btn_confirm.center = (width // 2 + btn_w // 2 + btn_gap // 2, card_rect.bottom + 40)
+    btn_back.center = (width // 2 - btn_w // 2 - btn_gap // 2, card_rect.bottom + 40)
+
+    def draw(show_cursor=True):
+        screen.fill((10, 14, 26))
+        _draw_rounded_rect(screen, card_rect, MODE_CARD_BASE_COLOR, MODE_CARD_BORDER_ONLINE_MP, 2, 18)
+        title = font_title.render("Enter Host IP", True, (255, 255, 255))
+        screen.blit(title, title.get_rect(center=(card_rect.centerx, card_rect.top + 28)))
+        prompt = font_small.render("Type the host machine's IP and press Enter", True, (200, 200, 200))
+        screen.blit(prompt, prompt.get_rect(center=(card_rect.centerx, card_rect.top + 60)))
+        ip_display = input_str + ("_" if show_cursor else "")
+        ip_surf = font_body.render(ip_display, True, (255, 220, 90))
+        screen.blit(ip_surf, ip_surf.get_rect(center=(card_rect.centerx, card_rect.centery + 6)))
+        # buttons
+        mouse_pos = pygame.mouse.get_pos()
+        for rect, label in ((btn_back, "Back"), (btn_confirm, "Connect")):
+            hovered = rect.collidepoint(mouse_pos)
+            bg = MODE_CARD_HOVER_COLOR if hovered else MODE_CARD_BASE_COLOR
+            border = MODE_CARD_HOVER_BORDER_ONLINE_MP if hovered else MODE_CARD_BORDER_ONLINE_MP
+            _draw_rounded_rect(screen, rect, bg, border, 2 if not hovered else 3, 14)
+            txt = font_body.render(label, True, border)
+            screen.blit(txt, txt.get_rect(center=rect.center))
         pygame.display.flip()
+
+    cursor_timer = 0.0
+    while True:
+        dt = clock.tick(60) / 1000.0
+        cursor_timer += dt
+        show_cursor = (int(cursor_timer * 2) % 2) == 0
+        draw(show_cursor)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -87,3 +120,26 @@ def prompt_ip_entry(screen, clock):
                     return None
                 elif event.unicode and (event.unicode.isdigit() or event.unicode == "."):
                     input_str += event.unicode
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if btn_confirm.collidepoint(event.pos) and input_str:
+                    return input_str
+                if btn_back.collidepoint(event.pos):
+                    return None
+
+
+def toast_message(screen, clock, message: str, color=(255, 120, 120), duration: float = 1.4):
+    font = pygame.font.SysFont(None, 32)
+    elapsed = 0.0
+    overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+    while elapsed < duration:
+        dt = clock.tick(60) / 1000.0
+        elapsed += dt
+        overlay.fill((0, 0, 0, 0))
+        text = font.render(message, True, color)
+        bg_rect = text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2))
+        bg_rect.inflate_ip(24, 16)
+        pygame.draw.rect(overlay, (20, 20, 30, 210), bg_rect, border_radius=10)
+        pygame.draw.rect(overlay, (color[0], color[1], color[2], 220), bg_rect, width=2, border_radius=10)
+        overlay.blit(text, text.get_rect(center=bg_rect.center))
+        screen.blit(overlay, (0, 0))
+        pygame.display.flip()

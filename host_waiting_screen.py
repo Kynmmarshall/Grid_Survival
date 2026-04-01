@@ -20,6 +20,8 @@ def host_waiting_screen(screen, clock, host_ip, network):
         screen.blit(title, (width // 2 - title.get_width() // 2, 120))
         info_surf = font_body.render(info, True, (180, 80, 255))
         screen.blit(info_surf, (width // 2 - info_surf.get_width() // 2, 200))
+        hint = font_small.render("Press ESC to cancel", True, (170, 170, 170))
+        screen.blit(hint, hint.get_rect(center=(width // 2, 240)))
         # Show connected devices (if any)
         if hasattr(network, 'socket') and network.socket:
             try:
@@ -30,11 +32,11 @@ def host_waiting_screen(screen, clock, host_ip, network):
         if connected:
             msg = f"Player connected: {client_addr[0]}"
             msg_surf = font_body.render(msg, True, (50, 220, 80))
-            screen.blit(msg_surf, (width // 2 - msg_surf.get_width() // 2, 270))
+            screen.blit(msg_surf, (width // 2 - msg_surf.get_width() // 2, 300))
         else:
             msg = "No players connected yet."
             msg_surf = font_small.render(msg, True, (200, 200, 200))
-            screen.blit(msg_surf, (width // 2 - msg_surf.get_width() // 2, 270))
+            screen.blit(msg_surf, (width // 2 - msg_surf.get_width() // 2, 300))
         pygame.display.flip()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
