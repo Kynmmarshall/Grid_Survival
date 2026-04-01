@@ -224,12 +224,25 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
         return f"BOMB  {smashed} tiles destroyed"
 
     elif orb_type == OrbType.LIFE:
-        # Grant a revive - player can survive one fall
-        if hasattr(collector, "add_life"):
-            collector.add_life()
+        # Grant a revive or extra life
+        is_eliminated = getattr(collector, '_eliminated', False)
+        if is_eliminated:
+            # Revive immediately if eliminated
+            if collector in game.eliminated_players:
+                game.eliminated_players.remove(collector)
+            collector._eliminated = False
+            game._rescue_player_to_safe_tile(collector)
             if hasattr(collector, "set_active_orb"):
-                collector.set_active_orb("Extra Life", None)
-            return "LIFE  Extra life granted!"
+                collector.set_active_orb("Revived", None)
+            print("Player revived by LIFE orb!")
+            return "LIFE  Revived!"
+        else:
+            # Grant extra life for future use
+            if hasattr(collector, "add_life"):
+                collector.add_life()
+                if hasattr(collector, "set_active_orb"):
+                    collector.set_active_orb("Extra Life", None)
+                return "LIFE  Extra life granted!"
         return "LIFE  Extra life granted!"
 
     return ""
