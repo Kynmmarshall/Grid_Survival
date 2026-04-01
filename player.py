@@ -169,10 +169,10 @@ class Player:
         self.power_orb_charges = min(POWER_ORBS_REQUIRED, self.power_orb_charges + amount)
         return self.power_orb_charges
 
-    def try_use_power(self) -> bool:
+    def try_use_power(self, game=None) -> bool:
         if not self.power or self.power_orb_charges < POWER_ORBS_REQUIRED:
             return False
-        if self.power.try_activate(self):
+        if self.power.try_activate(self, game):
             self.power_orb_charges -= POWER_ORBS_REQUIRED
             if self.power_orb_charges <= 0:
                 self.clear_active_orb("Power Charge")
@@ -296,6 +296,12 @@ class Player:
 
     def update(self, dt: float, keys, walkable_mask, walkable_bounds):
         self._tick_status_effects(dt)
+        if self.power and hasattr(self.power, "blocks_player_motion") and self.power.blocks_player_motion():
+            if hasattr(self.power, "update_target_cursor"):
+                self.power.update_target_cursor(dt, keys, self, walkable_mask, walkable_bounds)
+            self.velocity.update(0, 0)
+            self.rect.center = (round(self.position.x), round(self.position.y))
+            return
         move_vector = self._input_vector(keys)
         jump_pressed = self._check_jump_input(keys)
         if self.is_frozen():

@@ -315,6 +315,9 @@ class HazardManager:
     
     def check_player_collision(self, player) -> bool:
         """Check if any hazard hits the player."""
+        if getattr(player, "_immune_to_hazards", False):
+            return False
+
         hit = False
         
         for bullet in self.bullets:

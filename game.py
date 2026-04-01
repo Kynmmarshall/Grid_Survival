@@ -165,6 +165,8 @@ class GameManager:
                 if event.button == 1:  # Left click
                     if self.hud.mute_rect and self.hud.mute_rect.collidepoint(event.pos):
                         self.audio.toggle_mute()
+                    elif self._handle_ninja_target_click(event.pos):
+                        continue
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_l:
                     for player in self.players:
@@ -632,8 +634,24 @@ class GameManager:
             if player in self.eliminated_players:
                 continue
             if getattr(player, "power_key", None) == key:
-                if player.try_use_power():
+                power = getattr(player, "power", None)
+                if power and hasattr(power, "blocks_player_motion") and power.blocks_player_motion():
+                    confirm = getattr(power, "confirm_target_selection", None)
+                    if callable(confirm) and confirm(self):
+                        break
                     break
+                if player.try_use_power(self):
+                    break
+
+    def _handle_ninja_target_click(self, pos) -> bool:
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            power = getattr(player, "power", None)
+            handler = getattr(power, "handle_target_selection", None)
+            if callable(handler) and handler(self, pos):
+                return True
+        return False
 
     def _initial_spawns(self, slot_count: int) -> list[tuple[int, int]]:
         # Hardcoded grid positions on the platform (10x6 platform at x=7, y=9)

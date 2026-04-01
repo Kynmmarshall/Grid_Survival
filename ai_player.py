@@ -140,6 +140,13 @@ class AIPlayer(Player):
             )
             return
 
+        if self.power and hasattr(self.power, "blocks_player_motion") and self.power.blocks_player_motion():
+            self._current_direction.update(0, 0)
+            self._desired_direction.update(0, 0)
+            self.velocity.update(0, 0)
+            self.rect.center = (round(self.position.x), round(self.position.y))
+            return
+
         self._decision_timer += dt
 
         emergency = self._emergency_vector(walkable_mask, walkable_bounds)

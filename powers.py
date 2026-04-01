@@ -110,6 +110,10 @@ class CharacterPower:
     COLOR: tuple = (180, 180, 180)
     # Cooldown in seconds between activations
     COOLDOWN: float = 8.0
+    # Default activation knockback. Subclasses can override.
+    PUSH_ON_ACTIVATE: bool = False
+    PUSH_RADIUS: float = 160.0
+    PUSH_FORCE: float = 540.0
 
     def __init__(self):
         self.cooldown_remaining = 0.0
@@ -123,12 +127,14 @@ class CharacterPower:
 
     # ── public interface ───────────────────────────────────────────────────
 
-    def try_activate(self, player) -> bool:
+    def try_activate(self, player, game=None) -> bool:
         """Called when the power key is pressed.  Returns True if activated."""
         if self.cooldown_remaining > 0 or self.active:
             self._audio.play_sfx(SOUND_POWER_UNAVAILABLE, volume=0.4, max_instances=1)
             return False
         self.activate(player)
+        if game is not None and self.PUSH_ON_ACTIVATE:
+            self._push_nearby_players(game, player)
         return True
 
     def activate(self, player):
@@ -155,6 +161,9 @@ class CharacterPower:
     def _update_active(self, dt: float, player):
         """Override to tick the active effect."""
         pass
+
+    def blocks_player_motion(self) -> bool:
+        return False
 
     def apply_to_game(self, game):
         """Override to interact with GameManager each frame."""
@@ -199,6 +208,28 @@ class CharacterPower:
         self.active_timer = 0.0
         self._particles.clear()
 
+    def _push_nearby_players(self, game, owner, radius: float | None = None, force: float | None = None):
+        radius = self.PUSH_RADIUS if radius is None else radius
+        force = self.PUSH_FORCE if force is None else force
+        if game is None or radius <= 0 or force <= 0:
+            return
+
+        origin = pygame.Vector2(owner.position)
+        for other in getattr(game, "players", []):
+            if other is owner or other in getattr(game, "eliminated_players", []):
+                continue
+
+            offset = pygame.Vector2(other.position) - origin
+            distance = offset.length()
+            if distance <= 0 or distance > radius:
+                continue
+
+            push_scale = 1.0 - (distance / radius)
+            displacement = (offset / distance) * (force * push_scale * 0.016)
+            other.position += displacement
+            if hasattr(other, "rect"):
+                other.rect.center = (round(other.position.x), round(other.position.y))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Character powers
@@ -218,6 +249,7 @@ class CavemanPower(CharacterPower):
     SMASH_RADIUS = 180        # pixels — tiles within this range get smashed
     SHOCKWAVE_RADIUS = 220    # pixels — players within this range get pushed
     SHOCKWAVE_FORCE = 380     # pixels/s push velocity
+    PUSH_ON_ACTIVATE = False
 
     def __init__(self):
         super().__init__()
@@ -267,20 +299,7 @@ class CavemanPower(CharacterPower):
             if dist <= self.SMASH_RADIUS:
                 tile._start_crumble()
 
-        # Push other players
-        for player in game.players:
-            if player in game.eliminated_players:
-                continue
-            if not hasattr(player, 'power') or player.power is not self:
-                dx = player.position.x - cx
-                dy = player.position.y - cy
-                dist = math.hypot(dx, dy)
-                if 0 < dist <= self.SHOCKWAVE_RADIUS:
-                    scale = 1.0 - dist / self.SHOCKWAVE_RADIUS
-                    push_x = (dx / dist) * self.SHOCKWAVE_FORCE * scale
-                    push_y = (dy / dist) * self.SHOCKWAVE_FORCE * scale
-                    player.position.x += push_x * 0.016
-                    player.position.y += push_y * 0.016
+        self._push_nearby_players(game, owner, radius=self.SHOCKWAVE_RADIUS, force=self.SHOCKWAVE_FORCE)
 
     def _draw_active(self, surface: pygame.Surface, player):
         if not self._shockwave_active:
@@ -302,17 +321,17 @@ class CavemanPower(CharacterPower):
 
 class NinjaPower(CharacterPower):
     """
-    SHADOW DASH — Ninja blinks forward in their facing direction, becoming
-    briefly invisible and passing through hazards.
+    SHADOW DASH — Ninja disappears, then reappears where the player clicks.
     Passive: +25% movement speed.
     """
 
     NAME = "Shadow Dash"
-    DESCRIPTION = "Blink forward · Brief invisibility · Dodge hazards"
+    DESCRIPTION = "Disappear · Move with WASD/arrows · Confirm with power"
     COLOR = (80, 200, 220)
     COOLDOWN = 6.0
     DASH_DISTANCE = 200      # pixels
-    INVISIBLE_DURATION = 1.2  # seconds of ghosted state
+    TARGET_SELECT_TIMEOUT = 3.0
+    PUSH_ON_ACTIVATE = False
 
     def __init__(self):
         super().__init__()
@@ -322,13 +341,15 @@ class NinjaPower(CharacterPower):
         self._dash_start = pygame.Vector2(0, 0)
         self._dash_direction = pygame.Vector2(1, 0)
         self._pending_land_fix = False
+        self._target_pos: pygame.Vector2 | None = None
 
     def activate(self, player):
         self.active = True
         self.active_timer = 0.0
         self.cooldown_remaining = self.COOLDOWN
         self._invisible = True
-        self._ghost_alpha = 60
+        self._ghost_alpha = 0
+        self._pending_land_fix = True
         from settings import SOUND_POWER_NINJA_DASH
         self._audio.play_sfx(SOUND_POWER_NINJA_DASH, volume=0.75, volume_jitter=0.05, max_instances=1)
         facing_vec = {
@@ -342,36 +363,72 @@ class NinjaPower(CharacterPower):
             facing_vec = pygame.Vector2(1, 0)
         self._dash_direction = facing_vec.normalize()
         self._dash_start = player.position.copy()
-        player.position += self._dash_direction * self.DASH_DISTANCE
-        player.rect.center = (round(player.position.x), round(player.position.y))
-        self._pending_land_fix = True
+        self._target_pos = self._dash_start.copy()
+        player.velocity.update(0, 0)
+        player.falling = False
+        player.fall_velocity = 0.0
+        player.drowning = False
+        player.drown_animation_done = False
+        player.drown_surface_y = None
+        player.jumping = False
+        player.z = 0.0
+        player.z_velocity = 0.0
+        player.on_ground = True
+        player._power_alpha = 0
+        player._immune_to_hazards = True
+        if hasattr(player, "_set_state"):
+            player._set_state("idle", player.facing)
 
         # Shadow-smoke trail particles at origin
         cx = int(round(self._dash_start.x))
         cy = int(round(self._dash_start.y))
         self._particles += _burst(cx, cy, (40, 180, 200), count=18,
                                   speed_min=30, speed_max=140, lifetime=0.5)
-        # Also at landing spot
-        self._particles += _burst(player.rect.centerx, player.rect.centery,
-                                  (120, 230, 255), count=12,
-                                  speed_min=20, speed_max=100, lifetime=0.4)
 
     def _update_active(self, dt: float, player):
-        if self.active_timer > self.INVISIBLE_DURATION:
-            if self._invisible:   # fire sound exactly once on transition
-                from settings import SOUND_POWER_NINJA_END
-                self._audio.play_sfx(SOUND_POWER_NINJA_END, volume=0.55, max_instances=1)
-            self.active = False
-            self._invisible = False
-            self._ghost_alpha = 255
-            player._power_alpha = 255
-        else:
-            # Fade back in during second half of duration
-            fade_start = self.INVISIBLE_DURATION * 0.5
-            if self.active_timer > fade_start:
-                t = (self.active_timer - fade_start) / (self.INVISIBLE_DURATION - fade_start)
-                self._ghost_alpha = int(60 + 195 * t)
-            player._power_alpha = self._ghost_alpha
+        if self._pending_land_fix:
+            self._ghost_alpha = 0
+            player._power_alpha = 0
+            player._immune_to_hazards = True
+            return
+        player._power_alpha = 255
+        self._ghost_alpha = 255
+
+    def update_target_cursor(self, dt: float, keys, player, walkable_mask, walkable_bounds):
+        if not self._pending_land_fix:
+            return
+
+        move = pygame.Vector2(0, 0)
+        controls = getattr(player, "controls", {})
+        if keys[controls.get("left")]:
+            move.x -= 1
+        if keys[controls.get("right")]:
+            move.x += 1
+        if keys[controls.get("up")]:
+            move.y -= 1
+        if keys[controls.get("down")]:
+            move.y += 1
+
+        if move.length_squared() == 0:
+            return
+
+        if self._target_pos is None:
+            self._target_pos = self._dash_start.copy()
+
+        move = move.normalize()
+        target_speed = 280.0
+        self._target_pos += move * target_speed * dt
+
+        if walkable_bounds is not None:
+            self._target_pos.x = max(walkable_bounds.left, min(walkable_bounds.right, self._target_pos.x))
+            self._target_pos.y = max(walkable_bounds.top, min(walkable_bounds.bottom, self._target_pos.y))
+
+        offset = self._target_pos - self._dash_start
+        if offset.length() > self.DASH_DISTANCE:
+            self._target_pos = self._dash_start + offset.normalize() * self.DASH_DISTANCE
+
+    def blocks_player_motion(self) -> bool:
+        return self._pending_land_fix
 
     def apply_to_game(self, game):
         owner = self._find_owner(game)
@@ -379,10 +436,78 @@ class NinjaPower(CharacterPower):
             return
 
         if self._pending_land_fix:
-            self._resolve_safe_landing(game, owner)
-
-        if self._invisible:
             owner._immune_to_hazards = True
+            if self.active_timer >= self.TARGET_SELECT_TIMEOUT:
+                self._resolve_safe_landing(game, owner)
+                self._finalize_teleport(owner)
+
+    def handle_target_selection(self, game, position) -> bool:
+        self._target_pos = pygame.Vector2(position)
+        return self.confirm_target_selection(game)
+
+    def confirm_target_selection(self, game) -> bool:
+        owner = self._find_owner(game)
+        if owner is None or not self._pending_land_fix:
+            return False
+
+        target = self._target_pos if self._target_pos is not None else owner.position.copy()
+        target = self._resolve_selected_target(game, owner, target)
+        if target is None:
+            radius = max(owner.rect.width, owner.rect.height) * 0.35
+            target = self._find_backup_tile(game, radius) or self._dash_start.copy()
+
+        self._settle_player(owner, target)
+        self._finalize_teleport(owner)
+        return True
+
+    def _finalize_teleport(self, player):
+        self._pending_land_fix = False
+        self._invisible = False
+        self._ghost_alpha = 255
+        self._target_pos = None
+        self.active = False
+        player._power_alpha = 255
+        player._immune_to_hazards = False
+        self._particles += _burst(
+            player.rect.centerx,
+            player.rect.centery,
+            (120, 230, 255),
+            count=12,
+            speed_min=20,
+            speed_max=100,
+            lifetime=0.4,
+        )
+        from settings import SOUND_POWER_NINJA_END
+        self._audio.play_sfx(SOUND_POWER_NINJA_END, volume=0.55, max_instances=1)
+
+    def _resolve_selected_target(self, game, player, position):
+        mask = getattr(game, "walkable_mask", None)
+        hazards = getattr(game, "hazard_manager", None)
+        tiles = getattr(game, "tile_manager", None)
+        radius = max(player.rect.width, player.rect.height) * 0.35
+
+        target = pygame.Vector2(position)
+        offset = target - self._dash_start
+        if offset.length() > self.DASH_DISTANCE:
+            target = self._dash_start + offset.normalize() * self.DASH_DISTANCE
+
+        candidates = [target]
+        for search_radius in (12, 24, 36, 48, 64, 80, 100):
+            for angle_deg in range(0, 360, 30):
+                angle_rad = math.radians(angle_deg)
+                candidates.append(
+                    target + pygame.Vector2(math.cos(angle_rad), math.sin(angle_rad)) * search_radius
+                )
+
+        for candidate in candidates:
+            if not self._position_has_solid_tile(candidate, player, mask, tiles):
+                continue
+            if not self._position_is_hazard_free(candidate, hazards, radius):
+                continue
+            if self._position_overlaps_player(game, player, candidate):
+                continue
+            return candidate
+        return None
 
     def _resolve_safe_landing(self, game, player):
         mask = getattr(game, "walkable_mask", None)
@@ -396,7 +521,6 @@ class NinjaPower(CharacterPower):
             if not self._position_is_hazard_free(pos, hazards, radius):
                 continue
             self._place_player(player, pos)
-            self._pending_land_fix = False
             return
 
         backup = self._find_backup_tile(game, radius)
@@ -404,7 +528,6 @@ class NinjaPower(CharacterPower):
             self._place_player(player, backup)
         else:
             self._place_player(player, self._dash_start)
-        self._pending_land_fix = False
 
     def _candidate_landing_positions(self):
         direction = self._dash_direction
@@ -418,6 +541,22 @@ class NinjaPower(CharacterPower):
             pos = pygame.Vector2(pos)
         player.position = pos
         player.rect.center = (round(pos.x), round(pos.y))
+
+    def _settle_player(self, player, pos):
+        self._place_player(player, pos)
+        player.velocity.update(0, 0)
+        player.falling = False
+        player.fall_velocity = 0.0
+        player.drowning = False
+        player.drown_animation_done = False
+        player.drown_surface_y = None
+        player.jumping = False
+        player.z = 0.0
+        player.z_velocity = 0.0
+        player.on_ground = True
+        player._power_alpha = 255
+        if hasattr(player, "_set_state"):
+            player._set_state("idle", player.facing)
 
     def _find_backup_tile(self, game, radius: float):
         tile_manager = getattr(game, "tile_manager", None)
@@ -438,6 +577,18 @@ class NinjaPower(CharacterPower):
                 best_dist = dist
                 best_pos = candidate
         return best_pos
+
+    def _position_overlaps_player(self, game, player, pos) -> bool:
+        if game is None:
+            return False
+        candidate_rect = player.get_hitbox().copy()
+        candidate_rect.center = (round(pos.x), round(pos.y))
+        for other in getattr(game, "players", []):
+            if other is player or other in getattr(game, "eliminated_players", []):
+                continue
+            if candidate_rect.colliderect(other.get_hitbox()):
+                return True
+        return False
 
     def _position_has_solid_tile(self, pos, player, mask, tile_manager) -> bool:
         point = pygame.Vector2(pos)
@@ -476,6 +627,22 @@ class NinjaPower(CharacterPower):
         vec = pygame.Vector2(pos)
         return hazards.is_position_safe((vec.x, vec.y), radius)
 
+    def _draw_active(self, surface: pygame.Surface, player):
+        if not self._pending_land_fix:
+            return
+
+        target = self._target_pos if self._target_pos is not None else player.position
+        mouse_x, mouse_y = int(round(target.x)), int(round(target.y))
+        pulse = 0.5 + 0.5 * math.sin(self.active_timer * 8.0)
+        radius = 18 + int(4 * pulse)
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        color = (120, 240, 255)
+        pygame.draw.circle(overlay, (*color, 220), (mouse_x, mouse_y), radius, 2)
+        pygame.draw.line(overlay, (*color, 170), (mouse_x - radius, mouse_y), (mouse_x + radius, mouse_y), 1)
+        pygame.draw.line(overlay, (*color, 170), (mouse_x, mouse_y - radius), (mouse_x, mouse_y + radius), 1)
+        pygame.draw.line(overlay, (*color, 90), player.rect.center, (mouse_x, mouse_y), 1)
+        surface.blit(overlay, (0, 0))
+
     def _find_owner(self, game):
         for p in game.players:
             if hasattr(p, 'power') and p.power is self:
@@ -495,6 +662,7 @@ class WizardPower(CharacterPower):
     COLOR = (130, 80, 220)
     COOLDOWN = 14.0
     FREEZE_DURATION = 3.0
+    PUSH_ON_ACTIVATE = True
 
     def __init__(self):
         super().__init__()
@@ -567,6 +735,7 @@ class KnightPower(CharacterPower):
     COOLDOWN = 9.0
     BLOCK_DURATION = 2.0
     BASH_RANGE = 120         # pixels ahead for tile smash
+    PUSH_ON_ACTIVATE = True
 
     def __init__(self):
         super().__init__()
@@ -590,6 +759,8 @@ class KnightPower(CharacterPower):
     def _update_active(self, dt: float, player):
         if self.active_timer > self.BLOCK_DURATION:
             self.active = False
+        else:
+            player._immune_to_hazards = True
 
     def apply_to_game(self, game):
         owner = self._find_owner(game)
@@ -658,6 +829,7 @@ class RobotPower(CharacterPower):
     BOOST_DURATION = 2.5
     SPEED_BOOST = 2.0
     JUMP_BOOST = 1.4
+    PUSH_ON_ACTIVATE = True
 
     def __init__(self):
         super().__init__()
@@ -742,6 +914,7 @@ class SamuraiPower(CharacterPower):
     COOLDOWN = 10.0
     DEFLECT_RADIUS = 160
     STORM_DURATION = 1.5
+    PUSH_ON_ACTIVATE = True
 
     def __init__(self):
         super().__init__()
@@ -842,6 +1015,7 @@ class ArcherPower(CharacterPower):
     COOLDOWN = 7.0
     ARROW_SPEED = 500
     ARROW_LIFETIME = 1.5
+    PUSH_ON_ACTIVATE = True
 
     def __init__(self):
         super().__init__()
