@@ -442,9 +442,6 @@ def prompt_discovered_host(screen, clock):
 
 
 def prompt_ip_entry(screen, clock):
-<<<<<<< HEAD
-    return None
-=======
     width, height = WINDOW_SIZE
     card_w, card_h = MODE_CARD_WIDTH, MODE_CARD_HEIGHT
     font_title = _load_font(FONT_PATH_HEADING, 32, bold=True)
@@ -523,4 +520,3 @@ def toast_message(screen, clock, message: str, color=(255, 120, 120), duration: 
         overlay.blit(text, text.get_rect(center=bg_rect.center))
         screen.blit(overlay, (0, 0))
         pygame.display.flip()
->>>>>>> main
