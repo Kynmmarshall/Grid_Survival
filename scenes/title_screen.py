@@ -275,7 +275,68 @@ class TitleScreen:
             warn_surf.set_alpha(warn_alpha)
             self.screen.blit(warn_surf, warn_surf.get_rect(center=(self.width // 2, 490)))
 
+        self._draw_controls_panel()
         self._draw_back_button()
+
+    def _draw_controls_panel(self) -> None:
+        panel_w = 420
+        panel_h = 156
+        panel_rect = pygame.Rect(self.width - panel_w - 24, self.height - panel_h - 44, panel_w, panel_h)
+        bg_color = (16, 20, 34, 232)
+        border_color = (120, 150, 200)
+        _draw_rounded_rect(self.screen, panel_rect, bg_color, border_color, 2, 16)
+
+        title_surf = self._font_body.render("CONTROLS", True, (245, 245, 255))
+        title_rect = title_surf.get_rect(centerx=panel_rect.centerx, top=panel_rect.top + 10)
+        self.screen.blit(title_surf, title_rect)
+
+        pygame.draw.line(
+            self.screen,
+            (90, 115, 160),
+            (panel_rect.left + 14, title_rect.bottom + 8),
+            (panel_rect.right - 14, title_rect.bottom + 8),
+            1,
+        )
+
+        column_w = (panel_rect.width - 28) // 2
+        left_x = panel_rect.left + 14
+        right_x = left_x + column_w
+        rows_y = title_rect.bottom + 18
+
+        self._draw_control_column(
+            left_x,
+            rows_y,
+            "PLAYER 1",
+            (255, 200, 0),
+            [
+                ("MOVE", "WASD"),
+                ("JUMP", "SPACE"),
+                ("POWER", "Q"),
+            ],
+        )
+        self._draw_control_column(
+            right_x,
+            rows_y,
+            "PLAYER 2",
+            (100, 220, 255),
+            [
+                ("MOVE", "ARROWS"),
+                ("JUMP", "RSHIFT"),
+                ("POWER", "SLASH"),
+            ],
+        )
+
+    def _draw_control_column(self, x: int, y: int, heading: str, heading_color: tuple, rows: list[tuple[str, str]]) -> None:
+        heading_surf = self._font_small.render(heading, True, heading_color)
+        self.screen.blit(heading_surf, (x, y))
+
+        cursor_y = y + heading_surf.get_height() + 8
+        for label, value in rows:
+            label_surf = self._font_small.render(f"{label}:", True, INPUT_LABEL_COLOR)
+            value_surf = self._font_small.render(value, True, INPUT_TEXT_COLOR)
+            self.screen.blit(label_surf, (x, cursor_y))
+            self.screen.blit(value_surf, (x + 76, cursor_y))
+            cursor_y += max(label_surf.get_height(), value_surf.get_height()) + 6
 
     def _draw_back_button(self) -> None:
         mouse_pos = pygame.mouse.get_pos()
