@@ -103,6 +103,7 @@ class Player:
         self._shield_timer = 0.0
         self._shield_warning_threshold = ORB_SHIELD_WARNING
         self._freeze_timer = 0.0
+        self._void_walk_timer = 0.0
         self._status_flash_timer = 0.0
         self._immune_to_hazards = False
         self._power_alpha = 255
@@ -189,11 +190,19 @@ class Player:
     def is_frozen(self) -> bool:
         return self._freeze_timer > 0
 
+    def enable_void_walk(self, duration: float):
+        self._void_walk_timer = max(duration, self._void_walk_timer)
+
+    def has_void_walk(self) -> bool:
+        return self._void_walk_timer > 0
+
     def _tick_status_effects(self, dt: float):
         if self._shield_timer > 0:
             self._shield_timer = max(0.0, self._shield_timer - dt)
         if self._freeze_timer > 0:
             self._freeze_timer = max(0.0, self._freeze_timer - dt)
+        if self._void_walk_timer > 0:
+            self._void_walk_timer = max(0.0, self._void_walk_timer - dt)
         if self._active_orb_label and not self._active_orb_indefinite:
             if self._active_orb_timer > 0:
                 self._active_orb_timer = max(0.0, self._active_orb_timer - dt)
@@ -383,6 +392,8 @@ class Player:
         return False
 
     def _is_over_platform(self, position: pygame.Vector2, walkable_mask) -> bool:
+        if self.has_void_walk():
+            return True
         if walkable_mask is None:
             return True
 
@@ -480,6 +491,7 @@ class Player:
         self.power_orb_charges = 0
         self._shield_timer = 0.0
         self._freeze_timer = 0.0
+        self._void_walk_timer = 0.0
         self._orb_speed_boost = 1.0
         self._power_speed_boost = 1.0
         self._power_jump_boost = 1.0

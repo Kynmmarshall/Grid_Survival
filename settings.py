@@ -138,6 +138,7 @@ ORB_LIFETIME = 20.0
 ORB_SHIELD_DURATION = 20.0
 ORB_SHIELD_WARNING = 4.0
 ORB_FREEZE_DURATION = 10.0
+ORB_VOID_WALK_DURATION = 10.0
 POWER_ORBS_REQUIRED = 1
 ORB_ICON_PATHS = {
 	"speed": str(ASSETS_DIR / "orbs" / "speed.png"),
@@ -145,6 +146,7 @@ ORB_ICON_PATHS = {
 	"freeze": str(ASSETS_DIR / "orbs" / "freeze.png"),
 	"power": str(ASSETS_DIR / "orbs" / "power.png"),
 	"bomb": str(ASSETS_DIR / "orbs" / "bomb.png"),
+	"phase": str(ASSETS_DIR / "orbs" / "phase.png"),
 }
 SHIELD_EFFECT_PATH = ASSETS_DIR / "effects" / "shield.png"
 
