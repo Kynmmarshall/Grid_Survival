@@ -174,11 +174,8 @@ ORB_ICON_PATHS = {
 	"freeze": str(ASSETS_DIR / "orbs" / "freeze.png"),
 	"power": str(ASSETS_DIR / "orbs" / "power.png"),
 	"bomb": str(ASSETS_DIR / "orbs" / "bomb.png"),
-<<<<<<< HEAD
 	"life": str(ASSETS_DIR / "orbs" / "life.png"),
-=======
 	"phase": str(ASSETS_DIR / "orbs" / "phase.png"),
->>>>>>> main
 }
 SHIELD_EFFECT_PATH = ASSETS_DIR / "effects" / "shield.png"
 

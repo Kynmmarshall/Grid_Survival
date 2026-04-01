@@ -234,7 +234,6 @@ class GameManager:
             self.running = False
             return
 
-<<<<<<< HEAD
         if self.is_network_game:
             if not self.network or not self.network.connected:
                 self.running = False
@@ -256,13 +255,12 @@ class GameManager:
                 self._update_client_network_game(dt)
                 self._pending_power_press = False
                 return
-=======
+
         # Hidden first-frame restart to ensure AI is visible on first launch
         if self._pending_initial_restart:
             self._pending_initial_restart = False
             self._restart_game()
             return
->>>>>>> main
 
         if self.game_over:
             if self.elimination_screen:

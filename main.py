@@ -4,11 +4,8 @@ import pygame
 
 from audio import get_audio
 from game import GameManager
-<<<<<<< HEAD
-=======
 from network import NetworkHost, NetworkClient, get_local_ip
 from lan_prompts import prompt_host_or_join, prompt_ip_entry, toast_message
->>>>>>> main
 from host_waiting_screen import host_waiting_screen
 from lan_prompts import draw_lan_backdrop, prompt_host_or_join, prompt_ip_entry
 from network import NetworkClient, NetworkHost, get_local_ip
