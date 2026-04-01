@@ -224,9 +224,11 @@ class CharacterPower:
             if distance <= 0 or distance > radius:
                 continue
 
-            push_scale = 1.0 - (distance / radius)
-            displacement = (offset / distance) * (force * push_scale * 0.016)
-            other.position += displacement
+            direction = offset.normalize()
+            push_margin = max(36.0, force * 0.08)
+            target_distance = radius + push_margin
+            new_position = origin + direction * target_distance
+            other.position = new_position
             if hasattr(other, "rect"):
                 other.rect.center = (round(other.position.x), round(other.position.y))
 

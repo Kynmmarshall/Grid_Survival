@@ -40,6 +40,16 @@ ORB_LABEL_TO_KEY = {
     "bomb detonation": "bomb",
 }
 
+CARD_WIDTH = 282
+CARD_HEIGHT = 152
+CARD_MARGIN_X = 20
+CARD_MARGIN_Y = 18
+CARD_ROW_GAP = 16
+CARD_STATUS_BG = (18, 22, 34, 220)
+CARD_STATUS_BORDER = (92, 112, 150)
+CARD_TEXT_DIM = (190, 200, 215)
+CARD_TEXT_FAINT = (145, 155, 175)
+
 
 class PlayerCardRenderer:
     """Renders the individual player HUD cards."""
@@ -58,7 +68,7 @@ class PlayerCardRenderer:
         if not players:
             return
         render_players = self._active_players(players)
-        card_w, card_h = 260, 120
+        card_w, card_h = CARD_WIDTH, CARD_HEIGHT
         rects = self._player_card_rects(len(render_players), card_w, card_h)
         for idx, player in enumerate(render_players):
             if idx >= len(rects):
@@ -71,33 +81,24 @@ class PlayerCardRenderer:
         return active or players
 
     def _player_card_rects(self, count: int, width: int, height: int) -> List[pygame.Rect]:
-        margin = 20
-        top_y = 160
-        bottom_y = WINDOW_SIZE[1] - height - margin
-        anchors = [
-            (margin, top_y),
-            (WINDOW_SIZE[0] - width - margin, top_y),
-            (margin, bottom_y),
-            (WINDOW_SIZE[0] - width - margin, bottom_y),
-        ]
         rects: List[pygame.Rect] = []
-        if count <= len(anchors):
-            for idx in range(count):
-                x, y = anchors[idx]
-                rects.append(pygame.Rect(x, y, width, height))
+        if count <= 0:
             return rects
 
-        columns = min(3, count)
-        spacing_x = (WINDOW_SIZE[0] - 2 * margin - width) / max(1, columns - 1)
+        if count == 1:
+            rects.append(pygame.Rect((WINDOW_SIZE[0] - width) // 2, CARD_MARGIN_Y, width, height))
+            return rects
+
+        columns = 2
+        x_positions = [CARD_MARGIN_X, WINDOW_SIZE[0] - width - CARD_MARGIN_X]
         rows = math.ceil(count / columns)
-        positions_y = [top_y, bottom_y]
         for row in range(rows):
-            y = positions_y[row % len(positions_y)] if rows > 1 else top_y
+            y = CARD_MARGIN_Y + row * (height + CARD_ROW_GAP)
             for col in range(columns):
                 idx = row * columns + col
                 if idx >= count:
                     break
-                x = int(margin + col * spacing_x)
+                x = x_positions[col]
                 rects.append(pygame.Rect(x, y, width, height))
         return rects
 
@@ -107,21 +108,36 @@ class PlayerCardRenderer:
         self._draw_panel(surface, rect, HUD_PANEL_BG, border_color,
                          HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
 
-        portrait = self._headshot_surface(player, 70, border_color)
+        accent_rect = pygame.Rect(rect.left + 10, rect.top + 10, rect.width - 20, 5)
+        pygame.draw.rect(surface, (*border_color[:3], 180), accent_rect, border_radius=3)
+
+        portrait = self._headshot_surface(player, 68, border_color)
         portrait_rect = portrait.get_rect()
-        portrait_rect.topleft = (rect.left + 14, rect.top + 12)
+        portrait_rect.topleft = (rect.left + 14, rect.top + 16)
         surface.blit(portrait, portrait_rect)
 
         text_x = portrait_rect.right + 12
         text_y = rect.top + 14
         label = self._font_small.render(f"P{index + 1}", True, border_color)
-        surface.blit(label, (text_x, text_y))
+        label_bg = pygame.Rect(text_x - 2, text_y - 2, label.get_width() + 10, label.get_height() + 6)
+        self._draw_badge(surface, label_bg, CARD_STATUS_BG, border_color, f"P{index + 1}", border_color)
         name = getattr(player, "character_name", "Unknown")
-        name_surf = self._font_small.render(name, True, (255, 255, 255))
-        surface.blit(name_surf, (text_x + label.get_width() + 6, text_y))
+        name_surf = self._font_small.render(name.upper(), True, (255, 255, 255))
+        surface.blit(name_surf, (label_bg.right + 8, text_y))
 
-        icon_row_y = rect.top + 72
-        power_color = getattr(getattr(player, "power", None), "COLOR", border_color)
+        if getattr(player, "is_ai", False):
+            ai_text = "AI"
+            ai_rect = pygame.Rect(rect.right - 48, rect.top + 14, 34, 18)
+            self._draw_badge(surface, ai_rect, (34, 52, 84, 230), (110, 150, 210), ai_text, (235, 245, 255))
+
+        power = getattr(player, "power", None)
+        power_name = getattr(power, "NAME", "No Power")
+        power_color = getattr(power, "COLOR", border_color)
+        power_chip_text = f"{power_name.upper()}"
+        power_chip_rect = pygame.Rect(text_x, rect.top + 42, rect.width - (text_x - rect.left) - 16, 22)
+        self._draw_badge(surface, power_chip_rect, (*power_color[:3], 55), power_color, power_chip_text, (255, 255, 255))
+
+        icon_row_y = rect.top + 74
         self._draw_power_icon(surface, (text_x + 22, icon_row_y), power_color)
 
         charges = getattr(player, "power_orb_charges", 0)
@@ -137,8 +153,26 @@ class PlayerCardRenderer:
         self._draw_orb_icon(surface, (text_x + 74, icon_row_y), orb_label, bool(orb_label))
         self._draw_charge_pips(surface, (text_x + 128, icon_row_y), charges, border_color)
 
+        status_text = self._status_summary(player, orb_label, orb_timer, orb_infinite, orb_duration, charges)
+        status_surf = self._font_small.render(status_text, True, CARD_TEXT_DIM)
+        surface.blit(status_surf, (text_x, rect.top + 98))
+
+        controls_text = self._controls_summary(player)
+        controls_rect = pygame.Rect(rect.left + 14, rect.bottom - 34, rect.width - 28, 18)
+        self._draw_badge(surface, controls_rect, CARD_STATUS_BG, CARD_STATUS_BORDER, controls_text, CARD_TEXT_FAINT)
+
         self._draw_orb_timer_line(surface, rect, orb_color, orb_label,
                                   orb_timer, orb_infinite, orb_duration)
+
+    def _draw_badge(self, surface: pygame.Surface, rect: pygame.Rect,
+                    fill_color: tuple, border_color: tuple, text: str, text_color: tuple) -> None:
+        badge = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(badge, fill_color, badge.get_rect(), border_radius=max(8, rect.height // 2))
+        surface.blit(badge, rect.topleft)
+        pygame.draw.rect(surface, border_color, rect, 1, border_radius=max(8, rect.height // 2))
+        text_surf = self._font_small.render(text, True, text_color)
+        text_rect = text_surf.get_rect(center=rect.center)
+        surface.blit(text_surf, text_rect)
 
     def _headshot_surface(self, player, size: int, border_color: tuple) -> pygame.Surface:
         portrait = pygame.Surface((size, size), pygame.SRCALPHA)
@@ -233,6 +267,52 @@ class PlayerCardRenderer:
         if not label:
             return (110, 110, 130)
         return ORB_ICON_COLORS.get(label.lower(), CARD_TIMER_FILL)
+
+    def _status_summary(self, player, orb_label: Optional[str], orb_timer: float,
+                        orb_infinite: bool, orb_duration: float, charges: int) -> str:
+        if orb_label:
+            if orb_infinite or orb_duration <= 0:
+                return orb_label.upper()
+            return f"{orb_label.upper()} {orb_timer:.1f}s"
+        if charges > 0:
+            return f"POWER ORBS {charges}/{POWER_ORBS_REQUIRED}"
+        if getattr(player, "is_ai", False):
+            return "AI CONTROLLED"
+        return "READY"
+
+    def _controls_summary(self, player) -> str:
+        controls = getattr(player, "controls", {}) or {}
+        move = self._movement_label(controls)
+        jump = self._key_label(controls.get("jump"), "SPACE")
+        power = self._key_label(controls.get("power"), "POWER")
+        return f"MOVE {move}  •  JUMP {jump}  •  POWER {power}"
+
+    def _movement_label(self, controls: dict) -> str:
+        key_names = [self._key_label(controls.get(action), "") for action in ("left", "right", "up", "down")]
+        key_set = {name for name in key_names if name}
+        if key_set == {"W", "A", "S", "D"}:
+            return "WASD"
+        if key_set == {"LEFT", "RIGHT", "UP", "DOWN"}:
+            return "ARROWS"
+        if not key_set:
+            return "MOVE"
+        return "/".join(sorted(key_set))
+
+    def _key_label(self, key_code: Optional[int], fallback: str) -> str:
+        if key_code is None:
+            return fallback
+        name = pygame.key.name(key_code).upper()
+        if name in {"LEFT SHIFT", "RIGHT SHIFT"}:
+            return "SHIFT"
+        if name in {"LEFT CTRL", "RIGHT CTRL"}:
+            return "CTRL"
+        if name == "SLASH":
+            return "/"
+        if name == "BACKSLASH":
+            return "\\"
+        if name == "SPACE":
+            return "SPACE"
+        return name.replace("LEFT ", "").replace("RIGHT ", "").strip()
 
     def _orb_key_from_label(self, label: Optional[str]) -> Optional[str]:
         if not label:
