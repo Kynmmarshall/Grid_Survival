@@ -261,7 +261,7 @@ class OrbManager:
         [OrbType.FREEZE] * 2 +
         [OrbType.POWER]  * 2 +
         [OrbType.BOMB]   * 1 +
-        [OrbType.PHASE]  * 1
+        [OrbType.PHASE]  * 5
     )
 
     def __init__(self, level_number: int = 1):

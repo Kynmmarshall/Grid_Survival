@@ -147,8 +147,8 @@ class GameHUD:
         panel_w = label_surf.get_width() + HUD_PANEL_PADDING_H * 2
         panel_h = label_surf.get_height() + HUD_PANEL_PADDING_V * 2
         
-        # Score panel is hidden, so keep mute at top-left.
-        self.mute_rect = pygame.Rect(20, 20, panel_w, panel_h)
+        # Keep the audio control out of the top edge so it stays clear of the player cards.
+        self.mute_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 20, panel_w, panel_h)
 
         _draw_panel(surface, self.mute_rect, HUD_PANEL_BG, color,
                     HUD_PANEL_BORDER_WIDTH, 8, glow=False)
@@ -199,7 +199,7 @@ class GameHUD:
         surface.blit(value_surf, (vx, vy))
 
     def _draw_alive_panel(self, surface: pygame.Surface):
-        """Alive counter panel — top-right."""
+        """Alive counter panel — bottom-right."""
         alive_color = self._alive_color()
 
         # Last player: slow pulse
@@ -215,8 +215,9 @@ class GameHUD:
 
         panel_w = max(label_surf.get_width(), value_surf.get_width()) + HUD_PANEL_PADDING_H * 2
         panel_h = label_surf.get_height() + value_surf.get_height() + HUD_PANEL_PADDING_V * 3
-        panel_rect = pygame.Rect(0, 20, panel_w, panel_h)
+        panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
         panel_rect.right = WINDOW_SIZE[0] - 20
+        panel_rect.bottom = WINDOW_SIZE[1] - 20
 
         _draw_panel(surface, panel_rect, HUD_PANEL_BG, border_color,
                     HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
