@@ -21,6 +21,7 @@ from hazards import HazardManager
 from ui import GameHUD, EliminationScreen, VictoryScreen
 from settings import (
     BACKGROUND_COLOR,
+    BACKGROUND_MUSIC_TRACKS,
     DEBUG_DRAW_WALKABLE,
     DEBUG_VISUALS_ENABLED,
     DEBUG_WALKABLE_COLOR,
@@ -33,6 +34,7 @@ from settings import (
     USE_AI_PLAYER,
     WINDOW_SIZE,
     WINDOW_TITLE,
+    MUSIC_VOLUME,
     SOUND_PLAYER_FALL,
 )
 
@@ -209,7 +211,13 @@ class GameManager:
 
         self.game_over = False
         self.audio = get_audio()
-        self.audio.play_music()
+        self.audio.play_music_playlist(
+            BACKGROUND_MUSIC_TRACKS,
+            start_random=True,
+            loop=True,
+            fade_ms=1500,
+            volume=MUSIC_VOLUME,
+        )
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -237,6 +245,8 @@ class GameManager:
                         self._handle_power_key(event.key)
 
     def update(self, dt: float, keys):
+        self.audio.update()
+
         if keys[pygame.K_ESCAPE]:
             if self.is_network_game and self.network and self.network.connected:
                 self.network.send_message("disconnect")

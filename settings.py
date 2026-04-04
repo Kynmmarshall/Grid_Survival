@@ -180,7 +180,13 @@ ORB_ICON_PATHS = {
 SHIELD_EFFECT_PATH = ASSETS_DIR / "effects" / "shield.png"
 
 # Opening scene audio
-MUSIC_PATH = ASSETS_DIR / "Audio"/ "Background" / "Grid survival 1.mp3"
+BACKGROUND_MUSIC_TRACKS = [
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 1.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 2.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 3.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 4.mp3",
+]
+MUSIC_PATH = BACKGROUND_MUSIC_TRACKS[0]
 MUSIC_VOLUME = 0.45
 
 # ─────────────────────────────────────────────────────────────────────────────
