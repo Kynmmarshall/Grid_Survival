@@ -316,7 +316,13 @@ class GameManager:
             was_falling_before = player.is_falling()
 
             if player.is_ai:
-                player.update_ai(dt, self.walkable_mask, self.walkable_bounds)
+                player.update_ai(
+                    dt,
+                    self.walkable_mask,
+                    self.walkable_bounds,
+                    self.hazard_manager,
+                    self.pacman_enemy_manager,
+                )
             elif network_inputs is not None and idx in network_inputs:
                 player_input = self._sanitize_network_input(network_inputs[idx])
                 if player_input.get("power_pressed"):

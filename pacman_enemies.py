@@ -14,6 +14,7 @@ PACMAN_GHOST_KILL_RADIUS = 30
 PACMAN_GHOST_ACTIVATION_DELAY = 1.25
 PACMAN_GHOST_REPATH_INTERVAL = 0.14
 PACMAN_GHOST_BODY_SIZE = (48, 40)
+PACMAN_GHOST_SHIELD_KEEP_DISTANCE = 100.0
 
 PACMAN_GHOST_COLORS = (
     (255, 70, 70),
@@ -129,6 +130,8 @@ class PacmanEnemy:
     def _find_target(self, players: Sequence[object]):
         best_player = None
         best_distance = float("inf")
+        shielded_player = None
+        shielded_distance = float("inf")
         for player in players:
             if not self._is_valid_target(player):
                 continue
@@ -136,10 +139,15 @@ class PacmanEnemy:
             if player_position is None:
                 continue
             distance = self.position.distance_to(player_position)
+            if self._is_shielded(player):
+                if distance < shielded_distance:
+                    shielded_distance = distance
+                    shielded_player = player
+                continue
             if distance < best_distance:
                 best_distance = distance
                 best_player = player
-        return best_player
+        return best_player or shielded_player
 
     def _is_valid_target(self, player) -> bool:
         if getattr(player, "_eliminated", False):
@@ -159,6 +167,8 @@ class PacmanEnemy:
         vector = target_position - self.position
         if vector.length_squared() == 0:
             return pygame.Vector2(0, 0)
+        if self._is_shielded(target) and vector.length() <= PACMAN_GHOST_SHIELD_KEEP_DISTANCE:
+            return (-vector).normalize()
         return vector.normalize()
 
     def _choose_direction(self, target, walkable_mask, walkable_bounds) -> pygame.Vector2:
@@ -167,7 +177,12 @@ class PacmanEnemy:
         if target_vector.length_squared() == 0:
             return pygame.Vector2(0, 0)
 
+        shielded = self._is_shielded(target)
+        distance_to_target = target_vector.length()
         target_dir = target_vector.normalize()
+        if shielded and distance_to_target <= PACMAN_GHOST_SHIELD_KEEP_DISTANCE:
+            target_dir = -target_dir
+
         center_bias = pygame.Vector2(0, 0)
         if walkable_bounds is not None:
             center_bias = pygame.Vector2(walkable_bounds.center) - self.position
@@ -205,6 +220,14 @@ class PacmanEnemy:
                 score += candidate.dot(center_bias) * 0.55
             score -= probe.distance_to(target_position) / 700.0
 
+            if shielded:
+                projected_distance = probe.distance_to(target_position)
+                if projected_distance < PACMAN_GHOST_SHIELD_KEEP_DISTANCE:
+                    score -= ((PACMAN_GHOST_SHIELD_KEEP_DISTANCE - projected_distance) / PACMAN_GHOST_SHIELD_KEEP_DISTANCE) * 8.0
+                    score -= max(0.0, candidate.dot((target_position - self.position).normalize())) * 2.0
+                else:
+                    score += min(1.0, (projected_distance - PACMAN_GHOST_SHIELD_KEEP_DISTANCE) / PACMAN_GHOST_SHIELD_KEEP_DISTANCE) * 1.2
+
             if score > best_score:
                 best_score = score
                 best_direction = candidate
@@ -229,6 +252,12 @@ class PacmanEnemy:
             return pygame.Vector2(rect.center)
 
         return None
+
+    def _is_shielded(self, player) -> bool:
+        has_active_shield = getattr(player, "has_active_shield", None)
+        if callable(has_active_shield):
+            return bool(has_active_shield())
+        return float(getattr(player, "_shield_timer", 0.0)) > 0.0
 
     def _move_toward(self, direction: pygame.Vector2, dt: float, walkable_mask, walkable_bounds) -> bool:
         if direction.length_squared() == 0:
@@ -272,6 +301,8 @@ class PacmanEnemy:
     def _can_capture(self, player) -> bool:
         if not self._is_valid_target(player):
             return False
+        if self._is_shielded(player):
+            return False
         feet_getter = getattr(player, "get_feet_rect", None)
         if callable(feet_getter):
             player_rect = feet_getter()
@@ -302,16 +333,11 @@ class PacmanEnemy:
         return self._feet_mask
 
     def _is_over_platform(self, position: pygame.Vector2, walkable_mask, walkable_bounds) -> bool:
-        if walkable_mask is None:
-            return True
-
         feet_rect = self._feet_rect(position)
         if walkable_bounds is not None and not walkable_bounds.colliderect(feet_rect):
             return False
 
-        feet_mask = self._feet_mask_for_rect(feet_rect)
-        overlap = walkable_mask.overlap_area(feet_mask, feet_rect.topleft)
-        return overlap == self._feet_mask_count
+        return True
 
 
 class PacmanEnemyManager:
