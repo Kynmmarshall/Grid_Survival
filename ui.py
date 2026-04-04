@@ -99,6 +99,7 @@ class GameHUD:
         self._pulse_timer = 0.0
 
         self.mute_rect = None   # Mute button hit area
+        self.volume_rect = None
 
     def update(self, dt: float):
         """Update HUD state."""
@@ -128,10 +129,11 @@ class GameHUD:
         remaining_in_minute = 60 - (self.survival_time % 60)
         return remaining_in_minute <= TIMER_WARNING_THRESHOLD
 
-    def draw(self, surface: pygame.Surface, players: List, is_muted: bool = False):
+    def draw(self, surface: pygame.Surface, players: List, is_muted: bool = False, volume: float = 1.0):
         """Draw HUD elements."""
         self._draw_timer_panel(surface)
         self._draw_mute_button(surface, is_muted)
+        self._draw_volume_panel(surface, is_muted, volume)
         self._draw_player_cards(surface, players)
         if self.total_players > 1:
             self._draw_alive_panel(surface)
@@ -146,7 +148,7 @@ class GameHUD:
 
         panel_w = label_surf.get_width() + HUD_PANEL_PADDING_H * 2
         panel_h = label_surf.get_height() + HUD_PANEL_PADDING_V * 2
-        
+
         # Keep the audio control out of the top edge so it stays clear of the player cards.
         self.mute_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 20, panel_w, panel_h)
 
@@ -156,6 +158,40 @@ class GameHUD:
         lx = self.mute_rect.centerx - label_surf.get_width() // 2
         ly = self.mute_rect.centery - label_surf.get_height() // 2
         surface.blit(label_surf, (lx, ly))
+
+    def _draw_volume_panel(self, surface: pygame.Surface, is_muted: bool, volume: float):
+        """Draw the current master volume and a small fill bar."""
+        volume = max(0.0, min(1.0, volume))
+        panel_w = 176
+        panel_h = 54
+
+        if self.mute_rect is not None:
+            top = max(20, self.mute_rect.top - panel_h - 10)
+            panel_rect = pygame.Rect(self.mute_rect.left, top, panel_w, panel_h)
+        else:
+            panel_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 84, panel_w, panel_h)
+
+        self.volume_rect = panel_rect
+
+        active = not is_muted and volume > 0.0
+        border_color = HUD_ALIVE_BORDER_COLOR_ALL if active else HUD_TIMER_URGENT_COLOR
+        _draw_panel(surface, panel_rect, HUD_PANEL_BG, border_color,
+                    HUD_PANEL_BORDER_WIDTH, 8, glow=False)
+
+        label_surf = self._font_label.render("VOL", True, border_color)
+        value_text = "MUTED" if is_muted else f"{int(round(volume * 100)):02d}%"
+        value_surf = self._font_label.render(value_text, True, HUD_VALUE_COLOR)
+        surface.blit(label_surf, (panel_rect.left + 12, panel_rect.top + 10))
+        surface.blit(value_surf, value_surf.get_rect(top=panel_rect.top + 10, right=panel_rect.right - 12))
+
+        bar_rect = pygame.Rect(panel_rect.left + 12, panel_rect.bottom - 16, panel_rect.width - 24, 8)
+        pygame.draw.rect(surface, border_color, bar_rect, 1, border_radius=4)
+        inner = bar_rect.inflate(-2, -2)
+        pygame.draw.rect(surface, HUD_PANEL_BG, inner, border_radius=3)
+        fill_width = int(inner.width * volume) if active else 0
+        if fill_width > 0:
+            fill_rect = pygame.Rect(inner.left, inner.top, fill_width, inner.height)
+            pygame.draw.rect(surface, border_color, fill_rect, border_radius=3)
 
     def _draw_timer_panel(self, surface: pygame.Surface):
         """Timer panel — top-center."""

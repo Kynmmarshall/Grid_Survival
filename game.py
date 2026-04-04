@@ -8,6 +8,7 @@ from audio import get_audio
 from collision_manager import CollisionManager
 from player import Player
 from orbs import OrbManager
+from pacman_enemies import PacmanEnemyManager
 from powers import (
     apply_power_state,
     get_power_for_character,
@@ -17,9 +18,11 @@ from powers import (
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
-from ui import GameHUD, EliminationScreen
+from ui import GameHUD, EliminationScreen, VictoryScreen
 from settings import (
     BACKGROUND_COLOR,
+    BACKGROUND_MUSIC_TRACKS,
+    AUDIO_VOLUME_STEP,
     DEBUG_DRAW_WALKABLE,
     DEBUG_VISUALS_ENABLED,
     DEBUG_WALKABLE_COLOR,
@@ -105,11 +108,14 @@ class GameManager:
         self.hud = GameHUD()
         self.water = AnimatedWater()
         self.orb_manager = OrbManager()
+        self.pacman_enemy_manager = None
 
         # Initialize players based on game mode
         self.players = []
         self.eliminated_players = []
         self.elimination_screen = None
+        self.victory_screen = None
+        self.game_over_state = None
         self._spawn_adjusted = False
         self._spawn_rescue_window = 1.0
         self._time_since_start = 0.0
@@ -195,12 +201,22 @@ class GameManager:
         self._ensure_players_on_walkable_surface()
         self._force_safe_spawns()
         self._configure_powers_for_players()
+        if not self.is_network_game:
+            enemy_count = self._pacman_enemy_count()
+            if enemy_count > 0:
+                enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
+                self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
 
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
         self.game_over = False
         self.audio = get_audio()
-        self.audio.play_music()
+        self.audio.play_music_playlist(
+            BACKGROUND_MUSIC_TRACKS,
+            start_random=True,
+            loop=True,
+            fade_ms=1500,
+        )
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -212,7 +228,16 @@ class GameManager:
                         self.audio.toggle_mute()
                     elif self._handle_ninja_target_click(event.pos):
                         continue
+            elif event.type == pygame.MOUSEWHEEL:
+                if event.y:
+                    self._adjust_audio_volume(event.y * AUDIO_VOLUME_STEP)
             elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_PAGEUP, pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_RIGHTBRACKET):
+                    self._adjust_audio_volume(AUDIO_VOLUME_STEP)
+                    continue
+                if event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
+                    self._adjust_audio_volume(-AUDIO_VOLUME_STEP)
+                    continue
                 if event.key == pygame.K_l and not self.is_network_game:
                     for player in self.players:
                         player.reset()
@@ -228,6 +253,8 @@ class GameManager:
                         self._handle_power_key(event.key)
 
     def update(self, dt: float, keys):
+        self.audio.update()
+
         if keys[pygame.K_ESCAPE]:
             if self.is_network_game and self.network and self.network.connected:
                 self.network.send_message("disconnect")
@@ -263,7 +290,9 @@ class GameManager:
             return
 
         if self.game_over:
-            if self.elimination_screen:
+            if self.victory_screen:
+                self.victory_screen.update(dt)
+            elif self.elimination_screen:
                 self.elimination_screen.update(dt)
             return
 
@@ -305,7 +334,13 @@ class GameManager:
             was_falling_before = player.is_falling()
 
             if player.is_ai:
-                player.update_ai(dt, self.walkable_mask, self.walkable_bounds)
+                player.update_ai(
+                    dt,
+                    self.walkable_mask,
+                    self.walkable_bounds,
+                    self.hazard_manager,
+                    self.pacman_enemy_manager,
+                )
             elif network_inputs is not None and idx in network_inputs:
                 player_input = self._sanitize_network_input(network_inputs[idx])
                 if player_input.get("power_pressed"):
@@ -354,13 +389,39 @@ class GameManager:
             if player.power:
                 player.power.apply_to_game(self)
 
+        if self.pacman_enemy_manager:
+            ghost_victims = self.pacman_enemy_manager.update(
+                dt,
+                self.players,
+                self.walkable_mask,
+                self.walkable_bounds,
+            )
+            seen_victims: set[int] = set()
+            for victim in ghost_victims:
+                victim_id = id(victim)
+                if victim_id in seen_victims:
+                    continue
+                seen_victims.add(victim_id)
+                self._eliminate_player(victim, "hit by hazard")
+
         self.orb_manager.update(dt, self.walkable_bounds, self.players, self)
 
         # Update player count in HUD
         alive_count = len(self.players) - len(self.eliminated_players)
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
 
-        # Check game over condition — either everyone eliminated or no one remains on the platform.
+        # Check game over condition — victory for the last remaining participant,
+        # otherwise elimination when everyone is gone or nobody remains on the platform.
+        if len(self.players) > 1 and alive_count == 1:
+            winner_index = next(
+                (idx for idx, player in enumerate(self.players) if player not in self.eliminated_players),
+                0,
+            )
+            winner = self.players[winner_index] if self.players else None
+            winner_label = getattr(winner, "character_name", self.player_name) if winner else self.player_name
+            self._trigger_victory(f"P{winner_index + 1} - {winner_label} WINS")
+            return
+
         platform_empty = not self._any_player_on_platform()
         if alive_count == 0 or platform_empty:
             self._trigger_game_over()
@@ -437,9 +498,25 @@ class GameManager:
         return None
 
     def _build_network_snapshot(self) -> dict:
+        end_state = None
+        if self.game_over_state == "victory" and self.victory_screen:
+            end_state = {
+                "type": "victory",
+                "winner_name": self.victory_screen.player_name,
+                "survival_time": float(self.victory_screen.survival_time),
+            }
+        elif self.game_over_state == "elimination" and self.elimination_screen:
+            end_state = {
+                "type": "elimination",
+                "player_name": self.elimination_screen.player_name,
+                "survival_time": float(self.elimination_screen.survival_time),
+                "reason": self.elimination_screen.reason,
+            }
+
         return {
             "time_since_start": float(self._time_since_start),
             "game_over": bool(self.game_over),
+            "end_state": end_state,
             "players": [
                 {
                     "player": player.snapshot_state(),
@@ -465,6 +542,9 @@ class GameManager:
         self.hud.apply_snapshot(snapshot.get("hud"))
 
         self.eliminated_players.clear()
+        self.victory_screen = None
+        self.elimination_screen = None
+        self.game_over_state = None
         for idx, entry in enumerate(snapshot.get("players", []) or []):
             if idx >= len(self.players) or not isinstance(entry, dict):
                 continue
@@ -477,10 +557,16 @@ class GameManager:
 
         next_game_over = bool(snapshot.get("game_over", False))
         if next_game_over and not self.game_over:
-            self._trigger_game_over()
+            end_state = snapshot.get("end_state") or {}
+            if isinstance(end_state, dict) and end_state.get("type") == "victory":
+                self._trigger_victory(str(end_state.get("winner_name", self.player_name)))
+            else:
+                self._trigger_game_over()
         elif not next_game_over and self.game_over:
             self.game_over = False
             self.elimination_screen = None
+            self.victory_screen = None
+            self.game_over_state = None
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
@@ -512,6 +598,10 @@ class GameManager:
         # Draw orbs floating above the arena
         self.orb_manager.draw(self.screen)
 
+        # Draw pacman-style enemies before the player front layer
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.draw(self.screen)
+
         # Draw players in front of map
         for player in players_front:
             player.draw(self.screen)
@@ -527,10 +617,12 @@ class GameManager:
                 player.power.draw(self.screen, player)
 
         # Draw HUD
-        self.hud.draw(self.screen, self.players, is_muted=self.audio.is_muted)
+        self.hud.draw(self.screen, self.players, is_muted=self.audio.is_muted, volume=self.audio.get_volume())
 
         # Draw elimination screen if game over
-        if self.elimination_screen:
+        if self.victory_screen:
+            self.victory_screen.draw(self.screen)
+        elif self.elimination_screen:
             self.elimination_screen.draw(self.screen)
 
         pygame.display.flip()
@@ -694,6 +786,7 @@ class GameManager:
                 return
         if player not in self.eliminated_players:
             self.eliminated_players.append(player)
+            player._eliminated = True
             print(f"Player eliminated: {reason}")
             # Trigger death state if available
             if hasattr(player, 'die'):
@@ -733,8 +826,14 @@ class GameManager:
 
     def _trigger_game_over(self):
         """Trigger game over state."""
+        self._trigger_elimination()
+
+    def _trigger_elimination(self):
+        """Trigger the elimination end screen."""
         if not self.game_over:
             self.game_over = True
+            self.game_over_state = "elimination"
+            self.victory_screen = None
             self.elimination_screen = EliminationScreen(
                 self.player_name,
                 self.hud.survival_time,
@@ -744,10 +843,23 @@ class GameManager:
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
+    def _trigger_victory(self, winner_name: str):
+        """Trigger the victory end screen."""
+        if not self.game_over:
+            self.game_over = True
+            self.game_over_state = "victory"
+            self.elimination_screen = None
+            self.victory_screen = VictoryScreen(winner_name, self.hud.survival_time)
+            self.victory_screen.show()
+            if self.is_network_game and self.is_network_host and self.network and self.network.connected:
+                self.network.send_message("snapshot", state=self._build_network_snapshot())
+
     def _restart_game(self):
         """Restart the game."""
         self.game_over = False
         self.elimination_screen = None
+        self.victory_screen = None
+        self.game_over_state = None
         self.eliminated_players.clear()
 
         self.tile_manager.reset()
@@ -757,6 +869,9 @@ class GameManager:
         self.hud.reset()
         self._spawn_adjusted = False
         self._time_since_start = 0.0
+
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.reset()
 
         for player in self.players:
             player.reset()
@@ -849,6 +964,9 @@ class GameManager:
                     break
                 if player.try_use_power(self):
                     break
+
+    def _adjust_audio_volume(self, delta: float):
+        self.audio.adjust_volume(delta)
 
     def _handle_ninja_target_click(self, pos) -> bool:
         for player in self.players:
@@ -975,6 +1093,50 @@ class GameManager:
         if self.game_mode == MODE_VS_COMPUTER:
             return self._vs_computer_spawns(count)
         return self._spawn_positions(count)
+
+    def _pacman_enemy_count(self) -> int:
+        if self.is_network_game:
+            return 0
+        if self.game_mode == MODE_VS_COMPUTER:
+            return 1
+        if self.game_mode == MODE_LOCAL_MULTIPLAYER:
+            return 2
+        return 1 if self.players else 0
+
+    def _initial_pacman_enemy_spawns(self, count: int) -> list[tuple[int, int]]:
+        if count <= 0:
+            return []
+        if not self.players:
+            return [PLAYER_START_POS for _ in range(count)]
+        if not self.walkable_mask:
+            return self._spawn_positions(count)
+
+        occupied = {
+            (int(round(player.position.x)), int(round(player.position.y)))
+            for player in self.players
+        }
+        center = self._walkable_center()
+        prototype = self.players[0]
+        offsets = [
+            pygame.Vector2(0, -160),
+            pygame.Vector2(160, 0),
+            pygame.Vector2(0, 160),
+            pygame.Vector2(-160, 0),
+            pygame.Vector2(120, -120),
+            pygame.Vector2(120, 120),
+            pygame.Vector2(-120, 120),
+            pygame.Vector2(-120, -120),
+        ]
+
+        spawns: list[tuple[int, int]] = []
+        for index in range(count):
+            offset = offsets[index % len(offsets)]
+            spread = (index // len(offsets)) * 48
+            candidate = center + offset + pygame.Vector2(spread, 0)
+            spawn = self._find_valid_fallback(prototype, occupied, candidate)
+            spawns.append(spawn)
+            occupied.add(spawn)
+        return spawns
 
     def _character_choice(self, index: int) -> str | None:
         if not self.selected_characters:

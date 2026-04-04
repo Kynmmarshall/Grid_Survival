@@ -8,7 +8,6 @@ import pygame
 from audio import get_audio
 from settings import (
     MUSIC_PATH,
-    MUSIC_VOLUME,
     WINDOW_SIZE,
     TARGET_FPS,
     SCENE_FADE_SPEED,
@@ -127,7 +126,6 @@ class TitleScreen:
             track=MUSIC_PATH,
             loop=True,
             fade_ms=1500,
-            volume=MUSIC_VOLUME,
         )
 
     # ── title letter setup ───────────────────────────────────────────────

@@ -29,6 +29,7 @@ ORB_ICON_COLORS = {
     "speed boost": (60, 230, 220),
     "shield": (255, 210, 50),
     "frozen": (90, 150, 255),
+    "void walk": (120, 255, 190),
     "power charge": (200, 80, 255),
     "bomb detonation": (255, 90, 70),
 }
@@ -36,12 +37,13 @@ ORB_LABEL_TO_KEY = {
     "speed boost": "speed",
     "shield": "shield",
     "frozen": "freeze",
+    "void walk": "phase",
     "power charge": "power",
     "bomb detonation": "bomb",
 }
 
 CARD_WIDTH = 282
-CARD_HEIGHT = 152
+CARD_HEIGHT = 164
 CARD_MARGIN_X = 20
 CARD_MARGIN_Y = 18
 CARD_ROW_GAP = 16
@@ -67,7 +69,7 @@ class PlayerCardRenderer:
     def draw(self, surface: pygame.Surface, players: List) -> None:
         if not players:
             return
-        render_players = self._active_players(players)
+        render_players = list(players)
         card_w, card_h = CARD_WIDTH, CARD_HEIGHT
         rects = self._player_card_rects(len(render_players), card_w, card_h)
         for idx, player in enumerate(render_players):
@@ -75,10 +77,6 @@ class PlayerCardRenderer:
                 break
             border_color = CARD_COLOR_PALETTE[idx % len(CARD_COLOR_PALETTE)]
             self._draw_player_card(surface, rects[idx], player, idx, border_color)
-
-    def _active_players(self, players: List) -> List:
-        active = [p for p in players if not getattr(p, "_eliminated", False)]
-        return active or players
 
     def _player_card_rects(self, count: int, width: int, height: int) -> List[pygame.Rect]:
         rects: List[pygame.Rect] = []
@@ -105,16 +103,36 @@ class PlayerCardRenderer:
     def _draw_player_card(self, surface: pygame.Surface, rect: pygame.Rect, player, index: int, border_color: tuple) -> None:
         if player is None:
             return
+        eliminated = bool(getattr(player, "_eliminated", False))
+        if eliminated:
+            border_color = (120, 120, 135)
+
         self._draw_panel(surface, rect, HUD_PANEL_BG, border_color,
                          HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
 
-        accent_rect = pygame.Rect(rect.left + 10, rect.top + 10, rect.width - 20, 5)
-        pygame.draw.rect(surface, (*border_color[:3], 180), accent_rect, border_radius=3)
+        charges = getattr(player, "power_orb_charges", 0)
+        orb_label = None
+        orb_timer = 0.0
+        orb_infinite = False
+        orb_duration = 0.0
+        if hasattr(player, "get_active_orb_status"):
+            status = player.get_active_orb_status()
+            if status:
+                orb_label, orb_timer, orb_infinite, orb_duration = status
+        orb_color = self._orb_color_for_label(orb_label)
+
+        accent_rect = pygame.Rect(rect.left + 10, rect.top + 10, rect.width - 20, 6)
+        self._draw_orb_timer_line(surface, accent_rect, orb_color if orb_label else border_color, orb_label,
+                                  orb_timer, orb_infinite, orb_duration)
 
         portrait = self._headshot_surface(player, 68, border_color)
         portrait_rect = portrait.get_rect()
         portrait_rect.topleft = (rect.left + 14, rect.top + 16)
         surface.blit(portrait, portrait_rect)
+
+        if orb_label:
+            orb_icon_center = (portrait_rect.centerx, portrait_rect.bottom + 25)
+            self._draw_orb_icon(surface, orb_icon_center, orb_label, True, size=40)
 
         text_x = portrait_rect.right + 12
         text_y = rect.top + 14
@@ -131,38 +149,36 @@ class PlayerCardRenderer:
             self._draw_badge(surface, ai_rect, (34, 52, 84, 230), (110, 150, 210), ai_text, (235, 245, 255))
 
         power = getattr(player, "power", None)
-        power_name = getattr(power, "NAME", "No Power")
+        power_name = getattr(power, "NAME", None) or "NONE"
         power_color = getattr(power, "COLOR", border_color)
-        power_chip_text = f"{power_name.upper()}"
+        power_chip_text = f"POWER: {power_name.upper()}"
         power_chip_rect = pygame.Rect(text_x, rect.top + 42, rect.width - (text_x - rect.left) - 16, 22)
         self._draw_badge(surface, power_chip_rect, (*power_color[:3], 55), power_color, power_chip_text, (255, 255, 255))
 
-        icon_row_y = rect.top + 74
-        self._draw_power_icon(surface, (text_x + 22, icon_row_y), power_color)
-
-        charges = getattr(player, "power_orb_charges", 0)
-        orb_label = None
-        orb_timer = 0.0
-        orb_infinite = False
-        orb_duration = 0.0
-        if hasattr(player, "get_active_orb_status"):
-            status = player.get_active_orb_status()
-            if status:
-                orb_label, orb_timer, orb_infinite, orb_duration = status
-        orb_color = self._orb_color_for_label(orb_label)
-        self._draw_orb_icon(surface, (text_x + 74, icon_row_y), orb_label, bool(orb_label))
-        self._draw_charge_pips(surface, (text_x + 128, icon_row_y), charges, border_color)
+        lives = self._player_lives_count(player)
+        lives_label = self._font_small.render("LIVES", True, border_color)
+        surface.blit(lives_label, (text_x, rect.top + 68))
+        lives_rect = pygame.Rect(text_x, rect.top + 86, rect.width - (text_x - rect.left) - 16, 28)
+        self._draw_lives_badge(surface, lives_rect, lives, border_color)
 
         status_text = self._status_summary(player, orb_label, orb_timer, orb_infinite, orb_duration, charges)
-        status_surf = self._font_small.render(status_text, True, CARD_TEXT_DIM)
-        surface.blit(status_surf, (text_x, rect.top + 98))
+        status_label = self._font_small.render("STATUS", True, border_color)
+        surface.blit(status_label, (text_x, rect.top + 120))
+        status_rect = pygame.Rect(text_x, rect.top + 138, rect.width - (text_x - rect.left) - 16, 18)
+        self._draw_badge(surface, status_rect, CARD_STATUS_BG, orb_color if orb_label else CARD_STATUS_BORDER, status_text, CARD_TEXT_DIM)
 
-        controls_text = self._controls_summary(player)
-        controls_rect = pygame.Rect(rect.left + 14, rect.bottom - 34, rect.width - 28, 18)
-        self._draw_badge(surface, controls_rect, CARD_STATUS_BG, CARD_STATUS_BORDER, controls_text, CARD_TEXT_FAINT)
+        if eliminated:
+            self._draw_eliminated_overlay(surface, rect)
 
-        self._draw_orb_timer_line(surface, rect, orb_color, orb_label,
-                                  orb_timer, orb_infinite, orb_duration)
+    def _draw_eliminated_overlay(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
+        overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+        overlay.fill((8, 10, 16, 150))
+        pygame.draw.line(overlay, (255, 90, 90, 220), (12, 12), (rect.width - 12, rect.height - 12), 7)
+        pygame.draw.line(overlay, (255, 90, 90, 220), (rect.width - 12, 12), (12, rect.height - 12), 7)
+        surface.blit(overlay, rect.topleft)
+
+        badge_rect = pygame.Rect(rect.left + 16, rect.centery - 14, rect.width - 32, 28)
+        self._draw_badge(surface, badge_rect, (30, 18, 22, 230), (255, 90, 90), "ELIMINATED", (255, 225, 225))
 
     def _draw_badge(self, surface: pygame.Surface, rect: pygame.Rect,
                     fill_color: tuple, border_color: tuple, text: str, text_color: tuple) -> None:
@@ -201,6 +217,27 @@ class PlayerCardRenderer:
         pygame.draw.circle(fallback, (255, 255, 255, 140), (radius, radius), radius, 2)
         surface.blit(fallback, fallback.get_rect(center=center))
 
+    def _draw_lives_badge(self, surface: pygame.Surface, rect: pygame.Rect, lives: int, border_color: tuple) -> None:
+        badge = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(badge, CARD_STATUS_BG, badge.get_rect(), border_radius=max(8, rect.height // 2))
+        surface.blit(badge, rect.topleft)
+        pygame.draw.rect(surface, border_color, rect, 1, border_radius=max(8, rect.height // 2))
+
+        life_icon = self._orb_icon_surface("life", 22)
+        icon_left = rect.left + 10
+        if life_icon:
+            icon_rect = life_icon.get_rect(midleft=(icon_left, rect.centery))
+            surface.blit(life_icon, icon_rect)
+            count_x = icon_rect.right + 8
+        else:
+            fallback_radius = 7
+            pygame.draw.circle(surface, (255, 105, 180), (icon_left + fallback_radius, rect.centery), fallback_radius)
+            count_x = icon_left + fallback_radius * 2 + 8
+
+        count_surf = self._font_small.render(str(max(0, lives)), True, (255, 255, 255))
+        count_rect = count_surf.get_rect(midleft=(count_x, rect.centery))
+        surface.blit(count_surf, count_rect)
+
     def _draw_charge_pips(self, surface: pygame.Surface, origin: tuple[int, int],
                           charges: int, accent_color: tuple) -> None:
         required = max(1, POWER_ORBS_REQUIRED)
@@ -224,9 +261,9 @@ class PlayerCardRenderer:
                 pygame.draw.circle(surface, (255, 255, 255, 60), (cx, y), radius, 1)
 
     def _draw_orb_icon(self, surface: pygame.Surface, center: tuple[int, int],
-                       label: Optional[str], active: bool) -> None:
+                       label: Optional[str], active: bool, size: int = 40) -> None:
         key = self._orb_key_from_label(label)
-        icon = self._orb_icon_surface(key, 40)
+        icon = self._orb_icon_surface(key, size)
         if icon:
             to_blit = icon.copy()
             if not active:
@@ -246,22 +283,28 @@ class PlayerCardRenderer:
     def _draw_orb_timer_line(self, surface: pygame.Surface, rect: pygame.Rect,
                               color: tuple, label: Optional[str], timer: float,
                               indefinite: bool, duration: float) -> None:
-        line_rect = pygame.Rect(rect.left + 16, rect.bottom - 12, rect.width - 32, 6)
-        pygame.draw.rect(surface, CARD_TIMER_BORDER, line_rect, border_radius=3)
+        line_rect = rect.copy()
+        if line_rect.width <= 0 or line_rect.height <= 0:
+            return
+
+        line_color = color or CARD_TIMER_FILL
+        pygame.draw.rect(surface, CARD_TIMER_BORDER, line_rect, border_radius=max(2, line_rect.height // 2))
         inner = line_rect.inflate(-2, -2)
-        pygame.draw.rect(surface, CARD_TIMER_BG, inner, border_radius=3)
+        pygame.draw.rect(surface, CARD_TIMER_BG, inner, border_radius=max(1, inner.height // 2))
 
         if not label:
             return
+
         if indefinite or duration <= 0:
-            pygame.draw.rect(surface, color or CARD_TIMER_FILL, inner, border_radius=3)
-            return
-        if timer <= 0:
-            return
-        progress = max(0.0, min(1.0, timer / duration))
-        fill_width = max(2, int(inner.width * progress))
+            fill_width = inner.width
+        else:
+            if timer <= 0:
+                return
+            progress = max(0.0, min(1.0, timer / duration))
+            fill_width = max(2, int(inner.width * progress))
+
         fill_rect = pygame.Rect(inner.left, inner.top, fill_width, inner.height)
-        pygame.draw.rect(surface, color or CARD_TIMER_FILL, fill_rect, border_radius=3)
+        pygame.draw.rect(surface, line_color, fill_rect, border_radius=max(1, inner.height // 2))
 
     def _orb_color_for_label(self, label: Optional[str]) -> tuple:
         if not label:
@@ -271,48 +314,16 @@ class PlayerCardRenderer:
     def _status_summary(self, player, orb_label: Optional[str], orb_timer: float,
                         orb_infinite: bool, orb_duration: float, charges: int) -> str:
         if orb_label:
-            if orb_infinite or orb_duration <= 0:
-                return orb_label.upper()
-            return f"{orb_label.upper()} {orb_timer:.1f}s"
-        if charges > 0:
-            return f"POWER ORBS {charges}/{POWER_ORBS_REQUIRED}"
-        if getattr(player, "is_ai", False):
-            return "AI CONTROLLED"
+            return orb_label.upper()
+        if charges > 0 and getattr(player, "power", None):
+            return "POWER READY"
         return "READY"
 
-    def _controls_summary(self, player) -> str:
-        controls = getattr(player, "controls", {}) or {}
-        move = self._movement_label(controls)
-        jump = self._key_label(controls.get("jump"), "SPACE")
-        power = self._key_label(controls.get("power"), "POWER")
-        return f"MOVE {move}  •  JUMP {jump}  •  POWER {power}"
-
-    def _movement_label(self, controls: dict) -> str:
-        key_names = [self._key_label(controls.get(action), "") for action in ("left", "right", "up", "down")]
-        key_set = {name for name in key_names if name}
-        if key_set == {"W", "A", "S", "D"}:
-            return "WASD"
-        if key_set == {"LEFT", "RIGHT", "UP", "DOWN"}:
-            return "ARROWS"
-        if not key_set:
-            return "MOVE"
-        return "/".join(sorted(key_set))
-
-    def _key_label(self, key_code: Optional[int], fallback: str) -> str:
-        if key_code is None:
-            return fallback
-        name = pygame.key.name(key_code).upper()
-        if name in {"LEFT SHIFT", "RIGHT SHIFT"}:
-            return "SHIFT"
-        if name in {"LEFT CTRL", "RIGHT CTRL"}:
-            return "CTRL"
-        if name == "SLASH":
-            return "/"
-        if name == "BACKSLASH":
-            return "\\"
-        if name == "SPACE":
-            return "SPACE"
-        return name.replace("LEFT ", "").replace("RIGHT ", "").strip()
+    def _player_lives_count(self, player) -> int:
+        if getattr(player, "_eliminated", False):
+            return 0
+        extra_lives = int(getattr(player, "_extra_lives", 0))
+        return max(1, 1 + extra_lives)
 
     def _orb_key_from_label(self, label: Optional[str]) -> Optional[str]:
         if not label:
