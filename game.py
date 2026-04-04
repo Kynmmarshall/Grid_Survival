@@ -17,7 +17,7 @@ from powers import (
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
-from ui import GameHUD, EliminationScreen
+from ui import GameHUD, EliminationScreen, VictoryScreen
 from settings import (
     BACKGROUND_COLOR,
     DEBUG_DRAW_WALKABLE,
@@ -110,6 +110,8 @@ class GameManager:
         self.players = []
         self.eliminated_players = []
         self.elimination_screen = None
+        self.victory_screen = None
+        self.game_over_state = None
         self._spawn_adjusted = False
         self._spawn_rescue_window = 1.0
         self._time_since_start = 0.0
@@ -263,7 +265,9 @@ class GameManager:
             return
 
         if self.game_over:
-            if self.elimination_screen:
+            if self.victory_screen:
+                self.victory_screen.update(dt)
+            elif self.elimination_screen:
                 self.elimination_screen.update(dt)
             return
 
@@ -360,7 +364,18 @@ class GameManager:
         alive_count = len(self.players) - len(self.eliminated_players)
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
 
-        # Check game over condition — either everyone eliminated or no one remains on the platform.
+        # Check game over condition — victory for the last remaining participant,
+        # otherwise elimination when everyone is gone or nobody remains on the platform.
+        if len(self.players) > 1 and alive_count == 1:
+            winner_index = next(
+                (idx for idx, player in enumerate(self.players) if player not in self.eliminated_players),
+                0,
+            )
+            winner = self.players[winner_index] if self.players else None
+            winner_label = getattr(winner, "character_name", self.player_name) if winner else self.player_name
+            self._trigger_victory(f"P{winner_index + 1} - {winner_label} WINS")
+            return
+
         platform_empty = not self._any_player_on_platform()
         if alive_count == 0 or platform_empty:
             self._trigger_game_over()
@@ -437,9 +452,25 @@ class GameManager:
         return None
 
     def _build_network_snapshot(self) -> dict:
+        end_state = None
+        if self.game_over_state == "victory" and self.victory_screen:
+            end_state = {
+                "type": "victory",
+                "winner_name": self.victory_screen.player_name,
+                "survival_time": float(self.victory_screen.survival_time),
+            }
+        elif self.game_over_state == "elimination" and self.elimination_screen:
+            end_state = {
+                "type": "elimination",
+                "player_name": self.elimination_screen.player_name,
+                "survival_time": float(self.elimination_screen.survival_time),
+                "reason": self.elimination_screen.reason,
+            }
+
         return {
             "time_since_start": float(self._time_since_start),
             "game_over": bool(self.game_over),
+            "end_state": end_state,
             "players": [
                 {
                     "player": player.snapshot_state(),
@@ -465,6 +496,9 @@ class GameManager:
         self.hud.apply_snapshot(snapshot.get("hud"))
 
         self.eliminated_players.clear()
+        self.victory_screen = None
+        self.elimination_screen = None
+        self.game_over_state = None
         for idx, entry in enumerate(snapshot.get("players", []) or []):
             if idx >= len(self.players) or not isinstance(entry, dict):
                 continue
@@ -477,10 +511,16 @@ class GameManager:
 
         next_game_over = bool(snapshot.get("game_over", False))
         if next_game_over and not self.game_over:
-            self._trigger_game_over()
+            end_state = snapshot.get("end_state") or {}
+            if isinstance(end_state, dict) and end_state.get("type") == "victory":
+                self._trigger_victory(str(end_state.get("winner_name", self.player_name)))
+            else:
+                self._trigger_game_over()
         elif not next_game_over and self.game_over:
             self.game_over = False
             self.elimination_screen = None
+            self.victory_screen = None
+            self.game_over_state = None
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
@@ -530,7 +570,9 @@ class GameManager:
         self.hud.draw(self.screen, self.players, is_muted=self.audio.is_muted)
 
         # Draw elimination screen if game over
-        if self.elimination_screen:
+        if self.victory_screen:
+            self.victory_screen.draw(self.screen)
+        elif self.elimination_screen:
             self.elimination_screen.draw(self.screen)
 
         pygame.display.flip()
@@ -733,8 +775,14 @@ class GameManager:
 
     def _trigger_game_over(self):
         """Trigger game over state."""
+        self._trigger_elimination()
+
+    def _trigger_elimination(self):
+        """Trigger the elimination end screen."""
         if not self.game_over:
             self.game_over = True
+            self.game_over_state = "elimination"
+            self.victory_screen = None
             self.elimination_screen = EliminationScreen(
                 self.player_name,
                 self.hud.survival_time,
@@ -744,10 +792,23 @@ class GameManager:
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
+    def _trigger_victory(self, winner_name: str):
+        """Trigger the victory end screen."""
+        if not self.game_over:
+            self.game_over = True
+            self.game_over_state = "victory"
+            self.elimination_screen = None
+            self.victory_screen = VictoryScreen(winner_name, self.hud.survival_time)
+            self.victory_screen.show()
+            if self.is_network_game and self.is_network_host and self.network and self.network.connected:
+                self.network.send_message("snapshot", state=self._build_network_snapshot())
+
     def _restart_game(self):
         """Restart the game."""
         self.game_over = False
         self.elimination_screen = None
+        self.victory_screen = None
+        self.game_over_state = None
         self.eliminated_players.clear()
 
         self.tile_manager.reset()

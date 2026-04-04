@@ -38,7 +38,7 @@ def _detect_display_size() -> tuple[int, int]:
 
 
 WINDOW_SIZE = _detect_display_size()
-WINDOW_FLAGS = pygame.FULLSCREEN
+WINDOW_FLAGS = pygame.NOFRAME  # borderless windowed mode for easier screen capture
 WINDOW_TITLE = "GRID SURVIVAL"
 
 # Define Color Palette

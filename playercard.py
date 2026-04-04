@@ -67,7 +67,7 @@ class PlayerCardRenderer:
     def draw(self, surface: pygame.Surface, players: List) -> None:
         if not players:
             return
-        render_players = self._active_players(players)
+        render_players = list(players)
         card_w, card_h = CARD_WIDTH, CARD_HEIGHT
         rects = self._player_card_rects(len(render_players), card_w, card_h)
         for idx, player in enumerate(render_players):
@@ -75,10 +75,6 @@ class PlayerCardRenderer:
                 break
             border_color = CARD_COLOR_PALETTE[idx % len(CARD_COLOR_PALETTE)]
             self._draw_player_card(surface, rects[idx], player, idx, border_color)
-
-    def _active_players(self, players: List) -> List:
-        active = [p for p in players if not getattr(p, "_eliminated", False)]
-        return active or players
 
     def _player_card_rects(self, count: int, width: int, height: int) -> List[pygame.Rect]:
         rects: List[pygame.Rect] = []
@@ -105,6 +101,10 @@ class PlayerCardRenderer:
     def _draw_player_card(self, surface: pygame.Surface, rect: pygame.Rect, player, index: int, border_color: tuple) -> None:
         if player is None:
             return
+        eliminated = bool(getattr(player, "_eliminated", False))
+        if eliminated:
+            border_color = (120, 120, 135)
+
         self._draw_panel(surface, rect, HUD_PANEL_BG, border_color,
                          HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
 
@@ -163,6 +163,19 @@ class PlayerCardRenderer:
 
         self._draw_orb_timer_line(surface, rect, orb_color, orb_label,
                                   orb_timer, orb_infinite, orb_duration)
+
+        if eliminated:
+            self._draw_eliminated_overlay(surface, rect)
+
+    def _draw_eliminated_overlay(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
+        overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+        overlay.fill((8, 10, 16, 150))
+        pygame.draw.line(overlay, (255, 90, 90, 220), (12, 12), (rect.width - 12, rect.height - 12), 7)
+        pygame.draw.line(overlay, (255, 90, 90, 220), (rect.width - 12, 12), (12, rect.height - 12), 7)
+        surface.blit(overlay, rect.topleft)
+
+        badge_rect = pygame.Rect(rect.left + 16, rect.centery - 14, rect.width - 32, 28)
+        self._draw_badge(surface, badge_rect, (30, 18, 22, 230), (255, 90, 90), "ELIMINATED", (255, 225, 225))
 
     def _draw_badge(self, surface: pygame.Surface, rect: pygame.Rect,
                     fill_color: tuple, border_color: tuple, text: str, text_color: tuple) -> None:
