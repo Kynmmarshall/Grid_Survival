@@ -8,6 +8,7 @@ import pygame
 from audio import get_audio
 from settings import (
     MUSIC_PATH,
+    TUTORIAL_VIDEO_PATH,
     WINDOW_SIZE,
     TARGET_FPS,
     SCENE_FADE_SPEED,
@@ -73,6 +74,7 @@ class TitleScreen:
         self.warning_text = ""
         self.warning_timer = 0.0
         self._title_time = 0.0
+        self._quit_requested = False
 
         # Title letter animation
         self._letters = []
@@ -98,6 +100,7 @@ class TitleScreen:
         self._spawn_particles(TITLE_PARTICLE_COUNT)
 
         self._start_music()
+        self._tutorial_button_rect = pygame.Rect(24, self.height - 124, 190, 46)
         self._back_button_rect = pygame.Rect(24, self.height - 68, 150, 46)
 
         # Load background
@@ -274,6 +277,7 @@ class TitleScreen:
             self.screen.blit(warn_surf, warn_surf.get_rect(center=(self.width // 2, 490)))
 
         self._draw_controls_panel()
+        self._draw_tutorial_button()
         self._draw_back_button()
 
     def _draw_controls_panel(self) -> None:
@@ -347,6 +351,131 @@ class TitleScreen:
         label = self._font_small.render("EXIT", True, (235, 235, 245))
         self.screen.blit(label, label.get_rect(center=self._back_button_rect.center))
 
+    def _draw_tutorial_button(self) -> None:
+        mouse_pos = pygame.mouse.get_pos()
+        hovered = self._tutorial_button_rect.collidepoint(mouse_pos)
+        base_color = (30, 45, 70, 210)
+        hover_color = (60, 90, 130, 230)
+        bg_color = hover_color if hovered else base_color
+        border_color = (120, 170, 220)
+        _draw_rounded_rect(self.screen, self._tutorial_button_rect, bg_color, border_color, 2, 14)
+        label = self._font_small.render("TUTORIAL", True, (235, 240, 250))
+        self.screen.blit(label, label.get_rect(center=self._tutorial_button_rect.center))
+
+    def _play_tutorial_video(self) -> None:
+        if not TUTORIAL_VIDEO_PATH.exists():
+            self.warning_text = "TUTORIAL VIDEO NOT FOUND"
+            self.warning_timer = WARNING_DISPLAY_DURATION
+            return
+
+        try:
+            import importlib
+
+            cv2 = importlib.import_module("cv2")
+        except Exception:
+            self.warning_text = "INSTALL OPENCV: pip install opencv-python"
+            self.warning_timer = WARNING_DISPLAY_DURATION
+            return
+
+        capture = cv2.VideoCapture(str(TUTORIAL_VIDEO_PATH))
+        if not capture.isOpened():
+            self.warning_text = "FAILED TO OPEN TUTORIAL VIDEO"
+            self.warning_timer = WARNING_DISPLAY_DURATION
+            return
+
+        self.audio.stop_music(fade_ms=200)
+
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        if fps <= 1 or fps > 120:
+            fps = 30.0
+        target_fps = max(15, min(60, int(round(fps))))
+        frame_clock = pygame.time.Clock()
+
+        panel_w = int(self.width * 0.72)
+        panel_h = int(self.height * 0.72)
+        panel_rect = pygame.Rect((self.width - panel_w) // 2, (self.height - panel_h) // 2, panel_w, panel_h)
+        header_h = 48
+        padding = 16
+        content_rect = pygame.Rect(
+            panel_rect.left + padding,
+            panel_rect.top + header_h + 8,
+            panel_rect.width - padding * 2,
+            panel_rect.height - header_h - padding - 8,
+        )
+
+        while True:
+            dt = frame_clock.tick(target_fps) / 1000.0
+            close_rect = pygame.Rect(panel_rect.right - 104, panel_rect.top + 10, 88, 30)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self._quit_requested = True
+                    capture.release()
+                    return
+                if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_RETURN):
+                    capture.release()
+                    self._start_music()
+                    return
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if close_rect.collidepoint(event.pos):
+                        capture.release()
+                        self._start_music()
+                        return
+
+            ok, frame = capture.read()
+            if not ok:
+                break
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_h, frame_w = frame_rgb.shape[:2]
+            frame_surface = pygame.image.frombuffer(frame_rgb.tobytes(), (frame_w, frame_h), "RGB")
+
+            scale = min(content_rect.width / frame_w, content_rect.height / frame_h)
+            draw_w = max(1, int(frame_w * scale))
+            draw_h = max(1, int(frame_h * scale))
+            if draw_w != frame_w or draw_h != frame_h:
+                frame_surface = pygame.transform.smoothscale(frame_surface, (draw_w, draw_h))
+
+            draw_x = content_rect.left + (content_rect.width - draw_w) // 2
+            draw_y = content_rect.top + (content_rect.height - draw_h) // 2
+
+            # Keep title animations alive behind the tutorial panel.
+            self._title_time += dt
+            self.warning_timer = max(0.0, self.warning_timer - dt)
+            self._cursor_timer += dt
+            if self._cursor_timer >= 1.0 / CURSOR_BLINK_SPEED:
+                self._cursor_timer = 0.0
+                self._cursor_visible = not self._cursor_visible
+            self._update_shake(dt)
+            self._update_particles(dt)
+
+            self._draw_background()
+            self._draw_title()
+            self._draw_input()
+
+            dimmer = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            dimmer.fill((0, 0, 0, 140))
+            self.screen.blit(dimmer, (0, 0))
+
+            _draw_rounded_rect(self.screen, panel_rect, (14, 20, 34, 240), (125, 165, 220), 2, 14)
+            pygame.draw.rect(self.screen, (5, 8, 14), content_rect, border_radius=8)
+            self.screen.blit(frame_surface, (draw_x, draw_y))
+
+            heading = self._font_small.render("TUTORIAL", True, (235, 240, 250))
+            self.screen.blit(heading, (panel_rect.left + 16, panel_rect.top + 14))
+
+            hovered_close = close_rect.collidepoint(pygame.mouse.get_pos())
+            close_bg = (180, 70, 70, 235) if hovered_close else (130, 56, 56, 220)
+            close_border = (245, 170, 170)
+            _draw_rounded_rect(self.screen, close_rect, close_bg, close_border, 2, 10)
+            close_text = self._font_small.render("CLOSE", True, (245, 245, 245))
+            self.screen.blit(close_text, close_text.get_rect(center=close_rect.center))
+
+            pygame.display.flip()
+
+        capture.release()
+        if not self._quit_requested:
+            self._start_music()
+
     # ── shake update ─────────────────────────────────────────────────────
 
     def _update_shake(self, dt: float) -> None:
@@ -414,6 +543,11 @@ class TitleScreen:
                 if event.type == pygame.QUIT:
                     return None
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self._tutorial_button_rect.collidepoint(event.pos):
+                        self._play_tutorial_video()
+                        if self._quit_requested:
+                            return None
+                        continue
                     if self._back_button_rect.collidepoint(event.pos):
                         self._fade("out")
                         return None
