@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "Grid Survival"
-#define MyAppVersion "1.02"
+#define MyAppVersion "1.2"
 #define MyAppPublisher "GridSurvival, Inc."
 #define MyAppURL "https://pickmydish.duckdns.org:6060"
 #define MyAppExeName "Grid Survival.exe"
@@ -77,7 +77,7 @@ Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\kynm\Desktop\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Users\kynm\Desktop\Grid_Survival\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Registry]
