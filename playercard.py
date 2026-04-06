@@ -201,6 +201,29 @@ class PlayerCardRenderer:
         pygame.draw.circle(fallback, (255, 255, 255, 140), (radius, radius), radius, 2)
         surface.blit(fallback, fallback.get_rect(center=center))
 
+<<<<<<< Updated upstream
+=======
+    def _draw_lives_badge(self, surface: pygame.Surface, rect: pygame.Rect, lives: int, border_color: tuple) -> None:
+        badge = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(badge, CARD_STATUS_BG, badge.get_rect(), border_radius=max(8, rect.height // 2))
+        surface.blit(badge, rect.topleft)
+        pygame.draw.rect(surface, border_color, rect, 1, border_radius=max(8, rect.height // 2))
+
+        life_icon = self._orb_icon_surface("life", 16)
+        if life_icon:
+            for i in range(max(0, lives)):
+                icon_x = rect.left + 10 + i * 18
+                if icon_x + 16 < rect.right:
+                    icon_rect = life_icon.get_rect(midleft=(icon_x, rect.centery))
+                    surface.blit(life_icon, icon_rect)
+        else:
+            fallback_radius = 6
+            for i in range(max(0, lives)):
+                icon_x = rect.left + 10 + i * 18
+                if icon_x + fallback_radius * 2 < rect.right:
+                    pygame.draw.circle(surface, (255, 105, 180), (icon_x + fallback_radius, rect.centery), fallback_radius)
+
+>>>>>>> Stashed changes
     def _draw_charge_pips(self, surface: pygame.Surface, origin: tuple[int, int],
                           charges: int, accent_color: tuple) -> None:
         required = max(1, POWER_ORBS_REQUIRED)

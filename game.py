@@ -17,16 +17,24 @@ from powers import (
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
+<<<<<<< Updated upstream
 from ui import GameHUD, EliminationScreen
+=======
+from ui import GameHUD, EliminationScreen, VictoryScreen
+from level_config import get_level, MAX_LEVEL
+>>>>>>> Stashed changes
 from settings import (
     BACKGROUND_COLOR,
     DEBUG_DRAW_WALKABLE,
     DEBUG_VISUALS_ENABLED,
     DEBUG_WALKABLE_COLOR,
+    MODE_STORY,
     MODE_VS_COMPUTER,
+    MODE_SURVIVAL,
     MODE_LOCAL_MULTIPLAYER,
     MODE_ONLINE_MULTIPLAYER,
     PLAYER_START_POS,
+    PLAYER_DEFAULT_DIRECTION,
     TARGET_FPS,
     WINDOW_FLAGS,
     USE_AI_PLAYER,
@@ -34,6 +42,15 @@ from settings import (
     WINDOW_TITLE,
     SOUND_PLAYER_FALL,
 )
+
+
+class Flag:
+    def __init__(self, position):
+        self.position = pygame.Vector2(position)
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, (255, 255, 0), self.position, 20)  # Yellow flag
+        pygame.draw.rect(screen, (139, 69, 19), (self.position.x - 2, self.position.y - 30, 4, 30))  # Pole
 
 
 class GameManager:
@@ -44,10 +61,11 @@ class GameManager:
         screen=None,
         clock=None,
         player_name: str = "Player",
-        game_mode: str = MODE_VS_COMPUTER,
+        game_mode: str = MODE_SURVIVAL,
         selected_characters: list[str] | None = None,
         network=None,
         local_player_index: int = 0,
+        selected_level: int = 1,
     ):
         if screen is None or clock is None:
             pygame.init()
@@ -70,6 +88,19 @@ class GameManager:
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = 1 / 20
         self._snapshot_interval = 1 / 20
+
+        # Level progression
+        self.current_level = selected_level
+        self.level_config = get_level(self.current_level)
+        self.level_mode = (self.game_mode == MODE_STORY)
+        self.level_complete = False  # Always define this attribute
+        if self.level_mode:
+            self.flag = None
+            self.flag_spawned = False
+            self.level_display_timer = 3.0
+        self.paused = False
+        self.advancing = False
+        self.advance_timer = 0.0
         
         # Load assets
         self.background_surface = load_background_surface(WINDOW_SIZE)
@@ -104,7 +135,12 @@ class GameManager:
         self.hazard_manager = HazardManager(self.collision_manager)
         self.hud = GameHUD()
         self.water = AnimatedWater()
+<<<<<<< Updated upstream
         self.orb_manager = OrbManager()
+=======
+        self.orb_manager = OrbManager(level_number=self.current_level)
+        self.pacman_enemy_manager = None
+>>>>>>> Stashed changes
 
         # Initialize players based on game mode
         self.players = []
@@ -114,6 +150,9 @@ class GameManager:
         self._spawn_rescue_window = 1.0
         self._time_since_start = 0.0
         self._pending_initial_restart = (self.game_mode == MODE_VS_COMPUTER and USE_AI_PLAYER)
+
+        if self.level_mode:
+            self._spawn_initial_life_orbs()
         if self.game_mode == MODE_VS_COMPUTER:
             primary_char = self._character_choice(0)
             self.players.append(
@@ -122,9 +161,18 @@ class GameManager:
                     character_name=primary_char,
                 )
             )
-            if USE_AI_PLAYER:
+            for i in range(self.level_config.ai.count):
                 ai_pos = next(spawn_positions, PLAYER_START_POS)
                 self.players.append(AIPlayer(position=ai_pos))
+        elif self.game_mode == MODE_SURVIVAL:
+            primary_char = self._character_choice(0)
+            self.players.append(
+                Player(
+                    position=next(spawn_positions, PLAYER_START_POS),
+                    character_name=primary_char,
+                )
+            )
+            # Survival mode: single player, no AI
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
             player1_controls = {
                 'up': pygame.K_w,
@@ -195,6 +243,15 @@ class GameManager:
         self._ensure_players_on_walkable_surface()
         self._force_safe_spawns()
         self._configure_powers_for_players()
+<<<<<<< Updated upstream
+=======
+
+        if not self.is_network_game:
+            enemy_count = self._pacman_enemy_count()
+            if enemy_count > 0:
+                enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
+                self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
+>>>>>>> Stashed changes
 
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
@@ -218,6 +275,15 @@ class GameManager:
                         player.reset()
                 elif event.key == pygame.K_r and self.game_over and not self.is_network_game:
                     self._restart_game()
+                elif event.key == pygame.K_p:
+                    self.paused = not self.paused
+                elif self.paused and event.key == pygame.K_r:
+                    self._restart_game()
+                    self.paused = False
+                elif self.level_mode and self.level_complete and event.key == pygame.K_SPACE:
+                    self.advancing = True
+                    self.advance_timer = 2.0
+                    self.victory_screen = None
                 else:
                     if self.is_network_game:
                         local_player = self._local_network_player()
@@ -267,7 +333,23 @@ class GameManager:
                 self.elimination_screen.update(dt)
             return
 
+        if self.level_complete:
+            if self.victory_screen:
+                self.victory_screen.update(dt)
+            elif self.advancing:
+                self.advance_timer -= dt
+                if self.advance_timer <= 0:
+                    self._advance_level()
+                    self.advancing = False
+            return
+
+        if self.paused:
+            return
+
         self._time_since_start += dt
+        self.hud.score = int(self._time_since_start * 10)
+        if self.level_mode:
+            self.level_display_timer = max(0.0, self.level_display_timer - dt)
 
         # Update game systems
         if not self._spawn_adjusted and self.walkable_mask:
@@ -336,16 +418,22 @@ class GameManager:
             # Check water contact
             self._check_water_contact(player)
 
+            # Check flag touch (for level progression)
+            if self.level_mode and self.flag and player not in self.eliminated_players and player.position.distance_to(self.flag.position) < 30:
+                self.level_complete = True
+                self.eliminated_players.append(player)
+                player._eliminated = True
+                # Auto-advance to next level
+                self.advancing = True
+                self.advance_timer = 2.0
+                self.victory_screen = None
+
             # Check hazard collisions
-            if self.hazard_manager.check_player_collision(player):
-                # Check for LIFE orb collection before elimination
-                self._check_life_orb_collection(player)
+            if self.hazard_manager.check_player_collision(player) and player._revival_immunity_timer <= 0 and not self.level_complete:
                 self._eliminate_player(player, "hit by hazard")
 
             # Check if player fell off screen
-            if player.position.y > WINDOW_SIZE[1] + 100:
-                # Check for LIFE orb collection before elimination
-                self._check_life_orb_collection(player)
+            if player.position.y > WINDOW_SIZE[1] + 100 and player._revival_immunity_timer <= 0 and not self.level_complete:
                 self._eliminate_player(player, "fell off")
 
         for player in self.players:
@@ -354,11 +442,32 @@ class GameManager:
             if player.power:
                 player.power.apply_to_game(self)
 
+<<<<<<< Updated upstream
+=======
+        if self.pacman_enemy_manager:
+            ghost_victims = self.pacman_enemy_manager.update(
+                dt,
+                self.players,
+                self.walkable_mask,
+                self.walkable_bounds,
+            )
+            seen_victims: set[int] = set()
+            for victim in ghost_victims:
+                victim_id = id(victim)
+                if victim_id in seen_victims:
+                    continue
+                seen_victims.add(victim_id)
+                if victim._revival_immunity_timer <= 0 and not self.level_complete:
+                    self._eliminate_player(victim, "hit by hazard")
+
+>>>>>>> Stashed changes
         self.orb_manager.update(dt, self.walkable_bounds, self.players, self)
 
         # Update player count in HUD
         alive_count = len(self.players) - len(self.eliminated_players)
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
+        lives = sum(getattr(p, '_extra_lives', 0) for p in self.players if p not in self.eliminated_players)
+        self.hud.set_lives(lives)
 
         # Check game over condition — either everyone eliminated or no one remains on the platform.
         platform_empty = not self._any_player_on_platform()
@@ -367,6 +476,13 @@ class GameManager:
 
         for player in self.players:
             player._eliminated = player in self.eliminated_players
+
+        if self.level_mode:
+            # Flag spawn
+            if not self.flag_spawned and self.hud.score >= self.level_config.score_threshold:
+                cx, cy = WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2
+                self.flag = Flag((cx, cy))
+                self.flag_spawned = True
 
         if self.is_network_game and self.is_network_host:
             if self._snapshot_send_timer >= self._snapshot_interval:
@@ -519,6 +635,26 @@ class GameManager:
         # Draw hazards
         self.hazard_manager.draw(self.screen)
 
+        # Draw flag
+        if self.level_mode and self.flag:
+            self.flag.draw(self.screen)
+
+        # Draw level display
+        if self.level_mode and self.level_display_timer > 0:
+            font = pygame.font.SysFont("consolas", 36, bold=True)
+            text = f"Level {self.current_level}"
+            surf = font.render(text, True, (255, 255, 255))
+            rect = surf.get_rect(midtop=(WINDOW_SIZE[0] // 2, 20))
+            self.screen.blit(surf, rect)
+
+        # Draw advancing text
+        if self.advancing:
+            font = pygame.font.SysFont("consolas", 48, bold=True)
+            text = f"Advancing to Level {self.current_level + 1}"
+            surf = font.render(text, True, (255, 255, 255))
+            rect = surf.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2))
+            self.screen.blit(surf, rect)
+
         # Draw active power visuals
         for player in self.players:
             if player in self.eliminated_players:
@@ -528,6 +664,10 @@ class GameManager:
 
         # Draw HUD
         self.hud.draw(self.screen, self.players, is_muted=self.audio.is_muted)
+
+        # Draw pause menu
+        if self.paused:
+            self._draw_pause_menu()
 
         # Draw elimination screen if game over
         if self.elimination_screen:
@@ -624,7 +764,7 @@ class GameManager:
         walkable_center = self._walkable_center()
         safe_position = self._find_valid_fallback(player, occupied, walkable_center)
         if not safe_position:
-            return False
+            safe_position = pygame.Vector2(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)
         self._apply_spawn_position(player, safe_position)
         player.falling = False
         player.fall_velocity = 0.0
@@ -636,6 +776,12 @@ class GameManager:
         player.z_velocity = 0.0
         player.on_ground = True
         player.velocity.update(0, 0)
+        # Reset state and animation
+        player.state = "idle"
+        player.facing = PLAYER_DEFAULT_DIRECTION
+        player.current_animation = player.animations["idle"][player.facing]
+        player.current_animation.reset()
+        player._refresh_collision_shape(force=True)
         if hasattr(player, "_death_fade_alpha"):
             player._death_fade_alpha = 255
         if hasattr(player, "_set_state"):
@@ -660,6 +806,9 @@ class GameManager:
         if player not in self.eliminated_players:
             self._eliminate_player(player, "drowned")
 
+        # Check if player can collect LIFE orb before final elimination
+        self._check_life_orb_collection(player)
+
     def _check_life_orb_collection(self, player):
         """Check if player can collect a LIFE orb before elimination."""
         # Check if player is about to be eliminated and can collect a LIFE orb
@@ -677,24 +826,29 @@ class GameManager:
 
     def _eliminate_player(self, player, reason: str):
         """Mark a player as eliminated."""
-        if self._can_block_elimination(player, reason):
-            print(f"Elimination blocked by shield/immunity (Reason: {reason})")
-            return
-        # Check if player has an extra life to revive
+        # Check FIRST if player has an extra life to revive - this takes priority over shields
         if hasattr(player, 'has_extra_life') and player.has_extra_life():
-            if player.use_life():
-                # Remove from eliminated list if they were in it
+            # Try to rescue first, only consume life if rescue succeeds
+            if hasattr(player, 'has_extra_life') and player.has_extra_life():
+                player.use_life()
+                rescued = self._rescue_player_to_safe_tile(player)
                 if player in self.eliminated_players:
                     self.eliminated_players.remove(player)
-                # Reset eliminated flag
                 player._eliminated = False
-                # Revive the player at a safe position
-                self._rescue_player_to_safe_tile(player)
-                print(f"Player revived with extra life! (Reason: {reason})")
+                player._shield_timer = 0.0
+                player._revival_blink_timer = 2.0
+                player._revival_immunity_timer = 10.0
                 return
+        # Check if shield can block elimination (only after checking extra lives)
+        if self._can_block_elimination(player, reason):
+            return
         if player not in self.eliminated_players:
             self.eliminated_players.append(player)
+<<<<<<< Updated upstream
             print(f"Player eliminated: {reason}")
+=======
+            player._eliminated = True
+>>>>>>> Stashed changes
             # Trigger death state if available
             if hasattr(player, 'die'):
                 player.die()
@@ -744,6 +898,20 @@ class GameManager:
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
+<<<<<<< Updated upstream
+=======
+    def _trigger_victory(self, winner_name: str):
+        """Trigger the victory end screen."""
+        if not self.game_over:
+            self.game_over = True
+            self.game_over_state = "victory"
+            self.elimination_screen = None
+            self.victory_screen = VictoryScreen(f"{winner_name} Wins!", self.hud.survival_time)
+            self.victory_screen.show()
+            if self.is_network_game and self.is_network_host and self.network and self.network.connected:
+                self.network.send_message("snapshot", state=self._build_network_snapshot())
+
+>>>>>>> Stashed changes
     def _restart_game(self):
         """Restart the game."""
         self.game_over = False
@@ -763,9 +931,76 @@ class GameManager:
             if player.power:
                 player.power.reset()
 
+    def _advance_level(self):
+        """Advance to the next level."""
+        self.current_level += 1
+        if self.current_level > MAX_LEVEL:
+            # Game complete
+            self.victory_screen = VictoryScreen("Congratulations! You completed all levels!", self._time_since_start)
+            self.level_complete = False
+            return
+
+        self.level_config = get_level(self.current_level)
+        self.flag = None
+        self.flag_spawned = False
+        self.level_complete = False
+        self.paused = False
+
+        # Reset game state
+        self.game_over = False
+        self.elimination_screen = None
+        self.victory_screen = None
+        self.game_over_state = None
+        self.eliminated_players.clear()
+
+        self.tile_manager.reset()
+        self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
+        self.hazard_manager.reset()
+        self.orb_manager = OrbManager(level_number=self.current_level)
+        self.hud.reset()
+        self._spawn_adjusted = False
+        self._time_since_start = 0.0
+
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.reset()
+
+        # Initialize players with new level config
+        slot_count = self._player_slot_count()
+        spawn_positions = iter(self._initial_spawns(slot_count))
+        
+        # Keep existing players and their extra lives, just reset positions
+        for player in self.players:
+            pos = next(spawn_positions, PLAYER_START_POS)
+            player.spawn_position = pygame.Vector2(pos)
+            player.position = pygame.Vector2(pos)
+            player.rect.center = pos
+            player.reset_state_for_respawn()
+        
+        # Add any missing players up to slot_count
+        while len(self.players) < slot_count:
+            primary_char = self._character_choice(len(self.players))
+            self.players.append(
+                Player(
+                    position=next(spawn_positions, PLAYER_START_POS),
+                    character_name=primary_char,
+                )
+            )
+
         self._ensure_players_on_walkable_surface()
         self._force_safe_spawns()
         self._configure_powers_for_players()
+        if not self.is_network_game:
+            enemy_count = self._pacman_enemy_count()
+            if enemy_count > 0:
+                enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
+                self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
+
+        self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
+
+        self._ensure_players_on_walkable_surface()
+        self._force_safe_spawns()
+        self._configure_powers_for_players()
+
         self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
 
     def _force_safe_spawns(self):
@@ -821,6 +1056,20 @@ class GameManager:
     def _configure_powers_for_players(self):
         for idx, player in enumerate(self.players):
             self._configure_power_for_player(player, idx)
+
+    def _spawn_initial_life_orbs(self):
+        """Spawn initial life orbs for all non-AI players at random map positions."""
+        from orbs import MagicOrb, OrbType
+        if not hasattr(self, 'orb_manager') or self.orb_manager is None:
+            return
+        if not self.walkable_bounds:
+            return
+        for player in self.players:
+            if not player.is_ai:
+                pos = self.orb_manager._spawn_position_from_bounds(self.walkable_bounds)
+                if pos:
+                    self.orb_manager.orbs.append(MagicOrb(OrbType.LIFE, pos))
+                    self.orb_manager._life_orb_count += 1
 
     def _configure_power_for_player(self, player, slot_index: int):
         if getattr(player, "power", None):
@@ -933,7 +1182,10 @@ class GameManager:
             return max(2, len(self.selected_characters))
         if self.game_mode == MODE_VS_COMPUTER:
             human_slots = max(1, len(self.selected_characters))
-            return human_slots + (1 if USE_AI_PLAYER else 0)
+            return human_slots + self.level_config.ai.count
+        elif self.game_mode == MODE_SURVIVAL:
+            human_slots = max(1, len(self.selected_characters))
+            return human_slots  # No AI
         return max(1, len(self.selected_characters))
 
     def _spawn_positions(self, count: int) -> list[tuple[int, int]]:
@@ -971,11 +1223,77 @@ class GameManager:
             return positions
         return self._spawn_positions(count)
 
+    def _draw_pause_menu(self):
+        """Draw the pause menu overlay."""
+        overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 128))  # Semi-transparent black
+        self.screen.blit(overlay, (0, 0))
+
+        font = pygame.font.SysFont(None, 48)
+        title = font.render("Paused", True, (255, 255, 255))
+        self.screen.blit(title, (WINDOW_SIZE[0] // 2 - title.get_width() // 2, WINDOW_SIZE[1] // 2 - 100))
+
+        font_small = pygame.font.SysFont(None, 36)
+        resume = font_small.render("P - Resume", True, (255, 255, 255))
+        restart = font_small.render("R - Restart Level", True, (255, 255, 255))
+        quit = font_small.render("ESC - Quit to Menu", True, (255, 255, 255))
+
+        self.screen.blit(resume, (WINDOW_SIZE[0] // 2 - resume.get_width() // 2, WINDOW_SIZE[1] // 2 - 20))
+        self.screen.blit(restart, (WINDOW_SIZE[0] // 2 - restart.get_width() // 2, WINDOW_SIZE[1] // 2 + 20))
+        self.screen.blit(quit, (WINDOW_SIZE[0] // 2 - quit.get_width() // 2, WINDOW_SIZE[1] // 2 + 60))
+
     def _initial_spawns(self, count: int) -> list[tuple[int, int]]:
-        if self.game_mode == MODE_VS_COMPUTER:
+        if self.game_mode == MODE_SURVIVAL:
             return self._vs_computer_spawns(count)
         return self._spawn_positions(count)
 
+<<<<<<< Updated upstream
+=======
+    def _pacman_enemy_count(self) -> int:
+        if self.is_network_game:
+            return 0
+        if self.game_mode == MODE_SURVIVAL:
+            return 1
+        if self.game_mode == MODE_LOCAL_MULTIPLAYER:
+            return 2
+        return 1 if self.players else 0
+
+    def _initial_pacman_enemy_spawns(self, count: int) -> list[tuple[int, int]]:
+        if count <= 0:
+            return []
+        if not self.players:
+            return [PLAYER_START_POS for _ in range(count)]
+        if not self.walkable_mask:
+            return self._spawn_positions(count)
+
+        occupied = {
+            (int(round(player.position.x)), int(round(player.position.y)))
+            for player in self.players
+        }
+        center = self._walkable_center()
+        prototype = self.players[0]
+        offsets = [
+            pygame.Vector2(0, -160),
+            pygame.Vector2(160, 0),
+            pygame.Vector2(0, 160),
+            pygame.Vector2(-160, 0),
+            pygame.Vector2(120, -120),
+            pygame.Vector2(120, 120),
+            pygame.Vector2(-120, 120),
+            pygame.Vector2(-120, -120),
+        ]
+
+        spawns: list[tuple[int, int]] = []
+        for index in range(count):
+            offset = offsets[index % len(offsets)]
+            spread = (index // len(offsets)) * 48
+            candidate = center + offset + pygame.Vector2(spread, 0)
+            spawn = self._find_valid_fallback(prototype, occupied, candidate)
+            spawns.append(spawn)
+            occupied.add(spawn)
+        return spawns
+
+>>>>>>> Stashed changes
     def _character_choice(self, index: int) -> str | None:
         if not self.selected_characters:
             return None

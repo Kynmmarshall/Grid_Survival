@@ -90,10 +90,12 @@ class GameHUD:
         self._font_card_small = _load_font(FONT_PATH_HUD, max(10, FONT_SIZE_LABEL - 2))
         self._player_cards = PlayerCardRenderer(self._font_card_small, _draw_panel)
 
+        self.score = 0
         self.survival_time = 0.0
         self.player_name = "Player"
         self.players_alive = 1
         self.total_players = 1
+        self.total_lives = 0
 
         # Timer urgency pulse
         self._pulse_timer = 0.0
@@ -131,10 +133,42 @@ class GameHUD:
     def draw(self, surface: pygame.Surface, players: List, is_muted: bool = False):
         """Draw HUD elements."""
         self._draw_timer_panel(surface)
+        self._draw_lives_panel(surface)
         self._draw_mute_button(surface, is_muted)
         self._draw_player_cards(surface, players)
         if self.total_players > 1:
             self._draw_alive_panel(surface)
+
+    def _draw_lives_panel(self, surface: pygame.Surface):
+        """Lives counter panel — bottom-left."""
+        if self.total_lives <= 0:
+            return
+
+        lives_color = (255, 105, 180)  # Pink heart color
+
+        label_surf = self._font_label.render("LIVES", True, lives_color)
+        value_surf = self._font_value.render(str(self.total_lives), True, HUD_VALUE_COLOR)
+
+        panel_w = max(label_surf.get_width(), value_surf.get_width()) + HUD_PANEL_PADDING_H * 2
+        panel_h = label_surf.get_height() + value_surf.get_height() + HUD_PANEL_PADDING_V * 3
+        panel_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 20, panel_w, panel_h)
+
+        _draw_panel(surface, panel_rect, HUD_PANEL_BG, lives_color,
+                    HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
+
+        lx = panel_rect.centerx - label_surf.get_width() // 2
+        ly = panel_rect.top + HUD_PANEL_PADDING_V
+        surface.blit(label_surf, (lx, ly))
+
+        vx = panel_rect.centerx - value_surf.get_width() // 2
+        vy = ly + label_surf.get_height() + HUD_PANEL_PADDING_V
+        surface.blit(value_surf, (vx, vy))
+
+        # Draw heart icon
+        heart = "♥"
+        heart_surf = self._font_value.render(heart, True, lives_color)
+        heart_rect = heart_surf.get_rect(center=(panel_rect.centerx - 40, panel_rect.centery))
+        surface.blit(heart_surf, heart_rect)
 
     def _draw_mute_button(self, surface: pygame.Surface, is_muted: bool):
         """Draw a clickable mute button."""
@@ -146,9 +180,15 @@ class GameHUD:
 
         panel_w = label_surf.get_width() + HUD_PANEL_PADDING_H * 2
         panel_h = label_surf.get_height() + HUD_PANEL_PADDING_V * 2
+<<<<<<< Updated upstream
         
         # Keep the audio control out of the top edge so it stays clear of the player cards.
         self.mute_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 20, panel_w, panel_h)
+=======
+
+        # Position after lives panel
+        self.mute_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 100, panel_w, panel_h)  # Adjusted Y
+>>>>>>> Stashed changes
 
         _draw_panel(surface, self.mute_rect, HUD_PANEL_BG, color,
                     HUD_PANEL_BORDER_WIDTH, 8, glow=False)
@@ -243,6 +283,10 @@ class GameHUD:
         self.player_name = name
         self.players_alive = alive
         self.total_players = total
+
+    def set_lives(self, lives: int):
+        """Update total lives display."""
+        self.total_lives = lives
 
     def snapshot_state(self) -> dict:
         """Serialize HUD values for LAN clients."""
@@ -391,9 +435,10 @@ class EliminationScreen:
 class VictoryScreen:
     """Screen shown when player wins (survives longest in multiplayer)."""
 
-    def __init__(self, player_name: str, survival_time: float):
-        self.player_name = player_name
+    def __init__(self, message: str, survival_time: float, player_name: str = ""):
+        self.message = message
         self.survival_time = survival_time
+        self.player_name = player_name
 
         self.font_title = _load_font(FONT_PATH_HUD, 42, bold=True)
         self.font_large = _load_font(FONT_PATH_HUD, 28, bold=True)
@@ -434,7 +479,7 @@ class VictoryScreen:
         g = int(200 + 55 * pulse)
         title_color = (80, g, 80)
 
-        title_surf = self.font_title.render("VICTORY!", True, title_color)
+        title_surf = self.font_title.render(self.message, True, title_color)
         max_w = int(WINDOW_SIZE[0] * 0.80)
         if title_surf.get_width() > max_w:
             scale = max_w / title_surf.get_width()
@@ -445,7 +490,7 @@ class VictoryScreen:
             )
         title_surf.set_alpha(text_alpha)
 
-        shadow_surf = self.font_title.render("VICTORY!", True, (0, 0, 0))
+        shadow_surf = self.font_title.render(self.message, True, (0, 0, 0))
         if shadow_surf.get_width() > max_w:
             shadow_surf = pygame.transform.smoothscale(shadow_surf, title_surf.get_size())
         shadow_surf.set_alpha(int(text_alpha * 0.5))

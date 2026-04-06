@@ -9,11 +9,18 @@ from lan_prompts import prompt_host_or_join, prompt_ip_entry, toast_message
 from host_waiting_screen import host_waiting_screen
 from lan_prompts import draw_lan_backdrop, prompt_host_or_join, prompt_ip_entry
 from network import NetworkClient, NetworkHost, get_local_ip
+<<<<<<< Updated upstream
 from scenes import ModeSelectionScreen, PlayerSelectionScreen, TitleScreen
 from scenes.common import _draw_rounded_rect, _load_font
+=======
+from scenes import ModeSelectionScreen, LevelSelectionScreen, PlayerSelectionScreen, TitleScreen
+from scenes.common import SceneAudioOverlay, _draw_rounded_rect, _load_font
+>>>>>>> Stashed changes
 from settings import (
     FONT_PATH_BODY,
     FONT_PATH_HEADING,
+    MODE_STORY,
+    MODE_SURVIVAL,
     MODE_LOCAL_MULTIPLAYER,
     MODE_ONLINE_MULTIPLAYER,
     WINDOW_FLAGS,
@@ -147,6 +154,16 @@ def main():
             local_player_index = 0
             num_players = 2 if game_mode == MODE_LOCAL_MULTIPLAYER else 1
 
+            selected_level = 1
+            if game_mode == MODE_STORY:
+                level_select = LevelSelectionScreen(screen, clock, player_name, selected_level)
+                selected_level = level_select.run()
+                if selected_level is None:
+                    if getattr(level_select, "quit_requested", False):
+                        pygame.quit()
+                        return
+                    continue
+
             if game_mode == MODE_ONLINE_MULTIPLAYER:
                 choice = prompt_host_or_join(screen, clock)
                 if choice is None:
@@ -219,6 +236,7 @@ def main():
                     selected_characters=selected_characters,
                     network=network,
                     local_player_index=local_player_index,
+                    selected_level=selected_level,
                 ).run()
                 pygame.quit()
                 return

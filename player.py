@@ -114,6 +114,8 @@ class Player:
         self._active_orb_indefinite = False
         self._active_orb_duration = 0.0
         self._extra_lives = 0  # Extra lives from LIFE orbs
+        self._revival_blink_timer = 0.0
+        self._revival_immunity_timer = 0.0
 
     def _load_animations(self):
         animations = {}
@@ -190,7 +192,6 @@ class Player:
     def add_life(self):
         """Add an extra life from a LIFE orb."""
         self._extra_lives += 1
-        print(f"DEBUG: Player now has {self._extra_lives} extra lives")
 
     def has_extra_life(self) -> bool:
         """Check if player has an extra life available."""
@@ -234,6 +235,8 @@ class Player:
             self._active_orb_indefinite = False
             self._active_orb_duration = 0.0
         self._status_flash_timer += dt
+        self._revival_blink_timer = max(0.0, self._revival_blink_timer - dt)
+        self._revival_immunity_timer = max(0.0, self._revival_immunity_timer - dt)
 
     def _speed_multiplier(self) -> float:
         """Combine all speed buffs into a single multiplier."""
@@ -472,6 +475,9 @@ class Player:
     def draw(self, surface: pygame.Surface):
         death_alpha = self._death_fade_alpha if self.state == "death" else 255
         render_alpha = min(self._power_alpha, death_alpha)
+        if self._revival_blink_timer > 0:
+            blink_alpha = int(128 + 127 * math.sin(pygame.time.get_ticks() * 0.01))
+            render_alpha = min(render_alpha, blink_alpha)
         if render_alpha <= 0:
             return
 
@@ -557,6 +563,45 @@ class Player:
         self._death_fade_alpha = 255
         self.clear_active_orb()
         self._extra_lives = 0
+        self._revival_blink_timer = 0.0
+        self._revival_immunity_timer = 0.0
+        self._refresh_collision_shape(force=True)
+
+    def reset_state_for_respawn(self):
+        """Reset player state for respawning in story mode - preserves extra lives."""
+        self._eliminated = False
+        self.position = self.spawn_position.copy()
+        self.velocity.update(0, 0)
+        self.state = "idle"
+        self.facing = PLAYER_DEFAULT_DIRECTION
+        self.current_animation = self.animations[self.state][self.facing]
+        self.current_animation.reset()
+        self.rect.center = (round(self.position.x), round(self.position.y))
+        self.falling = False
+        self.fall_velocity = 0.0
+        self.fall_draw_behind = False
+        self.drowning = False
+        self.drown_animation_done = False
+        self.drown_surface_y = None
+        self.jumping = False
+        self.z = 0.0
+        self.z_velocity = 0.0
+        self.on_ground = True
+        self.power_orb_charges = 0
+        self._shield_timer = 0.0
+        self._freeze_timer = 0.0
+        self._void_walk_timer = 0.0
+        self._orb_speed_boost = 1.0
+        self._power_speed_boost = 1.0
+        self._power_jump_boost = 1.0
+        self._status_flash_timer = 0.0
+        self._immune_to_hazards = False
+        self._power_alpha = 255
+        self._death_fade_alpha = 255
+        self.clear_active_orb()
+        # Preserve extra lives - don't reset!
+        self._revival_blink_timer = 0.0
+        self._revival_immunity_timer = 0.0
         self._refresh_collision_shape(force=True)
 
     def snapshot_state(self) -> dict[str, Any]:

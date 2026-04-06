@@ -22,17 +22,23 @@ from settings import (
     MODE_CARD_TITLE_COLOR,
     MODE_CARD_DESC_COLOR,
     MODE_CARD_CLICK_BASE,
+    MODE_CARD_BORDER_STORY,
     MODE_CARD_BORDER_VS_COMPUTER,
+    MODE_CARD_BORDER_SURVIVAL,
     MODE_CARD_BORDER_LOCAL_MP,
     MODE_CARD_BORDER_ONLINE_MP,
+    MODE_CARD_HOVER_BORDER_STORY,
     MODE_CARD_HOVER_BORDER_VS_COMPUTER,
+    MODE_CARD_HOVER_BORDER_SURVIVAL,
     MODE_CARD_HOVER_BORDER_LOCAL_MP,
     MODE_CARD_HOVER_BORDER_ONLINE_MP,
     MODE_CLICK_FLASH_TIME,
     MODE_HEADER_SLIDE_DURATION,
     MODE_HEADER_SLIDE_DISTANCE,
     MODE_SUBTITLE_DELAY,
+    MODE_STORY,
     MODE_VS_COMPUTER,
+    MODE_SURVIVAL,
     MODE_LOCAL_MULTIPLAYER,
     MODE_ONLINE_MULTIPLAYER,
     FONT_PATH_HEADING,
@@ -49,19 +55,25 @@ class ModeSelectionScreen:
     """Mode select screen shown after successful name entry."""
 
     _MODE_ICONS = {
+        MODE_STORY: "📖",
         MODE_VS_COMPUTER: "🤖",
+        MODE_SURVIVAL: "⚔️",
         MODE_LOCAL_MULTIPLAYER: "🎮",
         MODE_ONLINE_MULTIPLAYER: "🌐",
     }
 
     _MODE_BORDER = {
+        MODE_STORY: MODE_CARD_BORDER_STORY,
         MODE_VS_COMPUTER: MODE_CARD_BORDER_VS_COMPUTER,
+        MODE_SURVIVAL: MODE_CARD_BORDER_SURVIVAL,
         MODE_LOCAL_MULTIPLAYER: MODE_CARD_BORDER_LOCAL_MP,
         MODE_ONLINE_MULTIPLAYER: MODE_CARD_BORDER_ONLINE_MP,
     }
 
     _MODE_HOVER_BORDER = {
+        MODE_STORY: MODE_CARD_HOVER_BORDER_STORY,
         MODE_VS_COMPUTER: MODE_CARD_HOVER_BORDER_VS_COMPUTER,
+        MODE_SURVIVAL: MODE_CARD_HOVER_BORDER_SURVIVAL,
         MODE_LOCAL_MULTIPLAYER: MODE_CARD_HOVER_BORDER_LOCAL_MP,
         MODE_ONLINE_MULTIPLAYER: MODE_CARD_HOVER_BORDER_ONLINE_MP,
     }
@@ -94,16 +106,40 @@ class ModeSelectionScreen:
         card_w = MODE_CARD_WIDTH
         card_h = MODE_CARD_HEIGHT
         gap = 34
-        total_h = 3 * card_h + 2 * gap
+        cols = 3
+        rows = 2
+        total_w = cols * card_w + (cols - 1) * gap
+        total_h = rows * card_h + (rows - 1) * gap
+        start_x = (self.width - total_w) // 2
         start_y = (self.height - total_h) // 2 + 60
 
         self.cards = [
             {
+                "mode": MODE_STORY,
+                "title": "STORY MODE",
+                "desc": "9-level single-player campaign",
+                "key": "[1]",
+                "rect": pygame.Rect(start_x + (card_w + gap) * 0, start_y + (card_h + gap) * 0, card_w, card_h),
+                "hover_y": 0.0,
+                "click_scale": 1.0,
+                "click_timer": 0.0,
+            },
+            {
                 "mode": MODE_VS_COMPUTER,
                 "title": "VS COMPUTER",
-                "desc": "Face an AI-controlled opponent",
-                "key": "[1]",
-                "rect": pygame.Rect(0, start_y + (card_h + gap) * 0, card_w, card_h),
+                "desc": "Face AI-controlled opponents",
+                "key": "[2]",
+                "rect": pygame.Rect(start_x + (card_w + gap) * 1, start_y + (card_h + gap) * 0, card_w, card_h),
+                "hover_y": 0.0,
+                "click_scale": 1.0,
+                "click_timer": 0.0,
+            },
+            {
+                "mode": MODE_SURVIVAL,
+                "title": "SURVIVAL MODE",
+                "desc": "Endless survival against hazards",
+                "key": "[3]",
+                "rect": pygame.Rect(start_x + (card_w + gap) * 2, start_y + (card_h + gap) * 0, card_w, card_h),
                 "hover_y": 0.0,
                 "click_scale": 1.0,
                 "click_timer": 0.0,
@@ -111,9 +147,9 @@ class ModeSelectionScreen:
             {
                 "mode": MODE_LOCAL_MULTIPLAYER,
                 "title": "LOCAL MULTIPLAYER",
-                "desc": "Play with another player on this keyboard",
-                "key": "[2]",
-                "rect": pygame.Rect(0, start_y + (card_h + gap) * 1, card_w, card_h),
+                "desc": "2-player local multiplayer",
+                "key": "[4]",
+                "rect": pygame.Rect(start_x + (card_w + gap) * 0, start_y + (card_h + gap) * 1, card_w, card_h),
                 "hover_y": 0.0,
                 "click_scale": 1.0,
                 "click_timer": 0.0,
@@ -121,16 +157,14 @@ class ModeSelectionScreen:
             {
                 "mode": MODE_ONLINE_MULTIPLAYER,
                 "title": "PLAY OVER LAN",
-                "desc": "Host or join a match on the same local network",
-                "key": "[3]",
-                "rect": pygame.Rect(0, start_y + (card_h + gap) * 2, card_w, card_h),
+                "desc": "Online multiplayer over LAN",
+                "key": "[5]",
+                "rect": pygame.Rect(start_x + (card_w + gap) * 1, start_y + (card_h + gap) * 1, card_w, card_h),
                 "hover_y": 0.0,
                 "click_scale": 1.0,
                 "click_timer": 0.0,
             },
         ]
-        for card in self.cards:
-            card["rect"].centerx = self.width // 2
 
         self._clicked_mode = None
         self._flash_timer = 0.0
@@ -331,14 +365,20 @@ class ModeSelectionScreen:
                         self.back_requested = True
                         return None
                     if event.key == pygame.K_1:
-                        self._clicked_mode = MODE_VS_COMPUTER
+                        self._clicked_mode = MODE_STORY
                         self.cards[0]["click_timer"] = 0.1
                     elif event.key == pygame.K_2:
-                        self._clicked_mode = MODE_LOCAL_MULTIPLAYER
+                        self._clicked_mode = MODE_VS_COMPUTER
                         self.cards[1]["click_timer"] = 0.1
                     elif event.key == pygame.K_3:
-                        self._clicked_mode = MODE_ONLINE_MULTIPLAYER
+                        self._clicked_mode = MODE_SURVIVAL
                         self.cards[2]["click_timer"] = 0.1
+                    elif event.key == pygame.K_4:
+                        self._clicked_mode = MODE_LOCAL_MULTIPLAYER
+                        self.cards[3]["click_timer"] = 0.1
+                    elif event.key == pygame.K_5:
+                        self._clicked_mode = MODE_ONLINE_MULTIPLAYER
+                        self.cards[4]["click_timer"] = 0.1
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self._back_button_rect.collidepoint(event.pos):
                         self.back_requested = True
