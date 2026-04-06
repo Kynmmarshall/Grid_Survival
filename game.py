@@ -17,12 +17,8 @@ from powers import (
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
-<<<<<<< Updated upstream
-from ui import GameHUD, EliminationScreen
-=======
 from ui import GameHUD, EliminationScreen, VictoryScreen
 from level_config import get_level, MAX_LEVEL
->>>>>>> Stashed changes
 from settings import (
     BACKGROUND_COLOR,
     DEBUG_DRAW_WALKABLE,
@@ -135,12 +131,8 @@ class GameManager:
         self.hazard_manager = HazardManager(self.collision_manager)
         self.hud = GameHUD()
         self.water = AnimatedWater()
-<<<<<<< Updated upstream
-        self.orb_manager = OrbManager()
-=======
         self.orb_manager = OrbManager(level_number=self.current_level)
         self.pacman_enemy_manager = None
->>>>>>> Stashed changes
 
         # Initialize players based on game mode
         self.players = []
@@ -243,15 +235,12 @@ class GameManager:
         self._ensure_players_on_walkable_surface()
         self._force_safe_spawns()
         self._configure_powers_for_players()
-<<<<<<< Updated upstream
-=======
 
         if not self.is_network_game:
             enemy_count = self._pacman_enemy_count()
             if enemy_count > 0:
                 enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
                 self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
->>>>>>> Stashed changes
 
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
@@ -442,8 +431,6 @@ class GameManager:
             if player.power:
                 player.power.apply_to_game(self)
 
-<<<<<<< Updated upstream
-=======
         if self.pacman_enemy_manager:
             ghost_victims = self.pacman_enemy_manager.update(
                 dt,
@@ -460,7 +447,6 @@ class GameManager:
                 if victim._revival_immunity_timer <= 0 and not self.level_complete:
                     self._eliminate_player(victim, "hit by hazard")
 
->>>>>>> Stashed changes
         self.orb_manager.update(dt, self.walkable_bounds, self.players, self)
 
         # Update player count in HUD
@@ -844,11 +830,7 @@ class GameManager:
             return
         if player not in self.eliminated_players:
             self.eliminated_players.append(player)
-<<<<<<< Updated upstream
-            print(f"Player eliminated: {reason}")
-=======
             player._eliminated = True
->>>>>>> Stashed changes
             # Trigger death state if available
             if hasattr(player, 'die'):
                 player.die()
@@ -898,8 +880,6 @@ class GameManager:
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
-<<<<<<< Updated upstream
-=======
     def _trigger_victory(self, winner_name: str):
         """Trigger the victory end screen."""
         if not self.game_over:
@@ -911,7 +891,6 @@ class GameManager:
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
->>>>>>> Stashed changes
     def _restart_game(self):
         """Restart the game."""
         self.game_over = False
@@ -1247,8 +1226,8 @@ class GameManager:
             return self._vs_computer_spawns(count)
         return self._spawn_positions(count)
 
-<<<<<<< Updated upstream
-=======
+
+
     def _pacman_enemy_count(self) -> int:
         if self.is_network_game:
             return 0
@@ -1293,7 +1272,7 @@ class GameManager:
             occupied.add(spawn)
         return spawns
 
->>>>>>> Stashed changes
+
     def _character_choice(self, index: int) -> str | None:
         if not self.selected_characters:
             return None

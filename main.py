@@ -9,13 +9,8 @@ from lan_prompts import prompt_host_or_join, prompt_ip_entry, toast_message
 from host_waiting_screen import host_waiting_screen
 from lan_prompts import draw_lan_backdrop, prompt_host_or_join, prompt_ip_entry
 from network import NetworkClient, NetworkHost, get_local_ip
-<<<<<<< Updated upstream
-from scenes import ModeSelectionScreen, PlayerSelectionScreen, TitleScreen
-from scenes.common import _draw_rounded_rect, _load_font
-=======
 from scenes import ModeSelectionScreen, LevelSelectionScreen, PlayerSelectionScreen, TitleScreen
 from scenes.common import SceneAudioOverlay, _draw_rounded_rect, _load_font
->>>>>>> Stashed changes
 from settings import (
     FONT_PATH_BODY,
     FONT_PATH_HEADING,
