@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 
 import pygame
 
@@ -169,6 +170,25 @@ class ModeSelectionScreen:
         self._clicked_mode = None
         self._flash_timer = 0.0
 
+        self._bg_particles = []
+        for _ in range(42):
+            self._bg_particles.append({
+                "x": random.uniform(0, self.width),
+                "y": random.uniform(0, self.height),
+                "radius": random.uniform(1.5, 4.5),
+                "speed": random.uniform(6.0, 20.0),
+                "drift": random.uniform(-18.0, 18.0),
+                "phase": random.uniform(0, math.tau),
+                "color": random.choice([
+                    (90, 180, 255),
+                    (120, 240, 190),
+                    (180, 120, 255),
+                    (255, 200, 120),
+                ]),
+            })
+        self._bg_sweep_offset = 0.0
+        self._bg_grid_offset = 0.0
+
         # Load background
         self._bg_image = None
         if MODE_BG_IMAGE_PATH.exists():
@@ -191,6 +211,23 @@ class ModeSelectionScreen:
 
     def _update_animations(self, dt: float):
         self._anim_time += dt
+        self._bg_sweep_offset = (self._bg_sweep_offset + 120 * dt) % (self.width + 320)
+        self._bg_grid_offset = (self._bg_grid_offset + 18 * dt) % 48
+
+        for particle in self._bg_particles:
+            particle["y"] -= particle["speed"] * dt
+            particle["x"] += math.sin(self._anim_time * 0.8 + particle["phase"]) * particle["drift"] * dt
+            if particle["y"] < -20:
+                particle["y"] = self.height + 20
+                particle["x"] = random.uniform(0, self.width)
+            elif particle["y"] > self.height + 20:
+                particle["y"] = -20
+                particle["x"] = random.uniform(0, self.width)
+
+            if particle["x"] < -20:
+                particle["x"] = self.width + 20
+            elif particle["x"] > self.width + 20:
+                particle["x"] = -20
 
         progress = min(1.0, self._anim_time / MODE_HEADER_SLIDE_DURATION)
         ease = 1 - (1 - progress) ** 3
@@ -217,12 +254,14 @@ class ModeSelectionScreen:
     def _draw(self) -> None:
         if self._bg_image:
             self.screen.blit(self._bg_image, (0, 0))
-            # Overlay
-            overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 115))  # 45% black
-            self.screen.blit(overlay, (0, 0))
         else:
             self.screen.fill(MODE_BG_COLOR)
+
+        self._draw_animated_background()
+
+        overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 115))  # 45% black
+        self.screen.blit(overlay, (0, 0))
 
         header_y = int(80 + self._header_y_offset)
         welcome_str = "Welcome, "
@@ -246,6 +285,28 @@ class ModeSelectionScreen:
         mouse_pos = pygame.mouse.get_pos()
         for card in self.cards:
             self._draw_card(card, mouse_pos)
+
+    def _draw_animated_background(self) -> None:
+        # Floating light particles.
+        particle_surf = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+        for particle in self._bg_particles:
+            pulse = 0.55 + 0.45 * math.sin(self._anim_time * 2.0 + particle["phase"])
+            alpha = int(25 + 70 * pulse)
+            radius = particle["radius"] * (0.9 + 0.15 * pulse)
+            color = (*particle["color"], alpha)
+            pygame.draw.circle(particle_surf, color, (int(particle["x"]), int(particle["y"])), int(radius))
+        self.screen.blit(particle_surf, (0, 0), special_flags=pygame.BLEND_ADD)
+
+        # Subtle animated grid lines near the bottom.
+        grid_surf = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+        grid_alpha = 22
+        for x in range(-48, self.width + 48, 48):
+            x_pos = x + int(self._bg_grid_offset)
+            pygame.draw.line(grid_surf, (90, 120, 170, grid_alpha), (x_pos, self.height - 180), (x_pos + 120, self.height), 1)
+        for y in range(self.height - 180, self.height + 20, 30):
+            alpha = 14 if ((y // 30) % 2 == 0) else 9
+            pygame.draw.line(grid_surf, (70, 95, 140, alpha), (0, y), (self.width, y), 1)
+        self.screen.blit(grid_surf, (0, 0))
 
     def _draw_back_button(self) -> None:
         mouse_pos = pygame.mouse.get_pos()

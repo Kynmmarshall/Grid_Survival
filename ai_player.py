@@ -126,7 +126,7 @@ class AIPlayer(Player):
         self._desired_direction.update(0, 0)
         self._last_escape_vector.update(0, 0)
 
-    def update_ai(self, dt: float, walkable_mask, walkable_bounds):
+    def update_ai(self, dt: float, walkable_mask, walkable_bounds, hazard_manager=None, pacman_enemy_manager=None):
         self._tick_status_effects(dt)
         if self.is_frozen():
             self._current_direction.update(0, 0)
@@ -149,13 +149,23 @@ class AIPlayer(Player):
 
         self._decision_timer += dt
 
-        emergency = self._emergency_vector(walkable_mask, walkable_bounds)
+        emergency = self._emergency_vector(
+            walkable_mask,
+            walkable_bounds,
+            hazard_manager,
+            pacman_enemy_manager,
+        )
         if emergency is not None:
             self._desired_direction = emergency
             self._decision_timer = 0.0
         elif self._decision_timer >= self.config["decision_interval"]:
             self._decision_timer = 0.0
-            self._desired_direction = self._choose_direction(walkable_mask, walkable_bounds)
+            self._desired_direction = self._choose_direction(
+                walkable_mask,
+                walkable_bounds,
+                hazard_manager,
+                pacman_enemy_manager,
+            )
 
         blend_rate = min(1.0, dt * self.config["smoothing"])
         self._current_direction = self._current_direction.lerp(self._desired_direction, blend_rate)
@@ -173,30 +183,51 @@ class AIPlayer(Player):
             jump_pressed=False,
         )
 
-    def _emergency_vector(self, walkable_mask, walkable_bounds):
-        if not walkable_mask:
+    def _emergency_vector(self, walkable_mask, walkable_bounds, hazard_manager=None, pacman_enemy_manager=None):
+        edge_danger = self._edge_danger_level(walkable_mask) if walkable_mask else 0.0
+        threat_escape, threat_pressure = self._threat_escape_vector(hazard_manager, pacman_enemy_manager)
+        if edge_danger < self.config["panic_threshold"] and threat_pressure <= 0.0:
             return None
-        danger = self._edge_danger_level(walkable_mask)
-        if danger < self.config["panic_threshold"]:
-            return None
-        safe_vector = self._vector_toward_safe_zone(walkable_bounds)
-        if safe_vector.length_squared() == 0:
-            safe_vector = pygame.Vector2(self._rng.uniform(-1, 1), self._rng.uniform(-1, 1))
-        safe_vector = safe_vector.normalize()
-        self._last_escape_vector = safe_vector * self.config["panic_force"]
-        return safe_vector
 
-    def _choose_direction(self, walkable_mask, walkable_bounds) -> pygame.Vector2:
+        escape = pygame.Vector2(0, 0)
+        if threat_escape is not None:
+            escape += threat_escape
+
+        if edge_danger >= self.config["panic_threshold"]:
+            safe_vector = self._vector_toward_safe_zone(walkable_bounds)
+            if safe_vector.length_squared() == 0:
+                safe_vector = pygame.Vector2(self._rng.uniform(-1, 1), self._rng.uniform(-1, 1))
+            if safe_vector.length_squared() > 0:
+                escape += safe_vector.normalize() * (0.5 + edge_danger)
+
+        if escape.length_squared() == 0:
+            safe_vector = pygame.Vector2(self._rng.uniform(-1, 1), self._rng.uniform(-1, 1))
+            escape = safe_vector
+
+        if escape.length_squared() == 0:
+            return None
+
+        escape = escape.normalize()
+        self._last_escape_vector = escape * self.config["panic_force"]
+        return escape
+
+    def _choose_direction(self, walkable_mask, walkable_bounds, hazard_manager=None, pacman_enemy_manager=None) -> pygame.Vector2:
         best_dir = pygame.Vector2(0, 0)
         best_score = float("-inf")
         for direction in CANDIDATE_DIRECTIONS:
-            score = self._score_direction(direction, walkable_mask, walkable_bounds)
+            score = self._score_direction(
+                direction,
+                walkable_mask,
+                walkable_bounds,
+                hazard_manager,
+                pacman_enemy_manager,
+            )
             if score > best_score:
                 best_score = score
                 best_dir = direction
         return best_dir
 
-    def _score_direction(self, direction: pygame.Vector2, walkable_mask, walkable_bounds) -> float:
+    def _score_direction(self, direction: pygame.Vector2, walkable_mask, walkable_bounds, hazard_manager=None, pacman_enemy_manager=None) -> float:
         if direction.length_squared() == 0:
             idle_penalty = self.config["idle_penalty"]
             jitter = self._rng.uniform(-self.config["explore_jitter"], self.config["explore_jitter"])
@@ -211,8 +242,9 @@ class AIPlayer(Player):
         momentum = max(0.0, direction.dot(self._current_direction)) * self.config["momentum_bonus"]
         escape_bias = direction.dot(self._last_escape_vector)
         jitter = self._rng.uniform(-self.config["explore_jitter"], self.config["explore_jitter"])
+        threat_score = self._threat_safety_score(probe=self.position + direction * 40, hazard_manager=hazard_manager, pacman_enemy_manager=pacman_enemy_manager)
 
-        return distance_score + edge_score + center_score + momentum + escape_bias + jitter
+        return distance_score + edge_score + center_score + momentum + escape_bias + threat_score + jitter
 
     def _walkable_distance(self, direction: pygame.Vector2, walkable_mask) -> float:
         if not walkable_mask:
@@ -270,3 +302,83 @@ class AIPlayer(Player):
             center = pygame.Vector2(walkable_bounds.center)
             return center - self.position
         return pygame.Vector2(-self._current_direction.y, self._current_direction.x)
+
+    def _threat_escape_vector(self, hazard_manager=None, pacman_enemy_manager=None):
+        escape = pygame.Vector2(0, 0)
+        pressure = 0.0
+
+        if hazard_manager:
+            for bullet in getattr(hazard_manager, "bullets", []):
+                if not getattr(bullet, "active", False):
+                    continue
+                bullet_pos = pygame.Vector2(getattr(bullet, "position", self.position))
+                vector = self.position - bullet_pos
+                distance = vector.length()
+                if distance <= 220 and distance > 0:
+                    influence = max(0.0, 1.0 - (distance / 220.0))
+                    escape += vector.normalize() * influence * 1.1
+                    pressure = max(pressure, influence)
+
+            for trap in getattr(hazard_manager, "traps", []):
+                trap_pos = pygame.Vector2(getattr(trap, "position", self.position))
+                vector = self.position - trap_pos
+                distance = vector.length()
+                if distance <= 260 and distance > 0:
+                    influence = max(0.0, 1.0 - (distance / 260.0))
+                    escape += vector.normalize() * influence * 0.9
+                    pressure = max(pressure, influence)
+
+        if pacman_enemy_manager:
+            for enemy in getattr(pacman_enemy_manager, "enemies", []):
+                if getattr(enemy, "_activation_timer", 0.0) > 0:
+                    continue
+                enemy_pos = pygame.Vector2(getattr(enemy, "position", self.position))
+                vector = self.position - enemy_pos
+                distance = vector.length()
+                if distance <= 320 and distance > 0:
+                    influence = max(0.0, 1.0 - (distance / 320.0))
+                    escape += vector.normalize() * influence * 1.6
+                    pressure = max(pressure, influence)
+
+        if escape.length_squared() == 0:
+            return None, pressure
+        return escape, pressure
+
+    def _threat_safety_score(self, probe: pygame.Vector2, hazard_manager=None, pacman_enemy_manager=None) -> float:
+        score = 0.0
+
+        if hazard_manager:
+            is_safe = getattr(hazard_manager, "is_position_safe", None)
+            if callable(is_safe) and not is_safe((probe.x, probe.y), radius=28):
+                score -= 4.0 + (0.25 * self.difficulty)
+            else:
+                nearest_hazard = None
+                for bullet in getattr(hazard_manager, "bullets", []):
+                    if not getattr(bullet, "active", False):
+                        continue
+                    bullet_pos = pygame.Vector2(getattr(bullet, "position", probe))
+                    distance = probe.distance_to(bullet_pos)
+                    nearest_hazard = distance if nearest_hazard is None else min(nearest_hazard, distance)
+                for trap in getattr(hazard_manager, "traps", []):
+                    trap_pos = pygame.Vector2(getattr(trap, "position", probe))
+                    distance = probe.distance_to(trap_pos)
+                    nearest_hazard = distance if nearest_hazard is None else min(nearest_hazard, distance)
+
+                if nearest_hazard is not None:
+                    safe_distance = 180.0 + 12.0 * self.difficulty
+                    score += min(1.0, nearest_hazard / safe_distance) * (1.0 + 0.12 * self.difficulty)
+
+        if pacman_enemy_manager:
+            nearest_enemy = None
+            for enemy in getattr(pacman_enemy_manager, "enemies", []):
+                if getattr(enemy, "_activation_timer", 0.0) > 0:
+                    continue
+                enemy_pos = pygame.Vector2(getattr(enemy, "position", probe))
+                distance = probe.distance_to(enemy_pos)
+                nearest_enemy = distance if nearest_enemy is None else min(nearest_enemy, distance)
+
+            if nearest_enemy is not None:
+                safe_distance = 240.0 + 18.0 * self.difficulty
+                score += min(1.0, nearest_enemy / safe_distance) * (1.1 + 0.14 * self.difficulty)
+
+        return score
