@@ -104,6 +104,18 @@ class TitleScreen:
         self._tutorial_button_rect = pygame.Rect(24, self.height - 124, 190, 46)
         self._back_button_rect = pygame.Rect(24, self.height - 68, 150, 46)
 
+        # First time playing prompt
+        self._show_tutorial_prompt = True
+        self._prompt_yes_rect = pygame.Rect(0, 0, 120, 50)
+        self._prompt_no_rect = pygame.Rect(0, 0, 120, 50)
+        self._tutorial_pages = [
+            "Welcome to Grid Survival!\nObjective: Survive as the tiles collapse beneath you.",
+            "Controls:\nPlayer 1: W/A/S/D to move, SPACE to jump, Q for powers.\nPlayer 2: Arrows to move, RIGHT SHIFT to jump, / for powers.",
+            "Modes:\n- Solo vs AI: Practice against bots.\n- Local: Couch Co-op with a friend.\n- LAN: Play over the local network.",
+            "Power-ups (Orbs): Collect glowing orbs to unlock powers.\n- Void Walk: Cross missing tiles.\n- Shields: Block one hazard hit.",
+            "Hazards & Enemies:\nWatch out for crumbling tiles, the deadly shoreline, and enemy attacks!"
+        ]
+
         # Load background
         self._bg_image = None
         if TITLE_BG_IMAGE_PATH.exists():
@@ -342,6 +354,170 @@ class TitleScreen:
             self.screen.blit(value_surf, (x + 76, cursor_y))
             cursor_y += max(label_surf.get_height(), value_surf.get_height()) + 6
 
+    def _draw_tutorial_prompt(self) -> None:
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
+        self.screen.blit(overlay, (0, 0))
+
+        panel_w, panel_h = 800, 300
+        panel_rect = pygame.Rect((self.width - panel_w) // 2, (self.height - panel_h) // 2, panel_w, panel_h)
+        _draw_rounded_rect(self.screen, panel_rect, (25, 30, 45), (100, 150, 255), 3, 16)
+
+        question_surf = self._font_heading.render("Is this your first time playing?", True, (255, 255, 255))
+        self.screen.blit(question_surf, question_surf.get_rect(center=(self.width // 2, panel_rect.top + 80)))
+
+        self._prompt_yes_rect.center = (self.width // 2 - 120, panel_rect.bottom - 80)
+        self._prompt_no_rect.center = (self.width // 2 + 120, panel_rect.bottom - 80)
+
+        mouse_pos = pygame.mouse.get_pos()
+        
+        yes_hover = self._prompt_yes_rect.collidepoint(mouse_pos)
+        yes_bg = (50, 120, 60) if yes_hover else (30, 80, 40)
+        _draw_rounded_rect(self.screen, self._prompt_yes_rect, yes_bg, (100, 255, 100), 2, 8)
+        yes_surf = self._font_body.render("YES", True, (255, 255, 255))
+        self.screen.blit(yes_surf, yes_surf.get_rect(center=self._prompt_yes_rect.center))
+
+        no_hover = self._prompt_no_rect.collidepoint(mouse_pos)
+        no_bg = (150, 50, 50) if no_hover else (100, 30, 30)
+        _draw_rounded_rect(self.screen, self._prompt_no_rect, no_bg, (255, 100, 100), 2, 8)
+        no_surf = self._font_body.render("NO", True, (255, 255, 255))
+        self.screen.blit(no_surf, no_surf.get_rect(center=self._prompt_no_rect.center))
+
+    def _play_multipage_tutorial(self) -> None:
+        import sys
+        import math
+        from pathlib import Path
+
+        current_page = 0
+        is_viewing = True
+
+        # Helper to load images safely
+        def safe_load(path_str, scale=1.0):
+            p = Path(path_str)
+            if p.exists():
+                img = pygame.image.load(str(p)).convert_alpha()
+                if scale != 1.0:
+                    w, h = img.get_size()
+                    img = pygame.transform.smoothscale(img, (int(w * scale), int(h * scale)))
+                return img
+            return None
+
+        # Load tutorial assets inside the method so it doesn't slow down the main boot
+        img_block = safe_load("Assets/Blocks/10.png", 0.6)
+        img_caveman = safe_load("Assets/Characters/portait/Caveman.png", 0.6)
+        img_ninja = safe_load("Assets/Characters/portait/Ninja.png", 0.6)
+        img_goblin = safe_load("Assets/Characters/portait/Giant Goblin.png", 0.6)
+        
+        img_orbs = []
+        # Adjusted orb scaling so they don't overshadow anything
+        for orb_name in ["power.png", "phase.png", "shield.png"]:
+            orb = safe_load(f"Assets/orbs/{orb_name}", 0.45) 
+            if orb: img_orbs.append(orb)
+
+        anim_timer = 0.0
+
+        while is_viewing:
+            dt = self.clock.tick(TARGET_FPS) / 1000.0
+            anim_timer += dt
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_RIGHT):
+                        current_page += 1
+                        if current_page >= len(self._tutorial_pages):
+                            is_viewing = False
+                            continue
+                    elif event.key == pygame.K_ESCAPE:
+                        is_viewing = False
+                        continue
+
+            if not is_viewing:
+                break
+
+            # Keep title animations alive behind the tutorial panel
+            self._title_time += dt
+            self._update_particles(dt)
+
+            self.screen.fill((10, 15, 25))
+            self._draw_background()
+            self._draw_title()
+
+            dimmer = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            dimmer.fill((0, 0, 0, 180))  # Slightly darker overlay
+            self.screen.blit(dimmer, (0, 0))
+
+            panel_w, panel_h = 1000, 520
+            panel_rect = pygame.Rect((self.width - panel_w) // 2, (self.height - panel_h) // 2, panel_w, panel_h)
+            _draw_rounded_rect(self.screen, panel_rect, (20, 25, 35, 240), (150, 200, 255), 3, 15)
+            
+            # Draw specific visual animations per tutorial page
+            visual_y = panel_rect.top + 100
+            text_y_start = visual_y + 120
+
+            if current_page == 0 and img_block:
+                # Bouncing tile
+                bounce = math.sin(anim_timer * 4) * 15
+                self.screen.blit(img_block, img_block.get_rect(center=(self.width // 2, visual_y + bounce)))
+            elif current_page == 1 and img_caveman:
+                # Bouncing character portraits for Player 1 / Player 2
+                bounce_1 = math.sin(anim_timer * 5) * 10
+                bounce_2 = math.cos(anim_timer * 5) * 10
+                self.screen.blit(img_caveman, img_caveman.get_rect(center=(self.width // 2 - 120, visual_y + bounce_1)))
+                if img_ninja:
+                    self.screen.blit(img_ninja, img_ninja.get_rect(center=(self.width // 2 + 120, visual_y + bounce_2)))
+            elif current_page == 2:
+                # Bouncing stylized Mode "Cards"
+                modes = [("SOLO", (80, 160, 255)), ("CO-OP", (255, 140, 80)), ("LAN", (100, 255, 140))]
+                for i, (text, color) in enumerate(modes):
+                    px = self.width // 2 - 180 + i * 180
+                    py = visual_y - 20 + math.sin(anim_timer * 3 + i) * 10
+                    rect = pygame.Rect(0, 0, 140, 60)
+                    rect.center = (px, py)
+                    _draw_rounded_rect(self.screen, rect, (30, 40, 60), color, 2, 10)
+                    
+                    label_surf = self._font_small.render(text, True, (240, 240, 255))
+                    self.screen.blit(label_surf, label_surf.get_rect(center=rect.center))
+                text_y_start -= 40
+            elif current_page == 3 and img_orbs:
+                # Row of hovering Orbs (instead of circling)
+                for i, img in enumerate(img_orbs):
+                    px = self.width // 2 - 120 + i * 120
+                    py = visual_y - 40 + math.sin(anim_timer * 4 + i) * 8
+                    self.screen.blit(img, img.get_rect(center=(px, py)))
+            elif current_page == 4:
+                # Render hazards and enemy representations
+                bounce_1 = math.sin(anim_timer * 4) * 10
+                bounce_2 = math.cos(anim_timer * 4) * 10
+                
+                if img_goblin:
+                    self.screen.blit(img_goblin, img_goblin.get_rect(center=(self.width // 2 - 100, visual_y + bounce_1)))
+                if img_block:
+                    # Tint the block red to represent a crumbling/hazard block
+                    hazard_block = img_block.copy()
+                    hazard_block.fill((200, 50, 50), special_flags=pygame.BLEND_MULT)
+                    self.screen.blit(hazard_block, hazard_block.get_rect(center=(self.width // 2 + 100, visual_y + bounce_2)))
+                    
+                pulse = 155 + int(100 * math.sin(anim_timer * 6))
+                warning_surf = self._font_display.render("!", True, (pulse, 50, 50))
+                self.screen.blit(warning_surf, warning_surf.get_rect(center=(self.width // 2, visual_y - 50)))
+
+            # Render tutorial text dynamically under animations
+            lines = self._tutorial_pages[current_page].split('\n')
+            for line in lines:
+                text_surf = self._font_body.render(line, True, (230, 240, 255))
+                self.screen.blit(text_surf, text_surf.get_rect(center=(self.width // 2, text_y_start)))
+                text_y_start += 45
+            
+            # Progress instruction
+            sub_surf = self._font_small.render(f"Page {current_page + 1} of {len(self._tutorial_pages)} - Press ENTER to continue", True, (150, 180, 210))
+            self.screen.blit(sub_surf, sub_surf.get_rect(center=(self.width // 2, panel_rect.bottom - 40)))
+
+            self._audio_overlay.draw(self.screen)
+            pygame.display.flip()
+
     def _draw_back_button(self) -> None:
         mouse_pos = pygame.mouse.get_pos()
         hovered = self._back_button_rect.collidepoint(mouse_pos)
@@ -548,11 +724,20 @@ class TitleScreen:
                     continue
                 if event.type == pygame.QUIT:
                     return None
+                
+                # Check tutorial prompt intercept first
+                if self._show_tutorial_prompt:
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        if self._prompt_yes_rect.collidepoint(event.pos):
+                            self._show_tutorial_prompt = False
+                            self._play_multipage_tutorial()
+                        elif self._prompt_no_rect.collidepoint(event.pos):
+                            self._show_tutorial_prompt = False
+                    continue
+
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self._tutorial_button_rect.collidepoint(event.pos):
-                        self._play_tutorial_video()
-                        if self._quit_requested:
-                            return None
+                        self._play_multipage_tutorial()
                         continue
                     if self._back_button_rect.collidepoint(event.pos):
                         self._fade("out")
@@ -577,6 +762,10 @@ class TitleScreen:
             self._draw_background()
             self._draw_title()
             self._draw_input()
+            
+            if self._show_tutorial_prompt:
+                self._draw_tutorial_prompt()
+
             pygame.display.flip()
 
 
