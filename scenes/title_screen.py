@@ -474,12 +474,30 @@ class TitleScreen:
                 for i, (text, color) in enumerate(modes):
                     px = self.width // 2 - 180 + i * 180
                     py = visual_y - 20 + math.sin(anim_timer * 3 + i) * 10
-                    rect = pygame.Rect(0, 0, 140, 60)
+                    rect = pygame.Rect(0, 0, 140, 80)
                     rect.center = (px, py)
                     _draw_rounded_rect(self.screen, rect, (30, 40, 60), color, 2, 10)
                     
+                    # Draw Icons
+                    cx, cy = px, py - 12
+                    if text == "SOLO":
+                        pygame.draw.circle(self.screen, color, (cx, cy - 6), 8)
+                        pygame.draw.rect(self.screen, color, (cx - 10, cy + 4, 20, 12), border_radius=4)
+                    elif text == "CO-OP":
+                        pygame.draw.circle(self.screen, color, (cx - 12, cy - 6), 8)
+                        pygame.draw.rect(self.screen, color, (cx - 22, cy + 4, 20, 12), border_radius=4)
+                        pygame.draw.circle(self.screen, color, (cx + 12, cy - 6), 8)
+                        pygame.draw.rect(self.screen, color, (cx + 2, cy + 4, 20, 12), border_radius=4)
+                    elif text == "LAN":
+                        # Draw connected nodes/screens
+                        pygame.draw.rect(self.screen, color, (cx - 8, cy - 12, 16, 12), border_radius=2)
+                        pygame.draw.rect(self.screen, color, (cx - 20, cy + 4, 16, 12), border_radius=2)
+                        pygame.draw.rect(self.screen, color, (cx + 4, cy + 4, 16, 12), border_radius=2)
+                        pygame.draw.line(self.screen, color, (cx, cy), (cx, cy + 4), 2)
+                        pygame.draw.line(self.screen, color, (cx - 12, cy + 4), (cx + 12, cy + 4), 2)
+                    
                     label_surf = self._font_small.render(text, True, (240, 240, 255))
-                    self.screen.blit(label_surf, label_surf.get_rect(center=rect.center))
+                    self.screen.blit(label_surf, label_surf.get_rect(center=(px, py + 24)))
                 text_y_start -= 40
             elif current_page == 3 and img_orbs:
                 # Row of hovering Orbs (instead of circling)
