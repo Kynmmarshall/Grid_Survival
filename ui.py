@@ -91,6 +91,8 @@ class GameHUD:
         self._player_cards = PlayerCardRenderer(self._font_card_small, _draw_panel)
 
         self.survival_time = 0.0
+        self.score = 0
+        self._prev_score = 0
         self.player_name = "Player"
         self.players_alive = 1
         self.total_players = 1
@@ -272,6 +274,8 @@ class GameHUD:
     def reset(self):
         """Reset HUD state."""
         self.survival_time = 0.0
+        self.score = 0
+        self._prev_score = 0
         self._pulse_timer = 0.0
 
     def set_player_info(self, name: str, alive: int, total: int):
