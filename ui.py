@@ -313,10 +313,23 @@ class GameHUD:
 class EliminationScreen:
     """Screen shown when player is eliminated."""
 
-    def __init__(self, player_name: str, survival_time: float, reason: str = "eliminated"):
+    def __init__(self, player_name: str, survival_time: float, reason: str = "eliminated", character_name: str = "Caveman"):
         self.player_name = player_name
         self.survival_time = survival_time
         self.reason = reason
+        self.character_name = character_name
+
+        self.portrait = None
+        try:
+            portrait_path = os.path.join("Assets", "Characters", "portait", f"{self.character_name}.png")
+            if os.path.exists(portrait_path):
+                raw_portrait = pygame.image.load(portrait_path).convert_alpha()
+                # Scale portrait to 200px tall to fit inside the panel beautifully
+                scale_factor = 200 / raw_portrait.get_height()
+                new_size = (int(raw_portrait.get_width() * scale_factor), 200)
+                self.portrait = pygame.transform.smoothscale(raw_portrait, new_size)
+        except Exception:
+            pass
 
         # Use the same HUD font hierarchy — fits within screen width
         self.font_title = _load_font(FONT_PATH_HUD, 42, bold=True)
@@ -386,7 +399,7 @@ class EliminationScreen:
         surface.blit(title_surf, title_rect)
 
         # ── Panel card ─────────────────────────────────────────────────────
-        panel_w = 520
+        panel_w = 640 if self.portrait else 520
         panel_h = 260
         panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
         panel_rect.center = (cx, WINDOW_SIZE[1] // 2 + 30)
@@ -395,15 +408,26 @@ class EliminationScreen:
         _draw_panel(surface, panel_rect, (15, 15, 25, panel_alpha),
                     (255, 60, 60), 2, 14, glow=True)
 
+        if self.portrait:
+            portrait_surf = self.portrait.copy()
+            portrait_surf.set_alpha(text_alpha)
+            portrait_rect = portrait_surf.get_rect(midleft=(panel_rect.left + 20, panel_rect.centery))
+            surface.blit(portrait_surf, portrait_rect)
+            text_area_left = portrait_rect.right + 20
+            text_cx = text_area_left + (panel_rect.right - text_area_left) // 2
+        else:
+            text_area_left = panel_rect.left + 20
+            text_cx = cx
+
         # Player name
         name_surf = self.font_large.render(self.player_name, True, (255, 255, 255))
         name_surf.set_alpha(text_alpha)
-        surface.blit(name_surf, name_surf.get_rect(center=(cx, panel_rect.top + 45)))
+        surface.blit(name_surf, name_surf.get_rect(center=(text_cx, panel_rect.top + 45)))
 
         # Divider line
         div_y = panel_rect.top + 75
         pygame.draw.line(surface, (255, 60, 60, text_alpha),
-                         (panel_rect.left + 20, div_y), (panel_rect.right - 20, div_y), 1)
+                         (text_area_left, div_y), (panel_rect.right - 20, div_y), 1)
 
         # Survived time
         minutes = int(self.survival_time // 60)
@@ -411,7 +435,7 @@ class EliminationScreen:
         time_text = f"Survived:  {minutes:02d}:{seconds:02d}"
         time_surf = self.font_medium.render(time_text, True, (180, 200, 255))
         time_surf.set_alpha(text_alpha)
-        surface.blit(time_surf, time_surf.get_rect(center=(cx, panel_rect.top + 115)))
+        surface.blit(time_surf, time_surf.get_rect(center=(text_cx, panel_rect.top + 115)))
 
         # Restart prompt (blinks after fully faded in)
         if self.alpha >= 220:
@@ -421,21 +445,15 @@ class EliminationScreen:
                 True, (180, 180, 180)
             )
             restart_surf.set_alpha(blink_alpha)
-            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 210)))
+            # Use original cx for menu text as it's typically full-width
+            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.bottom + 25)))
 
             menu_surf = self.font_small.render(
                 "To go to Main Menu, press Left Ctrl",
                 True, (150, 150, 180)
             )
             menu_surf.set_alpha(blink_alpha)
-            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.top + 235)))
-
-            menu_surf = self.font_small.render(
-                "To go to Main Menu, press Left Ctrl",
-                True, (150, 150, 180)
-            )
-            menu_surf.set_alpha(blink_alpha)
-            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.top + 235)))
+            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.bottom + 50)))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -445,9 +463,22 @@ class EliminationScreen:
 class VictoryScreen:
     """Screen shown when player wins (survives longest in multiplayer)."""
 
-    def __init__(self, player_name: str, survival_time: float):
+    def __init__(self, player_name: str, survival_time: float, character_name: str = "Caveman"):
         self.player_name = player_name
         self.survival_time = survival_time
+        self.character_name = character_name
+
+        self.portrait = None
+        try:
+            portrait_path = os.path.join("Assets", "Characters", "portait", f"{self.character_name}.png")
+            if os.path.exists(portrait_path):
+                raw_portrait = pygame.image.load(portrait_path).convert_alpha()
+                # Scale portrait to 200px tall to fit inside the panel beautifully
+                scale_factor = 200 / raw_portrait.get_height()
+                new_size = (int(raw_portrait.get_width() * scale_factor), 200)
+                self.portrait = pygame.transform.smoothscale(raw_portrait, new_size)
+        except Exception:
+            pass
 
         self.font_title = _load_font(FONT_PATH_HUD, 42, bold=True)
         self.font_large = _load_font(FONT_PATH_HUD, 28, bold=True)
@@ -507,7 +538,7 @@ class VictoryScreen:
         surface.blit(title_surf, title_surf.get_rect(center=(cx, 160)))
 
         # ── Panel card ─────────────────────────────────────────────────────
-        panel_w = 520
+        panel_w = 640 if self.portrait else 520
         panel_h = 260
         panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
         panel_rect.center = (cx, WINDOW_SIZE[1] // 2 + 30)
@@ -515,20 +546,31 @@ class VictoryScreen:
         _draw_panel(surface, panel_rect, (15, 25, 15, min(255, text_alpha)),
                     (80, 220, 80), 2, 14, glow=True)
 
+        if self.portrait:
+            portrait_surf = self.portrait.copy()
+            portrait_surf.set_alpha(text_alpha)
+            portrait_rect = portrait_surf.get_rect(midleft=(panel_rect.left + 20, panel_rect.centery))
+            surface.blit(portrait_surf, portrait_rect)
+            text_area_left = portrait_rect.right + 20
+            text_cx = text_area_left + (panel_rect.right - text_area_left) // 2
+        else:
+            text_area_left = panel_rect.left + 20
+            text_cx = cx
+
         name_surf = self.font_large.render(self.player_name, True, (255, 255, 255))
         name_surf.set_alpha(text_alpha)
-        surface.blit(name_surf, name_surf.get_rect(center=(cx, panel_rect.top + 45)))
+        surface.blit(name_surf, name_surf.get_rect(center=(text_cx, panel_rect.top + 45)))
 
         div_y = panel_rect.top + 75
-        pygame.draw.line(surface, (80, 220, 80),
-                         (panel_rect.left + 20, div_y), (panel_rect.right - 20, div_y), 1)
+        pygame.draw.line(surface, (80, 220, 80, text_alpha),
+                         (text_area_left, div_y), (panel_rect.right - 20, div_y), 1)
 
         minutes = int(self.survival_time // 60)
         seconds = int(self.survival_time % 60)
         time_text = f"Survived:  {minutes:02d}:{seconds:02d}"
         time_surf = self.font_medium.render(time_text, True, (180, 200, 255))
         time_surf.set_alpha(text_alpha)
-        surface.blit(time_surf, time_surf.get_rect(center=(cx, panel_rect.top + 115)))
+        surface.blit(time_surf, time_surf.get_rect(center=(text_cx, panel_rect.top + 115)))
 
         if self.alpha >= 220:
             blink_alpha = int(120 + 135 * abs(math.sin(self._time * math.pi * 1.5)))
@@ -537,11 +579,12 @@ class VictoryScreen:
                 True, (180, 180, 180)
             )
             restart_surf.set_alpha(blink_alpha)
-            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 210)))
+            # Center below the panel
+            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.bottom + 25)))
 
             menu_surf = self.font_small.render(
                 "To go to Main Menu, press Left Ctrl",
                 True, (150, 150, 180)
             )
             menu_surf.set_alpha(blink_alpha)
-            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.top + 235)))
+            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.bottom + 50)))
