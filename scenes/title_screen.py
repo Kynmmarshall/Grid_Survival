@@ -113,7 +113,8 @@ class TitleScreen:
             "Controls:\nPlayer 1: W/A/S/D to move, SPACE to jump, Q for powers.\nPlayer 2: Arrows to move, RIGHT SHIFT to jump, / for powers.",
             "Modes:\n- Solo vs AI: Practice against bots.\n- Local: Couch Co-op with a friend.\n- LAN: Play over the local network.",
             "Power-ups (Orbs): Collect glowing orbs to unlock powers.\n- Void Walk: Cross missing tiles.\n- Shields: Block one hazard hit.",
-            "Hazards & Enemies:\nWatch out for crumbling tiles, the deadly shoreline, and enemy attacks!"
+            "Hazards & Enemies:\nWatch out for crumbling tiles, the deadly shoreline, and enemy attacks!",
+            "Would you like to watch the gameplay video tutorial?"
         ]
 
         # Load background
@@ -416,6 +417,9 @@ class TitleScreen:
 
         anim_timer = 0.0
 
+        prompt_yes_rect = pygame.Rect(0, 0, 120, 50)
+        prompt_no_rect = pygame.Rect(0, 0, 120, 50)
+
         while is_viewing:
             dt = self.clock.tick(TARGET_FPS) / 1000.0
             anim_timer += dt
@@ -424,12 +428,24 @@ class TitleScreen:
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-                if event.type == pygame.KEYDOWN:
-                    if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_RIGHT):
-                        current_page += 1
-                        if current_page >= len(self._tutorial_pages):
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if current_page == 5:
+                        if prompt_yes_rect.collidepoint(event.pos):
+                            self._play_tutorial_video()
                             is_viewing = False
                             continue
+                        elif prompt_no_rect.collidepoint(event.pos):
+                            is_viewing = False
+                            continue
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_RIGHT):
+                        if current_page < 5:
+                            current_page += 1
+                        else:
+                            # Default to yes on enter for last page
+                            self._play_tutorial_video()
+                            is_viewing = False
+                        continue
                     elif event.key == pygame.K_ESCAPE:
                         is_viewing = False
                         continue
@@ -521,6 +537,30 @@ class TitleScreen:
                 pulse = 155 + int(100 * math.sin(anim_timer * 6))
                 warning_surf = self._font_display.render("!", True, (pulse, 50, 50))
                 self.screen.blit(warning_surf, warning_surf.get_rect(center=(self.width // 2, visual_y - 50)))
+            elif current_page == 5:
+                # Video prompt styling
+                prompt_yes_rect.center = (self.width // 2 - 90, panel_rect.bottom - 90)
+                prompt_no_rect.center = (self.width // 2 + 90, panel_rect.bottom - 90)
+
+                mouse_pos = pygame.mouse.get_pos()
+                
+                yes_hover = prompt_yes_rect.collidepoint(mouse_pos)
+                yes_bg = (50, 120, 60) if yes_hover else (30, 80, 40)
+                _draw_rounded_rect(self.screen, prompt_yes_rect, yes_bg, (100, 255, 100), 2, 8)
+                yes_surf = self._font_body.render("YES", True, (255, 255, 255))
+                self.screen.blit(yes_surf, yes_surf.get_rect(center=prompt_yes_rect.center))
+
+                no_hover = prompt_no_rect.collidepoint(mouse_pos)
+                no_bg = (150, 50, 50) if no_hover else (100, 30, 30)
+                _draw_rounded_rect(self.screen, prompt_no_rect, no_bg, (255, 100, 100), 2, 8)
+                no_surf = self._font_body.render("NO", True, (255, 255, 255))
+                self.screen.blit(no_surf, no_surf.get_rect(center=prompt_no_rect.center))
+                
+                # Draw video icon
+                icon_y = visual_y + math.sin(anim_timer * 3) * 5
+                pygame.draw.rect(self.screen, (220, 50, 50), (self.width // 2 - 30, icon_y - 20, 60, 40), border_radius=6)
+                pygame.draw.polygon(self.screen, (255, 255, 255), [(self.width // 2 - 5, icon_y - 10), (self.width // 2 - 5, icon_y + 10), (self.width // 2 + 10, icon_y)])
+                text_y_start -= 20
 
             # Render tutorial text dynamically under animations
             lines = self._tutorial_pages[current_page].split('\n')
@@ -530,8 +570,9 @@ class TitleScreen:
                 text_y_start += 45
             
             # Progress instruction
-            sub_surf = self._font_small.render(f"Page {current_page + 1} of {len(self._tutorial_pages)} - Press ENTER to continue", True, (150, 180, 210))
-            self.screen.blit(sub_surf, sub_surf.get_rect(center=(self.width // 2, panel_rect.bottom - 40)))
+            if current_page < 5:
+                sub_surf = self._font_small.render(f"Page {current_page + 1} of {len(self._tutorial_pages)-1} - Press ENTER to continue", True, (150, 180, 210))
+                self.screen.blit(sub_surf, sub_surf.get_rect(center=(self.width // 2, panel_rect.bottom - 40)))
 
             self._audio_overlay.draw(self.screen)
             pygame.display.flip()
