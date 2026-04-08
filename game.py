@@ -443,7 +443,7 @@ class GameManager:
             )
             winner = self.players[winner_index] if self.players else None
             winner_label = getattr(winner, "character_name", self.player_name) if winner else self.player_name
-            self._trigger_victory(f"P{winner_index + 1} - {winner_label} WINS")
+            self._trigger_victory(f"P{winner_index + 1} - {winner_label} WINS", winner_label)
             return
 
         platform_empty = not self._any_player_on_platform()
@@ -527,12 +527,14 @@ class GameManager:
             end_state = {
                 "type": "victory",
                 "winner_name": self.victory_screen.player_name,
+                "winner_character": self.victory_screen.character_name,
                 "survival_time": float(self.victory_screen.survival_time),
             }
         elif self.game_over_state == "elimination" and self.elimination_screen:
             end_state = {
                 "type": "elimination",
                 "player_name": self.elimination_screen.player_name,
+                "character_name": self.elimination_screen.character_name,
                 "survival_time": float(self.elimination_screen.survival_time),
                 "reason": self.elimination_screen.reason,
             }
@@ -583,7 +585,9 @@ class GameManager:
         if next_game_over and not self.game_over:
             end_state = snapshot.get("end_state") or {}
             if isinstance(end_state, dict) and end_state.get("type") == "victory":
-                self._trigger_victory(str(end_state.get("winner_name", self.player_name)))
+                winner_name = str(end_state.get("winner_name", self.player_name))
+                char_name = str(end_state.get("winner_character", "Caveman"))
+                self._trigger_victory(winner_name, char_name)
             else:
                 self._trigger_game_over()
         elif not next_game_over and self.game_over:
@@ -879,22 +883,26 @@ class GameManager:
             self.game_over = True
             self.game_over_state = "elimination"
             self.victory_screen = None
+            
+            char_name = getattr(self.player, "character_name", "Caveman") if hasattr(self, "player") and self.player else "Caveman"
+            
             self.elimination_screen = EliminationScreen(
                 self.player_name,
                 self.hud.survival_time,
-                "eliminated"
+                "eliminated",
+                char_name
             )
             self.elimination_screen.show()
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
-    def _trigger_victory(self, winner_name: str):
+    def _trigger_victory(self, winner_name: str, character_name: str = "Caveman"):
         """Trigger the victory end screen."""
         if not self.game_over:
             self.game_over = True
             self.game_over_state = "victory"
             self.elimination_screen = None
-            self.victory_screen = VictoryScreen(winner_name, self.hud.survival_time)
+            self.victory_screen = VictoryScreen(winner_name, self.hud.survival_time, character_name)
             self.victory_screen.show()
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
