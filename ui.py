@@ -421,7 +421,21 @@ class EliminationScreen:
                 True, (180, 180, 180)
             )
             restart_surf.set_alpha(blink_alpha)
-            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 220)))
+            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 210)))
+
+            menu_surf = self.font_small.render(
+                "To go to Main Menu, press Left Ctrl",
+                True, (150, 150, 180)
+            )
+            menu_surf.set_alpha(blink_alpha)
+            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.top + 235)))
+
+            menu_surf = self.font_small.render(
+                "To go to Main Menu, press Left Ctrl",
+                True, (150, 150, 180)
+            )
+            menu_surf.set_alpha(blink_alpha)
+            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.top + 235)))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -523,4 +537,11 @@ class VictoryScreen:
                 True, (180, 180, 180)
             )
             restart_surf.set_alpha(blink_alpha)
-            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 220)))
+            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 210)))
+
+            menu_surf = self.font_small.render(
+                "To go to Main Menu, press Left Ctrl",
+                True, (150, 150, 180)
+            )
+            menu_surf.set_alpha(blink_alpha)
+            surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.top + 235)))
