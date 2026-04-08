@@ -60,6 +60,7 @@ class GameManager:
         self.running = True
         self.player_name = player_name
         self.game_mode = game_mode
+        self.paused = False
         self.selected_characters = selected_characters or []
         self.network = network
         self.is_network_game = (
@@ -238,7 +239,9 @@ class GameManager:
                 if event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
                     self._adjust_audio_volume(-AUDIO_VOLUME_STEP)
                     continue
-                if event.key == pygame.K_l and not self.is_network_game:
+                if event.key == pygame.K_TAB:
+                    self.paused = not getattr(self, "paused", False)
+                elif event.key == pygame.K_l and not self.is_network_game:
                     for player in self.players:
                         player.reset()
                 elif event.key == pygame.K_r and self.game_over and not self.is_network_game:
@@ -254,6 +257,11 @@ class GameManager:
 
     def update(self, dt: float, keys):
         self.audio.update()
+
+        if getattr(self, "paused", False):
+            if keys[pygame.K_ESCAPE]:
+                self.running = False
+            return
 
         if keys[pygame.K_ESCAPE]:
             if self.is_network_game and self.network and self.network.connected:
@@ -294,6 +302,9 @@ class GameManager:
                 self.victory_screen.update(dt)
             elif self.elimination_screen:
                 self.elimination_screen.update(dt)
+            return
+
+        if self.paused:
             return
 
         self._time_since_start += dt
@@ -624,6 +635,23 @@ class GameManager:
             self.victory_screen.draw(self.screen)
         elif self.elimination_screen:
             self.elimination_screen.draw(self.screen)
+            
+        if getattr(self, "paused", False):
+            s_overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+            s_overlay.fill((0, 0, 0, 128))
+            self.screen.blit(s_overlay, (0, 0))
+            
+            # Using default pygame font since settings.py isn't guaranteed to have standard sizes loaded here
+            font = pygame.font.Font(None, 74)
+            text = font.render(f"PAUSED", True, (255, 255, 255))
+            text_rect = text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2))
+            
+            font_small = pygame.font.Font(None, 36)
+            sub_text = font_small.render(f"Press TAB to Resume", True, (200, 200, 220))
+            sub_rect = sub_text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2 + 50))
+            
+            self.screen.blit(text, text_rect)
+            self.screen.blit(sub_text, sub_rect)
 
         pygame.display.flip()
 
