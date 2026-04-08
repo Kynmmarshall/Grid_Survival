@@ -150,6 +150,7 @@ def main():
             break
 
         while True:
+            break_to_title = False
             mode_screen = ModeSelectionScreen(screen, clock, player_name)
             game_mode = mode_screen.run()
             if game_mode is None:
@@ -226,7 +227,7 @@ def main():
 
                 get_audio().stop_music(fade_ms=500)
 
-                GameManager(
+                result = GameManager(
                     screen=screen,
                     clock=clock,
                     player_name=player_name,
@@ -235,8 +236,16 @@ def main():
                     network=network,
                     local_player_index=local_player_index,
                 ).run()
-                pygame.quit()
-                return
+                
+                if result == "main_menu":
+                    break_to_title = True
+                    break
+                else:
+                    pygame.quit()
+                    return
+
+            if break_to_title:
+                break
 
     pygame.quit()
 
