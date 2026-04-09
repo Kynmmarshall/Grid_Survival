@@ -202,11 +202,10 @@ class GameManager:
         self._ensure_players_on_walkable_surface()
         self._force_safe_spawns()
         self._configure_powers_for_players()
-        if not self.is_network_game:
-            enemy_count = self._pacman_enemy_count()
-            if enemy_count > 0:
-                enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
-                self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
+        enemy_count = self._pacman_enemy_count()
+        if enemy_count > 0:
+            enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
+            self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
 
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
 
@@ -244,8 +243,15 @@ class GameManager:
                 elif event.key == pygame.K_l and not self.is_network_game:
                     for player in self.players:
                         player.reset()
-                elif event.key == pygame.K_r and self.game_over and not self.is_network_game:
-                    self._restart_game()
+                elif event.key == pygame.K_r and self.game_over:
+                    if self.is_network_game:
+                        if self.is_network_host:
+                            self._restart_network_round()
+                        elif self.network and self.network.connected:
+                            self.network.send_message("restart_request")
+                    else:
+                        self._restart_game()
+                    continue
                 else:
                     if self.is_network_game:
                         local_player = self._local_network_player()
@@ -476,7 +482,9 @@ class GameManager:
             if message_type == "disconnect":
                 self.running = False
                 return
-            if self.is_network_host and message_type == "input_state":
+            if self.is_network_host and message_type == "restart_request":
+                self._restart_network_round()
+            elif self.is_network_host and message_type == "input_state":
                 self._remote_input_state = self._sanitize_network_input(message.get("input"))
             elif (not self.is_network_host) and message_type == "snapshot":
                 latest_snapshot = message.get("state")
@@ -553,6 +561,11 @@ class GameManager:
             "tiles": self.tile_manager.snapshot_state(),
             "hazards": self.hazard_manager.snapshot_state(),
             "orbs": self.orb_manager.snapshot_state(),
+            "pacman_enemies": (
+                self.pacman_enemy_manager.snapshot_state()
+                if self.pacman_enemy_manager
+                else None
+            ),
             "hud": self.hud.snapshot_state(),
         }
 
@@ -565,6 +578,8 @@ class GameManager:
         self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
         self.hazard_manager.apply_snapshot(snapshot.get("hazards"))
         self.orb_manager.apply_snapshot(snapshot.get("orbs"))
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
         self.hud.apply_snapshot(snapshot.get("hud"))
 
         self.eliminated_players.clear()
@@ -914,6 +929,9 @@ class GameManager:
         self.victory_screen = None
         self.game_over_state = None
         self.eliminated_players.clear()
+        self._pending_power_press = False
+        self._remote_input_state = self._empty_network_input_state()
+        self._authoritative_network_inputs = None
 
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
@@ -935,6 +953,13 @@ class GameManager:
         self._force_safe_spawns()
         self._configure_powers_for_players()
         self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
+
+    def _restart_network_round(self):
+        """Host-authoritative restart path for LAN games."""
+        self._restart_game()
+        if self.is_network_game and self.is_network_host and self.network and self.network.connected:
+            self._snapshot_send_timer = 0.0
+            self.network.send_message("snapshot", state=self._build_network_snapshot())
 
     def _force_safe_spawns(self):
         """Clamp every player to a valid walkable tile and clear fall/drown flags."""
@@ -1148,8 +1173,8 @@ class GameManager:
         return self._spawn_positions(count)
 
     def _pacman_enemy_count(self) -> int:
-        if self.is_network_game:
-            return 0
+        if self.game_mode == MODE_ONLINE_MULTIPLAYER:
+            return 2
         if self.game_mode == MODE_VS_COMPUTER:
             return 1
         if self.game_mode == MODE_LOCAL_MULTIPLAYER:
