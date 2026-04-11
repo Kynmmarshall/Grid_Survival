@@ -51,6 +51,8 @@ from settings import (
     FONT_SIZE_HEADING,
     FONT_SIZE_BODY,
     FONT_SIZE_SMALL,
+    load_custom_controls,
+    save_custom_controls,
 )
 from .common import SceneAudioOverlay, _draw_rounded_rect, _load_font
 
@@ -103,6 +105,7 @@ class TitleScreen:
         self._start_music()
         self._tutorial_button_rect = pygame.Rect(24, self.height - 124, 190, 46)
         self._back_button_rect = pygame.Rect(24, self.height - 68, 150, 46)
+        self._controls_button_rect = pygame.Rect(self.width - 134, self.height - 68, 110, 46)
 
         # First time playing prompt
         self._show_tutorial_prompt = True
@@ -292,6 +295,7 @@ class TitleScreen:
             self.screen.blit(warn_surf, warn_surf.get_rect(center=(self.width // 2, 490)))
 
         self._draw_controls_panel()
+        self._draw_controls_edit_button()
         self._draw_tutorial_button()
         self._draw_back_button()
         self._audio_overlay.draw(self.screen)
@@ -321,27 +325,81 @@ class TitleScreen:
         right_x = left_x + column_w
         rows_y = title_rect.bottom + 18
 
+        custom_controls = load_custom_controls()
+        if custom_controls is None:
+            from settings import DEFAULT_CONTROLS
+            custom_controls = DEFAULT_CONTROLS
+
+        p1_controls = custom_controls["player1"]
+        p2_controls = custom_controls["player2"]
+
+        def get_key_display(code):
+            if code in (pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT):
+                icon_map = {pygame.K_UP: "↑", pygame.K_DOWN: "↓", pygame.K_LEFT: "←", pygame.K_RIGHT: "→"}
+                return icon_map.get(code, "?")
+            name = pygame.key.name(code).upper() if code else "?"
+            if name.startswith("K_"):
+                name = name[2:]
+            return name
+
+        def _is_arrow_keys(controls):
+            return (
+                controls.get("up") == pygame.K_UP
+                and controls.get("down") == pygame.K_DOWN
+                and controls.get("left") == pygame.K_LEFT
+                and controls.get("right") == pygame.K_RIGHT
+            )
+
+        p2_is_arrows = _is_arrow_keys(p2_controls)
+        p1_is_wasd = (
+            p1_controls.get("up") == pygame.K_w
+            and p1_controls.get("down") == pygame.K_s
+            and p1_controls.get("left") == pygame.K_a
+            and p1_controls.get("right") == pygame.K_d
+        )
+
+        if p1_is_wasd:
+            p1_move = "WASD"
+        else:
+            left_d = get_key_display(p1_controls['left'])
+            down_d = get_key_display(p1_controls['down'])
+            right_d = get_key_display(p1_controls['right'])
+            up_d = get_key_display(p1_controls['up'])
+            p1_move = f"{left_d}{down_d}{right_d}{up_d}".upper()
+
+        if p2_is_arrows:
+            p2_move = "←↓→↑"
+        else:
+            left_d = get_key_display(p2_controls['left'])
+            down_d = get_key_display(p2_controls['down'])
+            right_d = get_key_display(p2_controls['right'])
+            up_d = get_key_display(p2_controls['up'])
+            p2_move = f"{left_d}{down_d}{right_d}{up_d}".upper()
+
+        p1_rows = [
+            ("MOVE", p1_move),
+            ("JUMP", get_key_display(p1_controls['jump'])),
+            ("POWER", get_key_display(p1_controls['power'])),
+        ]
+        p2_rows = [
+            ("MOVE", p2_move),
+            ("JUMP", get_key_display(p2_controls['jump'])),
+            ("POWER", get_key_display(p2_controls['power'])),
+        ]
+
         self._draw_control_column(
             left_x,
             rows_y,
             "PLAYER 1",
             (255, 200, 0),
-            [
-                ("MOVE", "WASD"),
-                ("JUMP", "SPACE"),
-                ("POWER", "Q"),
-            ],
+            p1_rows,
         )
         self._draw_control_column(
             right_x,
             rows_y,
             "PLAYER 2",
             (100, 220, 255),
-            [
-                ("MOVE", "ARROWS"),
-                ("JUMP", "RSHIFT"),
-                ("POWER", "SLASH"),
-            ],
+            p2_rows,
         )
 
     def _draw_control_column(self, x: int, y: int, heading: str, heading_color: tuple, rows: list[tuple[str, str]]) -> None:
@@ -600,6 +658,17 @@ class TitleScreen:
         label = self._font_small.render("TUTORIAL", True, (235, 240, 250))
         self.screen.blit(label, label.get_rect(center=self._tutorial_button_rect.center))
 
+    def _draw_controls_edit_button(self) -> None:
+        mouse_pos = pygame.mouse.get_pos()
+        hovered = self._controls_button_rect.collidepoint(mouse_pos)
+        base_color = (30, 55, 80, 210)
+        hover_color = (60, 100, 140, 230)
+        bg_color = hover_color if hovered else base_color
+        border_color = (100, 160, 220)
+        _draw_rounded_rect(self.screen, self._controls_button_rect, bg_color, border_color, 2, 14)
+        label = self._font_small.render("EDIT", True, (235, 240, 250))
+        self.screen.blit(label, label.get_rect(center=self._controls_button_rect.center))
+
     def _play_tutorial_video(self) -> None:
         if not TUTORIAL_VIDEO_PATH.exists():
             self.warning_text = "TUTORIAL VIDEO NOT FOUND"
@@ -802,6 +871,9 @@ class TitleScreen:
                     if self._back_button_rect.collidepoint(event.pos):
                         self._fade("out")
                         return None
+                    if self._controls_button_rect.collidepoint(event.pos):
+                        self._customize_controls()
+                        continue
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self._fade("out")
@@ -825,6 +897,150 @@ class TitleScreen:
             
             if self._show_tutorial_prompt:
                 self._draw_tutorial_prompt()
+
+            pygame.display.flip()
+
+    def _customize_controls(self) -> None:
+        from settings import DEFAULT_CONTROLS
+
+        custom_controls = load_custom_controls()
+        if custom_controls is None:
+            custom_controls = {
+                "player1": dict(DEFAULT_CONTROLS["player1"]),
+                "player2": dict(DEFAULT_CONTROLS["player2"]),
+            }
+
+        current_player = "player1"
+        current_action = "up"
+        waiting_for_key = False
+        clock = pygame.time.Clock()
+
+        action_names = ["up", "down", "left", "right", "jump", "power"]
+
+        panel_w = 540
+        panel_h = 420
+        panel_x = (self.width - panel_w) // 2
+        panel_y = (self.height - panel_h) // 2
+        panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
+
+        col1_x = panel_x + 30
+        col2_x = panel_x + 280
+        start_y = panel_y + 110
+        button_w = 110
+        button_h = 34
+
+        save_button_rect = pygame.Rect(panel_x + panel_w - 130, panel_y + panel_h - 55, 110, 44)
+        back_button_rect = pygame.Rect(panel_x + 20, panel_y + panel_h - 55, 110, 44)
+
+        while True:
+            dt = clock.tick(TARGET_FPS) / 1000.0
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+                if waiting_for_key:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key != pygame.K_ESCAPE:
+                            custom_controls[current_player][current_action] = event.key
+                            print(f"Updated {current_player} {current_action} to {event.key}")  # Debug log
+                        waiting_for_key = False
+                else:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            save_custom_controls(custom_controls)
+                            return
+                        if event.key == pygame.K_TAB:
+                            current_player = "player2" if current_player == "player1" else "player1"
+                        if event.key == pygame.K_UP:
+                            idx = action_names.index(current_action)
+                            current_action = action_names[(idx - 1) % len(action_names)]
+                        if event.key == pygame.K_DOWN:
+                            idx = action_names.index(current_action)
+                            current_action = action_names[(idx + 1) % len(action_names)]
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        mouse_pos = event.pos
+                        if save_button_rect.collidepoint(mouse_pos):
+                            save_custom_controls(custom_controls)
+                            return
+                        if back_button_rect.collidepoint(mouse_pos):
+                            return
+                        for i, action in enumerate(action_names):
+                            y_pos = start_y + i * 38
+                            p1_rect = pygame.Rect(col1_x, y_pos, button_w, button_h)
+                            p2_rect = pygame.Rect(col2_x, y_pos, button_w, button_h)
+                            if p1_rect.collidepoint(mouse_pos):
+                                current_player = "player1"
+                                current_action = action
+                                waiting_for_key = True
+                            elif p2_rect.collidepoint(mouse_pos):
+                                current_player = "player2"
+                                current_action = action
+                                waiting_for_key = True
+
+            self.screen.fill((10, 15, 25))
+            self._draw_background()
+            self._draw_title()
+
+            _draw_rounded_rect(self.screen, panel_rect, (16, 20, 34, 245), (120, 150, 200), 2, 16)
+
+            title_surf = self._font_heading.render("CUSTOMIZE CONTROLS", True, (255, 255, 255))
+            self.screen.blit(title_surf, title_surf.get_rect(centerx=panel_rect.centerx, top=panel_y + 18))
+
+            p1_heading = self._font_body.render("PLAYER 1", True, (255, 200, 0))
+            p2_heading = self._font_body.render("PLAYER 2", True, (100, 220, 255))
+            self.screen.blit(p1_heading, (col1_x, start_y - 38))
+            self.screen.blit(p2_heading, (col2_x, start_y - 38))
+
+            hint_surf = self._font_small.render("Click on a key to change it", True, (160, 180, 210))
+            self.screen.blit(hint_surf, hint_surf.get_rect(centerx=panel_rect.centerx, top=panel_y + panel_h - 28))
+
+            mouse_pos = pygame.mouse.get_pos()
+
+            sep_x = panel_x + panel_w // 2
+            pygame.draw.line(self.screen, (90, 110, 150), (sep_x, start_y - 10), (sep_x, start_y + len(action_names) * 38 + 10), 2)
+
+            for i, action in enumerate(action_names):
+                y_pos = start_y + i * 38
+                for player_key, x_pos in [("player1", col1_x), ("player2", col2_x)]:
+                    is_selected = player_key == current_player and action == current_action
+                    key_code = custom_controls.get(player_key, {}).get(action, None)
+                    key_name = pygame.key.name(key_code).upper() if key_code else "?"
+                    if key_name.startswith("K_"):
+                        key_name = key_name[2:]
+                    if key_code in (pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT):
+                        icon_map = {pygame.K_UP: "↑", pygame.K_DOWN: "↓", pygame.K_LEFT: "←", pygame.K_RIGHT: "→"}
+                        key_name = icon_map.get(key_code, key_name)
+
+                    btn_rect = pygame.Rect(x_pos, y_pos, button_w, button_h)
+                    bg_color = (70, 100, 140, 240) if is_selected else (35, 50, 80, 220)
+                    border_color = (255, 220, 100) if is_selected else (100, 130, 170)
+                    _draw_rounded_rect(self.screen, btn_rect, bg_color, border_color, 2, 6)
+
+                    action_surf = self._font_small.render(f"{action.upper()}:", True, (180, 200, 220))
+                    self.screen.blit(action_surf, (x_pos + 5, y_pos + 8))
+                    key_surf = self._font_small.render(key_name, True, (255, 255, 255))
+                    self.screen.blit(key_surf, (x_pos + 62, y_pos + 8))
+
+            save_hover = save_button_rect.collidepoint(mouse_pos)
+            save_bg = (50, 120, 60, 230) if save_hover else (40, 80, 45, 210)
+            save_border = (100, 255, 130) if save_hover else (80, 180, 100)
+            _draw_rounded_rect(self.screen, save_button_rect, save_bg, save_border, 2, 8)
+            save_label = self._font_body.render("SAVE", True, (255, 255, 255))
+            self.screen.blit(save_label, save_label.get_rect(center=save_button_rect.center))
+
+            back_hover = back_button_rect.collidepoint(mouse_pos)
+            back_bg = (120, 50, 50, 210) if back_hover else (80, 35, 35, 210)
+            back_border = (255, 100, 100) if back_hover else (150, 80, 80)
+            _draw_rounded_rect(self.screen, back_button_rect, back_bg, back_border, 2, 8)
+            back_label = self._font_body.render("BACK", True, (255, 255, 255))
+            self.screen.blit(back_label, back_label.get_rect(center=back_button_rect.center))
+
+            if waiting_for_key:
+                overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+                overlay.fill((0, 0, 0, 150))
+                self.screen.blit(overlay, (0, 0))
+                wait_surf = self._font_heading.render("Press any key for " + current_player.upper() + " " + current_action.upper(), True, (255, 200, 100))
+                self.screen.blit(wait_surf, wait_surf.get_rect(center=(self.width // 2, self.height // 2)))
 
             pygame.display.flip()
 
