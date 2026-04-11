@@ -2,17 +2,15 @@ import math
 import sys
 
 import pygame
-import math
 
 from audio import get_audio
 from game import GameManager
-from network import NetworkHost, NetworkClient, get_local_ip
-from lan_prompts import prompt_host_or_join, prompt_ip_entry, toast_message
 from host_waiting_screen import host_waiting_screen
-from lan_prompts import draw_lan_backdrop, prompt_host_or_join, prompt_ip_entry
+from lan_prompts import draw_lan_backdrop, prompt_host_or_join, prompt_ip_entry, toast_message
 from network import NetworkClient, NetworkHost, get_local_ip
-from scenes import ModeSelectionScreen, PlayerSelectionScreen, TitleScreen
+from scenes import LevelSelectionScreen, ModeSelectionScreen, PlayerSelectionScreen, TitleScreen
 from scenes.common import SceneAudioOverlay, _draw_rounded_rect, _load_font
+from scenes.level_selection import resolve_level_option
 from settings import (
     FONT_PATH_BODY,
     FONT_PATH_HEADING,
@@ -70,7 +68,14 @@ def _draw_lobby_panel(
     pygame.display.flip()
 
 
-def _wait_for_online_match_start(screen, clock, network, player_name: str, character_name: str):
+def _wait_for_online_match_start(
+    screen,
+    clock,
+    network,
+    player_name: str,
+    character_name: str,
+    selected_level_id: int,
+):
     local_setup = {"name": player_name, "character": character_name}
     audio_overlay = SceneAudioOverlay()
     if not network.send_message("player_setup", **local_setup):
@@ -105,10 +110,12 @@ def _wait_for_online_match_start(screen, clock, network, player_name: str, chara
                     "game_start",
                     players=players,
                     local_player_index=1,
+                    level_id=int(selected_level_id),
                 )
                 return {
                     "players": players,
                     "local_player_index": 0,
+                    "level_id": int(selected_level_id),
                 }
 
             if (not network.is_host) and message_type == "game_start":
@@ -118,6 +125,7 @@ def _wait_for_online_match_start(screen, clock, network, player_name: str, chara
                 return {
                     "players": players[:2],
                     "local_player_index": int(message.get("local_player_index", 1)),
+                    "level_id": int(message.get("level_id", selected_level_id)),
                 }
 
         title = "PLAY OVER LAN" if network.is_host else "JOINING OVER LAN"
@@ -158,6 +166,14 @@ def main():
                     pygame.quit()
                     return
                 break
+
+            level_screen = LevelSelectionScreen(screen, clock, game_mode)
+            selected_level = level_screen.run()
+            if selected_level is None:
+                if getattr(level_screen, "quit_requested", False):
+                    pygame.quit()
+                    return
+                continue
 
             network = None
             local_player_index = 0
@@ -215,6 +231,7 @@ def main():
                         network,
                         player_name,
                         selected_characters[0],
+                        selected_level.level_id,
                     )
                     if not match_setup:
                         network.disconnect()
@@ -224,6 +241,9 @@ def main():
                         for player in match_setup["players"]
                     ]
                     local_player_index = int(match_setup["local_player_index"])
+                    selected_level = resolve_level_option(
+                        int(match_setup.get("level_id", selected_level.level_id))
+                    ) or selected_level
 
                 get_audio().stop_music(fade_ms=500)
 
@@ -235,6 +255,8 @@ def main():
                     selected_characters=selected_characters,
                     network=network,
                     local_player_index=local_player_index,
+                    level_map_path=selected_level.map_path,
+                    level_background_path=selected_level.background_path,
                 ).run()
                 
                 if result == "main_menu":

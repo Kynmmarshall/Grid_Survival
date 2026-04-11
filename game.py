@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 
 import pygame
 
@@ -51,6 +52,8 @@ class GameManager:
         selected_characters: list[str] | None = None,
         network=None,
         local_player_index: int = 0,
+        level_map_path: str | Path | None = None,
+        level_background_path: str | Path | None = None,
     ):
         if screen is None or clock is None:
             pygame.init()
@@ -78,9 +81,14 @@ class GameManager:
         self._world_snapshot_interval = 1 / 6
         self._client_position_blend = 0.35
         self._client_snap_distance = 180.0
+        self.level_map_path = Path(level_map_path) if level_map_path else None
+        self.level_background_path = Path(level_background_path) if level_background_path else None
         
         # Load assets
-        self.background_surface = load_background_surface(WINDOW_SIZE)
+        self.background_surface = load_background_surface(
+            WINDOW_SIZE,
+            self.level_background_path,
+        )
         (
             self.map_surface,
             self.tmx_data,
@@ -89,7 +97,7 @@ class GameManager:
             self.map_scale_x,
             self.map_scale_y,
             self.map_offset,
-        ) = load_tilemap_surface(WINDOW_SIZE)
+        ) = load_tilemap_surface(WINDOW_SIZE, self.level_map_path)
         
         # Calculate spawn points after map loads
         slot_count = self._player_slot_count()
