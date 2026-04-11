@@ -472,6 +472,8 @@ class Player:
     def draw(self, surface: pygame.Surface):
         death_alpha = self._death_fade_alpha if self.state == "death" else 255
         render_alpha = min(self._power_alpha, death_alpha)
+        if self._has_phase_orb_blink():
+            render_alpha = self._phase_blink_alpha(render_alpha)
         if render_alpha <= 0:
             return
 
@@ -498,6 +500,8 @@ class Player:
         surface.blit(frame, draw_rect.topleft)
 
         death_opacity = death_alpha / 255.0
+        if self._has_speed_orb_glow():
+            self._draw_speed_orb_glow(surface, draw_rect, death_opacity)
         if self._shield_timer > 0:
             self._draw_shield_overlay(surface, draw_rect, death_opacity)
         if self.is_frozen():
@@ -549,6 +553,8 @@ class Player:
         self._freeze_timer = 0.0
         self._void_walk_timer = 0.0
         self._orb_speed_boost = 1.0
+        if hasattr(self, "_orb_speed_timer"):
+            del self._orb_speed_timer
         self._power_speed_boost = 1.0
         self._power_jump_boost = 1.0
         self._status_flash_timer = 0.0
@@ -807,6 +813,72 @@ class Player:
         shield_surf = pygame.Surface((radius * 2 + 4, radius * 2 + 4), pygame.SRCALPHA)
         pygame.draw.circle(shield_surf, (*base_color, alpha), (radius + 2, radius + 2), radius, 4)
         surface.blit(shield_surf, (draw_rect.centerx - radius - 2, draw_rect.centery - radius - 2))
+
+    def _has_speed_orb_glow(self) -> bool:
+        if self.state == "death":
+            return False
+
+        if self._orb_speed_boost > 1.01:
+            return True
+
+        if self._active_orb_label != "Speed Boost":
+            return False
+
+        return self._active_orb_indefinite or self._active_orb_timer > 0.0
+
+    def _has_phase_orb_blink(self) -> bool:
+        if self.state == "death":
+            return False
+
+        if self.has_void_walk():
+            return True
+
+        if self._active_orb_label != "Void Walk":
+            return False
+
+        return self._active_orb_indefinite or self._active_orb_timer > 0.0
+
+    def _phase_blink_alpha(self, base_alpha: int) -> int:
+        # Fast alpha pulse creates a clear phasing blink effect.
+        pulse = 0.5 + 0.5 * math.sin(self._status_flash_timer * math.pi * 8.0)
+        phase_alpha = int(65 + 190 * pulse)
+        return max(0, min(int(base_alpha), phase_alpha))
+
+    def _draw_speed_orb_glow(self, surface: pygame.Surface, draw_rect: pygame.Rect, opacity_scale: float = 1.0):
+        """Draw a yellow shimmering aura around the player's collision silhouette."""
+        self._refresh_collision_shape()
+        pulse = 0.5 + 0.5 * math.sin(self._status_flash_timer * 10.0)
+        glow_pad = 16
+
+        if len(self._collision_outline) >= 2:
+            glow_size = (draw_rect.width + glow_pad * 2, draw_rect.height + glow_pad * 2)
+            glow = pygame.Surface(glow_size, pygame.SRCALPHA)
+            points = [(x + glow_pad, y + glow_pad) for x, y in self._collision_outline]
+
+            outer_alpha = int((30 + 50 * pulse) * opacity_scale)
+            mid_alpha = int((70 + 90 * pulse) * opacity_scale)
+            inner_alpha = int((140 + 90 * pulse) * opacity_scale)
+
+            pygame.draw.lines(glow, (255, 215, 40, outer_alpha), True, points, 8)
+            pygame.draw.lines(glow, (255, 235, 95, mid_alpha), True, points, 4)
+            pygame.draw.lines(glow, (255, 255, 185, inner_alpha), True, points, 2)
+
+            step = max(1, len(points) // 10)
+            sparkle_alpha = int((130 + 90 * (1.0 - pulse)) * opacity_scale)
+            for idx in range(0, len(points), step):
+                x, y = points[idx]
+                pygame.draw.circle(glow, (255, 245, 155, sparkle_alpha), (x, y), 2)
+
+            surface.blit(glow, (draw_rect.left - glow_pad, draw_rect.top - glow_pad))
+            return
+
+        fallback = pygame.Surface((draw_rect.width + 36, draw_rect.height + 36), pygame.SRCALPHA)
+        f_rect = fallback.get_rect()
+        outer_alpha = int((40 + 60 * pulse) * opacity_scale)
+        inner_alpha = int((120 + 80 * pulse) * opacity_scale)
+        pygame.draw.ellipse(fallback, (255, 215, 60, outer_alpha), f_rect, 6)
+        pygame.draw.ellipse(fallback, (255, 255, 180, inner_alpha), f_rect.inflate(-10, -10), 3)
+        surface.blit(fallback, (draw_rect.left - 18, draw_rect.top - 18))
 
     def _draw_freeze_overlay(self, surface: pygame.Surface, draw_rect: pygame.Rect, opacity_scale: float = 1.0):
         self._refresh_collision_shape()

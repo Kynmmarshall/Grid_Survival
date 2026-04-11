@@ -8,7 +8,7 @@ Six types exist, each with a distinct colour, icon, and effect:
   SHIELD  (gold)   — absorbs the next hazard hit
   FREEZE  (blue)   — freeze all tiles and hazards for 3 s (same as Wizard power)
   POWER   (purple) — immediately recharge all power cooldowns
-  BOMB    (red)    — smash every WARNING tile on the map instantly
+    LIFE    (pink)   — revive on pickup if eliminated, otherwise grant extra life
     PHASE   (mint)   — walk over missing tiles for 10 s
 
 The OrbManager spawns orbs on random walkable positions, tracks collection,
@@ -46,7 +46,6 @@ class OrbType(Enum):
     SHIELD = "shield"
     FREEZE = "freeze"
     POWER  = "power"
-    BOMB   = "bomb"
     LIFE   = "life"
     PHASE  = "phase"
 
@@ -57,7 +56,6 @@ _ORB_VISUALS: dict[OrbType, tuple] = {
     OrbType.SHIELD: ((255, 210, 50), (255, 240, 120)),
     OrbType.FREEZE: ((80,  140, 255), (140, 180, 255)),
     OrbType.POWER:  ((200, 80,  255), (230, 140, 255)),
-    OrbType.BOMB:   ((255, 70,  50),  (255, 140, 80)),
     OrbType.LIFE:   ((255, 105, 180), (255, 182, 193)),  # Pink heart
     OrbType.PHASE:  ((120, 255, 190), (190, 255, 230)),
 }
@@ -215,18 +213,6 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
             return f"POWER CHARGE {charges}/{POWER_ORBS_REQUIRED}"
         return "POWER CHARGE"
 
-    elif orb_type == OrbType.BOMB:
-        # Smash every WARNING tile immediately
-        from tile_system import TileState
-        smashed = 0
-        for tile in game.tile_manager.tiles.values():
-            if tile.state == TileState.WARNING:
-                tile._start_crumble()
-                smashed += 1
-        if hasattr(collector, "set_active_orb"):
-            collector.set_active_orb("Bomb Detonation", 1.5)
-        return f"BOMB  {smashed} tiles destroyed"
-
     elif orb_type == OrbType.LIFE:
         # Grant a revive or extra life
         is_eliminated = getattr(collector, '_eliminated', False)
@@ -271,7 +257,7 @@ class OrbManager:
       - Orbs appear on random positions within walkable_bounds
       - At most MAX_ORBS active at once
       - After an orb is collected a cooldown passes before a new one spawns
-      - Orb type distribution is weighted (SPEED/SHIELD most common, BOMB rarest)
+            - Orb type distribution is weighted (SPEED/PHASE most common)
     """
 
     MAX_ORBS = 3
@@ -284,7 +270,6 @@ class OrbManager:
         [OrbType.SHIELD] * 3 +
         [OrbType.FREEZE] * 2 +
         [OrbType.POWER]  * 2 +
-        [OrbType.BOMB]   * 1 +
         [OrbType.LIFE]   * 2 +  # Life orb - heart-shaped pink heart
         [OrbType.PHASE]  * 4
     )

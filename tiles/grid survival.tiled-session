@@ -24,8 +24,8 @@
             "scale": 0.5,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1621,
-                "y": 965
+                "x": 1537,
+                "y": 769
             }
         },
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx#tilesfloorbig": {
@@ -33,9 +33,9 @@
         },
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_10.tmx": {
             "scale": 0.275537109375,
-            "selectedLayer": 1,
+            "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },
@@ -43,7 +43,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },
@@ -51,7 +51,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },
@@ -59,15 +59,15 @@
             "scale": 0.33,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1443.9393939393938,
-                "y": 1392.4242424242425
+                "x": 1534.8484848484848,
+                "y": 768.1818181818182
             }
         },
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_2.tmx": {
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1682.1690590111643,
                 "y": 767.591706539075
             }
         },
@@ -75,23 +75,23 @@
             "scale": 0.5,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1533,
-                "y": 401
+                "x": 1537,
+                "y": 769
             }
         },
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_4.tmx": {
             "scale": 0.33,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1610.6060606060605,
-                "y": 983.3333333333333
+                "x": 1534.8484848484848,
+                "y": 768.1818181818182
             }
         },
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_5.tmx": {
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },
@@ -99,7 +99,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },
@@ -107,7 +107,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },
@@ -115,7 +115,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },
@@ -123,7 +123,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1536.9980506822612,
                 "y": 767.591706539075
             }
         },

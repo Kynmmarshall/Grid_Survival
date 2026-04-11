@@ -31,7 +31,6 @@ ORB_ICON_COLORS = {
     "frozen": (90, 150, 255),
     "void walk": (120, 255, 190),
     "power charge": (200, 80, 255),
-    "bomb detonation": (255, 90, 70),
 }
 ORB_LABEL_TO_KEY = {
     "speed boost": "speed",
@@ -39,7 +38,6 @@ ORB_LABEL_TO_KEY = {
     "frozen": "freeze",
     "void walk": "phase",
     "power charge": "power",
-    "bomb detonation": "bomb",
 }
 
 CARD_WIDTH = 282
