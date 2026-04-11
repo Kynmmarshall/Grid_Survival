@@ -26,9 +26,12 @@ from settings import (
     MODE_CARD_BORDER_VS_COMPUTER,
     MODE_CARD_BORDER_LOCAL_MP,
     MODE_CARD_BORDER_ONLINE_MP,
+    MODE_CARD_BORDER_CAMPAIGN,
+    MODE_CARD_DISABLED_COLOR,
     MODE_CARD_HOVER_BORDER_VS_COMPUTER,
     MODE_CARD_HOVER_BORDER_LOCAL_MP,
     MODE_CARD_HOVER_BORDER_ONLINE_MP,
+    MODE_CARD_HOVER_BORDER_CAMPAIGN,
     MODE_CLICK_FLASH_TIME,
     MODE_HEADER_SLIDE_DURATION,
     MODE_HEADER_SLIDE_DISTANCE,
@@ -36,6 +39,7 @@ from settings import (
     MODE_VS_COMPUTER,
     MODE_LOCAL_MULTIPLAYER,
     MODE_ONLINE_MULTIPLAYER,
+    MODE_CAMPAIGN,
     FONT_PATH_HEADING,
     FONT_PATH_BODY,
     FONT_PATH_SMALL,
@@ -53,18 +57,21 @@ class ModeSelectionScreen:
         MODE_VS_COMPUTER: "🤖",
         MODE_LOCAL_MULTIPLAYER: "🎮",
         MODE_ONLINE_MULTIPLAYER: "🌐",
+        MODE_CAMPAIGN: "🏆",
     }
 
     _MODE_BORDER = {
         MODE_VS_COMPUTER: MODE_CARD_BORDER_VS_COMPUTER,
         MODE_LOCAL_MULTIPLAYER: MODE_CARD_BORDER_LOCAL_MP,
         MODE_ONLINE_MULTIPLAYER: MODE_CARD_BORDER_ONLINE_MP,
+        MODE_CAMPAIGN: MODE_CARD_BORDER_CAMPAIGN,
     }
 
     _MODE_HOVER_BORDER = {
         MODE_VS_COMPUTER: MODE_CARD_HOVER_BORDER_VS_COMPUTER,
         MODE_LOCAL_MULTIPLAYER: MODE_CARD_HOVER_BORDER_LOCAL_MP,
         MODE_ONLINE_MULTIPLAYER: MODE_CARD_HOVER_BORDER_ONLINE_MP,
+        MODE_CAMPAIGN: MODE_CARD_HOVER_BORDER_CAMPAIGN,
     }
 
     def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock, player_name: str):
@@ -95,8 +102,8 @@ class ModeSelectionScreen:
         # Card hover animation (smooth y offset per card)
         card_w = MODE_CARD_WIDTH
         card_h = MODE_CARD_HEIGHT
-        gap = 34
-        total_h = 3 * card_h + 2 * gap
+        gap = 28
+        total_h = 4 * card_h + 3 * gap
         start_y = (self.height - total_h) // 2 + 60
 
         self.cards = [
@@ -109,6 +116,7 @@ class ModeSelectionScreen:
                 "hover_y": 0.0,
                 "click_scale": 1.0,
                 "click_timer": 0.0,
+                "disabled": False,
             },
             {
                 "mode": MODE_LOCAL_MULTIPLAYER,
@@ -119,6 +127,7 @@ class ModeSelectionScreen:
                 "hover_y": 0.0,
                 "click_scale": 1.0,
                 "click_timer": 0.0,
+                "disabled": False,
             },
             {
                 "mode": MODE_ONLINE_MULTIPLAYER,
@@ -129,6 +138,18 @@ class ModeSelectionScreen:
                 "hover_y": 0.0,
                 "click_scale": 1.0,
                 "click_timer": 0.0,
+                "disabled": False,
+            },
+            {
+                "mode": MODE_CAMPAIGN,
+                "title": "CAMPAIGN",
+                "desc": "Story mode coming soon",
+                "key": "[4]",
+                "rect": pygame.Rect(0, start_y + (card_h + gap) * 3, card_w, card_h),
+                "hover_y": 0.0,
+                "click_scale": 1.0,
+                "click_timer": 0.0,
+                "disabled": True,
             },
         ]
         for card in self.cards:
@@ -136,6 +157,8 @@ class ModeSelectionScreen:
 
         self._clicked_mode = None
         self._flash_timer = 0.0
+        self._unavailable_message = None
+        self._unavailable_message_timer = 0.0
 
         self._bg_particles = []
         for _ in range(42):
@@ -218,6 +241,12 @@ class ModeSelectionScreen:
             else:
                 card["click_scale"] = 1.0
 
+        if self._unavailable_message_timer > 0.0:
+            self._unavailable_message_timer -= dt
+            if self._unavailable_message_timer <= 0.0:
+                self._unavailable_message = None
+                self._unavailable_message_timer = 0.0
+
     def _draw(self) -> None:
         if self._bg_image:
             self.screen.blit(self._bg_image, (0, 0))
@@ -233,8 +262,8 @@ class ModeSelectionScreen:
         header_y = int(80 + self._header_y_offset)
         welcome_str = "Welcome, "
         name_str = self.player_name + "!"
-        welcome_surf = self._font_header.render(welcome_str, True, MODE_HEADER_COLOR)
-        name_surf = self._font_header.render(name_str, True, MODE_HEADER_NAME_COLOR)
+        welcome_surf = self._font_header.render(welcome_str, True, MODE_HEADER_COLOR, (0, 0, 0))  # Add background color
+        name_surf = self._font_header.render(name_str, True, MODE_HEADER_NAME_COLOR, (0, 0, 0))  # Add background color
         total_w = welcome_surf.get_width() + name_surf.get_width()
         start_x = self.width // 2 - total_w // 2
 
@@ -253,6 +282,7 @@ class ModeSelectionScreen:
         for card in self.cards:
             self._draw_card(card, mouse_pos)
 
+        self._draw_unavailable_message()
         self._audio_overlay.draw(self.screen)
 
     def _draw_animated_background(self) -> None:
@@ -288,7 +318,91 @@ class ModeSelectionScreen:
         label = self._font_small.render("BACK", True, (235, 235, 245))
         self.screen.blit(label, label.get_rect(center=self._back_button_rect.center))
 
+    def _draw_unavailable_message(self) -> None:
+        if not self._unavailable_message:
+            return
+
+        message_surf = self._font_body.render(self._unavailable_message, True, (255, 220, 100))
+        message_bg = pygame.Surface((message_surf.get_width() + 30, message_surf.get_height() + 18), pygame.SRCALPHA)
+        _draw_rounded_rect(message_bg, message_bg.get_rect(), (22, 30, 50, 210), (220, 180, 90), 2, 14)
+        message_bg.blit(message_surf, (15, 9))
+        self.screen.blit(message_bg, message_bg.get_rect(center=(self.width // 2, self.height - 135)))
+
     def _draw_card(self, card: dict, mouse_pos: tuple) -> None:
+        rect = card["rect"].copy()
+        rect.y += int(card["hover_y"])
+
+        hovered = rect.collidepoint(mouse_pos)
+        selected = self._clicked_mode == card["mode"]
+        disabled = card.get("disabled", False)
+        mode = card["mode"]
+
+        if disabled:
+            bg_color = MODE_CARD_DISABLED_COLOR
+            border_color = self._MODE_BORDER[mode]
+            border_w = 2
+        elif selected:
+            pulse = 0.5 + 0.5 * math.sin(self._flash_timer * 20)
+            bg_r = int(MODE_CARD_CLICK_BASE[0] + 80 * pulse)
+            bg_g = int(MODE_CARD_CLICK_BASE[1] + 80 * pulse)
+            bg_b = int(MODE_CARD_CLICK_BASE[2] + 40 * pulse)
+            bg_color = (bg_r, bg_g, bg_b, 230)
+            border_color = self._MODE_HOVER_BORDER[mode]
+            border_w = 3
+        elif hovered:
+            bg_color = MODE_CARD_HOVER_COLOR
+            border_color = self._MODE_HOVER_BORDER[mode]
+            border_w = 3
+        else:
+            bg_color = MODE_CARD_BASE_COLOR
+            border_color = self._MODE_BORDER[mode]
+            border_w = 2
+
+        if card["click_scale"] != 1.0:
+            s = card["click_scale"]
+            new_w = int(rect.width * s)
+            new_h = int(rect.height * s)
+            rect = pygame.Rect(
+                rect.centerx - new_w // 2,
+                rect.centery - new_h // 2,
+                new_w, new_h
+            )
+
+        _draw_rounded_rect(self.screen, rect, bg_color, border_color, border_w, 16)
+
+        if selected:
+            flash_pulse = 0.5 + 0.5 * math.sin(self._flash_timer * 30)
+            if flash_pulse > 0.8:
+                flash_surf = pygame.Surface(rect.size, pygame.SRCALPHA)
+                pygame.draw.rect(flash_surf, (255, 255, 255, 40), flash_surf.get_rect(), border_radius=16)
+                self.screen.blit(flash_surf, rect.topleft)
+
+        icon_str = self._MODE_ICONS.get(card["mode"], "?")
+        try:
+            icon_surf = self._font_icon.render(icon_str, True, (255, 255, 255))
+        except Exception:
+            icon_surf = self._font_body.render(icon_str, True, (255, 255, 255))
+        icon_rect = icon_surf.get_rect(centerx=rect.centerx, top=rect.top + 18)
+        self.screen.blit(icon_surf, icon_rect)
+
+        title_color = border_color if hovered else MODE_CARD_TITLE_COLOR
+        title_surf = self._font_card_title.render(card["title"], True, title_color)
+        title_rect = title_surf.get_rect(centerx=rect.centerx, top=icon_rect.bottom + 10)
+        self.screen.blit(title_surf, title_rect)
+
+        desc_color = (200, 200, 200) if not disabled else (180, 180, 205)
+        desc_surf = self._font_card_desc.render(card["desc"], True, desc_color)
+        desc_rect = desc_surf.get_rect(centerx=rect.centerx, top=title_rect.bottom + 8)
+        self.screen.blit(desc_surf, desc_rect)
+
+        if disabled:
+            lock_text = self._font_small.render("COMING SOON", True, (255, 210, 110))
+            lock_rect = lock_text.get_rect(center=(rect.centerx, desc_rect.bottom + 24))
+            self.screen.blit(lock_text, lock_rect)
+
+        key_surf = self._font_small.render(card["key"], True, border_color)
+        key_rect = key_surf.get_rect(right=rect.right - 12, bottom=rect.bottom - 10)
+        self.screen.blit(key_surf, key_rect)
         rect = card["rect"].copy()
         rect.y += int(card["hover_y"])
 
@@ -405,6 +519,10 @@ class ModeSelectionScreen:
                     elif event.key == pygame.K_3:
                         self._clicked_mode = MODE_ONLINE_MULTIPLAYER
                         self.cards[2]["click_timer"] = 0.1
+                    elif event.key == pygame.K_4:
+                        self._unavailable_message = "Campaign mode is coming soon!"
+                        self._unavailable_message_timer = 2.0
+                        self.cards[3]["click_timer"] = 0.1
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self._back_button_rect.collidepoint(event.pos):
                         self.back_requested = True
@@ -413,8 +531,13 @@ class ModeSelectionScreen:
                         hover_rect = card["rect"].copy()
                         hover_rect.y += int(card["hover_y"])
                         if hover_rect.collidepoint(event.pos):
-                            self._clicked_mode = card["mode"]
-                            card["click_timer"] = 0.1
+                            if card.get("disabled", False):
+                                self._unavailable_message = "Campaign mode is coming soon!"
+                                self._unavailable_message_timer = 2.0
+                                card["click_timer"] = 0.1
+                            else:
+                                self._clicked_mode = card["mode"]
+                                card["click_timer"] = 0.1
                             break
 
             self._draw()

@@ -106,12 +106,13 @@ class TitleScreen:
 
         # First time playing prompt
         self._show_tutorial_prompt = True
-        self._prompt_yes_rect = pygame.Rect(0, 0, 120, 50)
-        self._prompt_no_rect = pygame.Rect(0, 0, 120, 50)
+        # Adjust tutorial prompt box dimensions
+        self._prompt_yes_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
+        self._prompt_no_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
         self._tutorial_pages = [
             "Welcome to Grid Survival!\nObjective: Survive as the tiles collapse beneath you.",
             "Controls:\nPlayer 1: W/A/S/D to move, SPACE to jump, Q for powers.\nPlayer 2: Arrows to move, RIGHT SHIFT to jump, / for powers.",
-            "Modes:\n- Solo vs AI: Practice against bots.\n- Local: Couch Co-op with a friend.\n- LAN: Play over the local network.",
+            "Modes:\n- Solo vs AI: Practice against bots.\n- Local: Couch Co-op with a friend.\n- LAN: Play over the local network.\n- Campaign: Story mode coming soon.",
             "Power-ups (Orbs): Collect glowing orbs to unlock powers.\n- Void Walk: Cross missing tiles.\n- Shields: Block one hazard hit.",
             "Hazards & Enemies:\nWatch out for crumbling tiles, the deadly shoreline, and enemy attacks!",
             "Would you like to watch the gameplay video tutorial?"
