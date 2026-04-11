@@ -27,7 +27,7 @@ from settings import (
     DEBUG_DRAW_WALKABLE,
     DEBUG_VISUALS_ENABLED,
     DEBUG_WALKABLE_COLOR,
-    MODE_VS_COMPUTER,
+    MODE_CAMPAIGN,
     MODE_LOCAL_MULTIPLAYER,
     MODE_ONLINE_MULTIPLAYER,
     PLAYER_START_POS,
@@ -50,7 +50,7 @@ class GameManager:
         screen=None,
         clock=None,
         player_name: str = "Player",
-        game_mode: str = MODE_VS_COMPUTER,
+        game_mode: str = MODE_CAMPAIGN,
         selected_characters: list[str] | None = None,
         network=None,
         local_player_index: int = 0,
@@ -140,8 +140,8 @@ class GameManager:
         self._spawn_adjusted = False
         self._spawn_rescue_window = 1.0
         self._time_since_start = 0.0
-        self._pending_initial_restart = (self.game_mode == MODE_VS_COMPUTER and USE_AI_PLAYER)
-        if self.game_mode == MODE_VS_COMPUTER:
+        self._pending_initial_restart = (self.game_mode == MODE_CAMPAIGN and USE_AI_PLAYER)
+        if self.game_mode == MODE_CAMPAIGN:
             primary_char = self._character_choice(0)
             self.players.append(
                 Player(
@@ -1292,7 +1292,7 @@ class GameManager:
             return 2
         if self.game_mode == MODE_LOCAL_MULTIPLAYER:
             return max(2, len(self.selected_characters))
-        if self.game_mode == MODE_VS_COMPUTER:
+        if self.game_mode == MODE_CAMPAIGN:
             human_slots = max(1, len(self.selected_characters))
             return human_slots + (1 if USE_AI_PLAYER else 0)
         return max(1, len(self.selected_characters))
@@ -1333,14 +1333,14 @@ class GameManager:
         return self._spawn_positions(count)
 
     def _initial_spawns(self, count: int) -> list[tuple[int, int]]:
-        if self.game_mode == MODE_VS_COMPUTER:
+        if self.game_mode == MODE_CAMPAIGN:
             return self._vs_computer_spawns(count)
         return self._spawn_positions(count)
 
     def _pacman_enemy_count(self) -> int:
         if self.game_mode == MODE_ONLINE_MULTIPLAYER:
             return 2
-        if self.game_mode == MODE_VS_COMPUTER:
+        if self.game_mode == MODE_CAMPAIGN:
             return 1
         if self.game_mode == MODE_LOCAL_MULTIPLAYER:
             return 2

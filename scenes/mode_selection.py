@@ -54,24 +54,21 @@ class ModeSelectionScreen:
     """Mode select screen shown after successful name entry."""
 
     _MODE_ICONS = {
-        MODE_VS_COMPUTER: "🤖",
+        MODE_CAMPAIGN: "🏆",
         MODE_LOCAL_MULTIPLAYER: "🎮",
         MODE_ONLINE_MULTIPLAYER: "🌐",
-        MODE_CAMPAIGN: "🏆",
     }
 
     _MODE_BORDER = {
-        MODE_VS_COMPUTER: MODE_CARD_BORDER_VS_COMPUTER,
+        MODE_CAMPAIGN: MODE_CARD_BORDER_CAMPAIGN,
         MODE_LOCAL_MULTIPLAYER: MODE_CARD_BORDER_LOCAL_MP,
         MODE_ONLINE_MULTIPLAYER: MODE_CARD_BORDER_ONLINE_MP,
-        MODE_CAMPAIGN: MODE_CARD_BORDER_CAMPAIGN,
     }
 
     _MODE_HOVER_BORDER = {
-        MODE_VS_COMPUTER: MODE_CARD_HOVER_BORDER_VS_COMPUTER,
+        MODE_CAMPAIGN: MODE_CARD_HOVER_BORDER_CAMPAIGN,
         MODE_LOCAL_MULTIPLAYER: MODE_CARD_HOVER_BORDER_LOCAL_MP,
         MODE_ONLINE_MULTIPLAYER: MODE_CARD_HOVER_BORDER_ONLINE_MP,
-        MODE_CAMPAIGN: MODE_CARD_HOVER_BORDER_CAMPAIGN,
     }
 
     def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock, player_name: str):
@@ -103,13 +100,13 @@ class ModeSelectionScreen:
         card_w = MODE_CARD_WIDTH
         card_h = MODE_CARD_HEIGHT
         gap = 28
-        total_h = 4 * card_h + 3 * gap
+        total_h = 3 * card_h + 2 * gap
         start_y = (self.height - total_h) // 2 + 60
 
         self.cards = [
             {
-                "mode": MODE_VS_COMPUTER,
-                "title": "VS COMPUTER",
+                "mode": MODE_CAMPAIGN,
+                "title": "CAMPAIGN",
                 "desc": "Face an AI-controlled opponent",
                 "key": "[1]",
                 "rect": pygame.Rect(0, start_y + (card_h + gap) * 0, card_w, card_h),
@@ -139,17 +136,6 @@ class ModeSelectionScreen:
                 "click_scale": 1.0,
                 "click_timer": 0.0,
                 "disabled": False,
-            },
-            {
-                "mode": MODE_CAMPAIGN,
-                "title": "CAMPAIGN",
-                "desc": "Story mode coming soon",
-                "key": "[4]",
-                "rect": pygame.Rect(0, start_y + (card_h + gap) * 3, card_w, card_h),
-                "hover_y": 0.0,
-                "click_scale": 1.0,
-                "click_timer": 0.0,
-                "disabled": True,
             },
         ]
         for card in self.cards:
@@ -511,7 +497,7 @@ class ModeSelectionScreen:
                         self.back_requested = True
                         return None
                     if event.key == pygame.K_1:
-                        self._clicked_mode = MODE_VS_COMPUTER
+                        self._clicked_mode = MODE_CAMPAIGN
                         self.cards[0]["click_timer"] = 0.1
                     elif event.key == pygame.K_2:
                         self._clicked_mode = MODE_LOCAL_MULTIPLAYER
@@ -519,10 +505,6 @@ class ModeSelectionScreen:
                     elif event.key == pygame.K_3:
                         self._clicked_mode = MODE_ONLINE_MULTIPLAYER
                         self.cards[2]["click_timer"] = 0.1
-                    elif event.key == pygame.K_4:
-                        self._unavailable_message = "Campaign mode is coming soon!"
-                        self._unavailable_message_timer = 2.0
-                        self.cards[3]["click_timer"] = 0.1
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self._back_button_rect.collidepoint(event.pos):
                         self.back_requested = True
