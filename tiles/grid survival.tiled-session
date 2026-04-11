@@ -3,7 +3,7 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
+    "activeFile": "",
     "expandedProjectPaths": [
     ],
     "file.lastUsedOpenFilter": "All Files (*)",
@@ -26,6 +26,94 @@
             "viewCenter": {
                 "x": 807.5137338295234,
                 "y": 383.7958532695375
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_10.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_11.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_12.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_13.tmx": {
+            "scale": 0.33,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1442.4242424242423,
+                "y": 1392.4242424242425
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_2.tmx": {
+            "scale": 0.275537109375,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1535.1834130781501,
+                "y": 767.591706539075
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_3.tmx": {
+            "scale": 0.275537109375,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1535.1834130781501,
+                "y": 767.591706539075
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_4.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_5.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_7.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_8.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
+            }
+        },
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_9.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1536,
+                "y": 768.5
             }
         },
         "C_OutSide_Nature.tsx": {
@@ -63,12 +151,11 @@
     "map.tileWidth": 128,
     "map.width": 12,
     "openFiles": [
-        "tilesfloorbig.tsx",
-        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx"
     ],
     "project": "grid survival.tiled-project",
     "recentFiles": [
         "tilesfloorbig.tsx",
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_13.tmx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
         "tilesfloor.tsx",
         "ground.tsx",
