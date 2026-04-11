@@ -5,6 +5,8 @@ import random
 
 import pygame
 
+_first_time_prompt_answered = False
+
 from audio import get_audio
 from settings import (
     MUSIC_PATH,
@@ -104,8 +106,8 @@ class TitleScreen:
         self._tutorial_button_rect = pygame.Rect(24, self.height - 124, 190, 46)
         self._back_button_rect = pygame.Rect(24, self.height - 68, 150, 46)
 
-        # First time playing prompt
-        self._show_tutorial_prompt = True
+        # First time playing prompt - only show if not answered yet
+        self._show_tutorial_prompt = not _first_time_prompt_answered
         # Adjust tutorial prompt box dimensions
         self._prompt_yes_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
         self._prompt_no_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
@@ -789,10 +791,13 @@ class TitleScreen:
                 if self._show_tutorial_prompt:
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         if self._prompt_yes_rect.collidepoint(event.pos):
+                            global _first_time_prompt_answered
                             self._show_tutorial_prompt = False
+                            _first_time_prompt_answered = True
                             self._play_multipage_tutorial()
                         elif self._prompt_no_rect.collidepoint(event.pos):
                             self._show_tutorial_prompt = False
+                            _first_time_prompt_answered = True
                     continue
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
