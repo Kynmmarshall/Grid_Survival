@@ -464,20 +464,23 @@ class GameManager:
         alive_count = len(self.players) - len(self.eliminated_players)
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
 
-        # Check game over condition — victory for the last remaining participant,
-        # otherwise elimination when everyone is gone or nobody remains on the platform.
+        # Check completion only after elimination animations finish so death sequences play out.
+        completion_ready = self._elimination_animations_finished()
+
+        # Victory for the last remaining participant.
         if len(self.players) > 1 and alive_count == 1:
-            winner_index = next(
-                (idx for idx, player in enumerate(self.players) if player not in self.eliminated_players),
-                0,
-            )
-            winner = self.players[winner_index] if self.players else None
-            winner_label = getattr(winner, "character_name", self.player_name) if winner else self.player_name
-            self._handle_round_victory(winner_index, winner_label)
+            if completion_ready:
+                winner_index = next(
+                    (idx for idx, player in enumerate(self.players) if player not in self.eliminated_players),
+                    0,
+                )
+                winner = self.players[winner_index] if self.players else None
+                winner_label = getattr(winner, "character_name", self.player_name) if winner else self.player_name
+                self._handle_round_victory(winner_index, winner_label)
             return
 
-        platform_empty = not self._any_player_on_platform()
-        if alive_count == 0 or platform_empty:
+        # Elimination when everyone is gone.
+        if alive_count == 0 and completion_ready:
             self._trigger_game_over()
 
         for player in self.players:
@@ -977,6 +980,27 @@ class GameManager:
             if self._player_on_platform(player):
                 return True
         return False
+
+    def _elimination_animations_finished(self) -> bool:
+        """Return True when all eliminated players have fully finished death visuals."""
+        for player in self.eliminated_players:
+            if getattr(player, "state", "") != "death":
+                return False
+
+            animation = getattr(player, "current_animation", None)
+            if animation is not None and not bool(getattr(animation, "finished", False)):
+                return False
+
+            # Keep end-of-round/game UI hidden until the death fade has finished too.
+            if int(getattr(player, "_death_fade_alpha", 255)) > 0:
+                return False
+
+            if bool(getattr(player, "drowning", False)) and not bool(
+                getattr(player, "drown_animation_done", False)
+            ):
+                return False
+
+        return True
 
     def _player_on_platform(self, player) -> bool:
         if player.is_falling() or player.is_drowning():

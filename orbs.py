@@ -286,7 +286,7 @@ class OrbManager:
         [OrbType.POWER]  * 2 +
         [OrbType.BOMB]   * 1 +
         [OrbType.LIFE]   * 2 +  # Life orb - heart-shaped pink heart
-        [OrbType.PHASE]  * 5
+        [OrbType.PHASE]  * 4
     )
 
     def __init__(self, level_number: int = 1):
