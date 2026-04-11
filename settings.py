@@ -78,6 +78,170 @@ PLAYER_JUMP_GRAVITY = 2000         # Gravity acceleration on Z axis
 PLAYER_MAX_FALL_SPEED = 1000       # Max fall speed for Z axis
 PLAYER_JUMP_KEY = pygame.K_SPACE   # Default jump key
 
+DEFAULT_CONTROLS = {
+    "player1": {
+        "up": pygame.K_w,
+        "down": pygame.K_s,
+        "left": pygame.K_a,
+        "right": pygame.K_d,
+        "jump": pygame.K_SPACE,
+        "power": pygame.K_q,
+    },
+    "player2": {
+        "up": pygame.K_UP,
+        "down": pygame.K_DOWN,
+        "left": pygame.K_LEFT,
+        "right": pygame.K_RIGHT,
+        "jump": pygame.K_RSHIFT,
+        "power": pygame.K_SLASH,
+    },
+}
+
+CUSTOM_CONTROLS_FILE = BASE_DIR / "custom_controls.json"
+
+_KEY_TO_NAME = {
+    pygame.K_SPACE: "SPACE",
+    pygame.K_RETURN: "RETURN",
+    pygame.K_BACKSPACE: "BACKSPACE",
+    pygame.K_TAB: "TAB",
+    pygame.K_ESCAPE: "ESCAPE",
+    pygame.K_UP: "UP",
+    pygame.K_DOWN: "DOWN",
+    pygame.K_LEFT: "LEFT",
+    pygame.K_RIGHT: "RIGHT",
+    pygame.K_LSHIFT: "LSHIFT",
+    pygame.K_RSHIFT: "RSHIFT",
+    pygame.K_LCTRL: "LCTRL",
+    pygame.K_RCTRL: "RCTRL",
+    pygame.K_LALT: "LALT",
+    pygame.K_RALT: "RALT",
+    pygame.K_CAPSLOCK: "CAPSLOCK",
+    pygame.K_F1: "F1",
+    pygame.K_F2: "F2",
+    pygame.K_F3: "F3",
+    pygame.K_F4: "F4",
+    pygame.K_F5: "F5",
+    pygame.K_F6: "F6",
+    pygame.K_F7: "F7",
+    pygame.K_F8: "F8",
+    pygame.K_F9: "F9",
+    pygame.K_F10: "F10",
+    pygame.K_F11: "F11",
+    pygame.K_F12: "F12",
+    pygame.K_SCROLLOCK: "SCROLLOCK",
+    pygame.K_SYSREQ: "SYSREQ",
+    pygame.K_PRINTSCREEN: "PRINTSCREEN",
+    pygame.K_PAGEUP: "PAGEUP",
+    pygame.K_PAGEDOWN: "PAGEDOWN",
+    pygame.K_HOME: "HOME",
+    pygame.K_END: "END",
+    pygame.K_INSERT: "INSERT",
+    pygame.K_DELETE: "DELETE",
+    pygame.K_NUMLOCK: "NUMLOCK",
+    pygame.K_KP_0: "KP_0",
+    pygame.K_KP_1: "KP_1",
+    pygame.K_KP_2: "KP_2",
+    pygame.K_KP_3: "KP_3",
+    pygame.K_KP_4: "KP_4",
+    pygame.K_KP_5: "KP_5",
+    pygame.K_KP_6: "KP_6",
+    pygame.K_KP_7: "KP_7",
+    pygame.K_KP_8: "KP_8",
+    pygame.K_KP_9: "KP_9",
+    pygame.K_KP_PERIOD: "KP_PERIOD",
+    pygame.K_KP_DIVIDE: "KP_DIVIDE",
+    pygame.K_KP_MULTIPLY: "KP_MULTIPLY",
+    pygame.K_KP_MINUS: "KP_MINUS",
+    pygame.K_KP_PLUS: "KP_PLUS",
+    pygame.K_KP_ENTER: "KP_ENTER",
+    pygame.K_SLASH: "SLASH",
+    pygame.K_BACKSLASH: "BACKSLASH",
+    pygame.K_PERIOD: "PERIOD",
+    pygame.K_COMMA: "COMMA",
+    pygame.K_SEMICOLON: "SEMICOLON",
+    pygame.K_QUOTE: "QUOTE",
+    pygame.K_BACKQUOTE: "BACKQUOTE",
+    pygame.K_LEFTBRACKET: "LEFTBRACKET",
+    pygame.K_RIGHTBRACKET: "RIGHTBRACKET",
+    pygame.K_MINUS: "MINUS",
+    pygame.K_EQUALS: "EQUALS",
+}
+
+_NAME_TO_KEY = {v: k for k, v in _KEY_TO_NAME.items()}
+
+
+def _default_controls():
+    return {
+        "player1": {
+            "up": "K_w",
+            "down": "K_s",
+            "left": "K_a",
+            "right": "K_d",
+            "jump": "K_SPACE",
+            "power": "K_q",
+        },
+        "player2": {
+            "up": "K_UP",
+            "down": "K_DOWN",
+            "left": "K_LEFT",
+            "right": "K_RIGHT",
+            "jump": "K_RSHIFT",
+            "power": "K_SLASH",
+        },
+    }
+
+
+def load_custom_controls():
+    import json
+
+    if not CUSTOM_CONTROLS_FILE.exists():
+        return None
+    try:
+        with open(CUSTOM_CONTROLS_FILE, "r") as f:
+            data = json.load(f)
+        converted = {}
+        for player_key, controls in data.items():
+            converted_controls = {}
+            for action, key_name in controls.items():
+                if key_name.startswith("K_"):
+                    key_str = key_name[2:]
+                    if key_str in _NAME_TO_KEY:
+                        converted_controls[action] = _NAME_TO_KEY[key_str]
+                    else:
+                        converted_controls[action] = getattr(pygame, f"K_{key_str.lower()}", pygame.K_UNKNOWN)
+                else:
+                    converted_controls[action] = getattr(pygame, key_name, pygame.K_UNKNOWN)
+            converted[player_key] = converted_controls
+        return converted
+    except Exception:
+        return None
+
+
+def save_custom_controls(controls):
+    import json
+
+    try:
+        serializable = {}
+        for player_key, player_controls in controls.items():
+            serializable_controls = {}
+            for action, key_code in player_controls.items():
+                key_name = _KEY_TO_NAME.get(key_code)
+                if key_name:
+                    serializable_controls[action] = f"K_{key_name}"
+                else:
+                    regular_name = pygame.key.name(key_code)
+                    if regular_name and regular_name != "":
+                        serializable_controls[action] = f"K_{regular_name.upper()}"
+                    else:
+                        serializable_controls[action] = f"K_UNKNOWN"
+            serializable[player_key] = serializable_controls
+        with open(CUSTOM_CONTROLS_FILE, "w") as f:
+            json.dump(serializable, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving controls: {e}")
+        return False
+
 PLAYER_ANIMATION_PATHS = {
 	"idle": {
 		"down": CHARACTER_BASE / "idle" / "Front - Idle Blinking",

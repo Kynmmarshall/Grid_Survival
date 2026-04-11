@@ -37,6 +37,8 @@ from settings import (
     WINDOW_SIZE,
     WINDOW_TITLE,
     SOUND_PLAYER_FALL,
+    DEFAULT_CONTROLS,
+    load_custom_controls,
 )
 
 
@@ -145,22 +147,14 @@ class GameManager:
                 ai_pos = next(spawn_positions, PLAYER_START_POS)
                 self.players.append(AIPlayer(position=ai_pos))
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
-            player1_controls = {
-                'up': pygame.K_w,
-                'down': pygame.K_s,
-                'left': pygame.K_a,
-                'right': pygame.K_d,
-                'jump': pygame.K_SPACE,
-                'power': pygame.K_q,
-            }
-            player2_controls = {
-                'up': pygame.K_UP,
-                'down': pygame.K_DOWN,
-                'left': pygame.K_LEFT,
-                'right': pygame.K_RIGHT,
-                'jump': pygame.K_RSHIFT,
-                'power': pygame.K_SLASH,
-            }
+            custom_controls = load_custom_controls()
+            if custom_controls is None:
+                custom_controls = {
+                    "player1": dict(DEFAULT_CONTROLS["player1"]),
+                    "player2": dict(DEFAULT_CONTROLS["player2"]),
+                }
+            player1_controls = custom_controls["player1"]
+            player2_controls = custom_controls["player2"]
             player1_pos = next(spawn_positions, PLAYER_START_POS)
             player2_pos = next(spawn_positions, PLAYER_START_POS)
             self.players.append(
@@ -178,22 +172,14 @@ class GameManager:
                 )
             )
         elif self.is_network_game:
-            local_controls = {
-                'up': pygame.K_w,
-                'down': pygame.K_s,
-                'left': pygame.K_a,
-                'right': pygame.K_d,
-                'jump': pygame.K_SPACE,
-                'power': pygame.K_q,
-            }
-            remote_controls = {
-                'up': pygame.K_UP,
-                'down': pygame.K_DOWN,
-                'left': pygame.K_LEFT,
-                'right': pygame.K_RIGHT,
-                'jump': pygame.K_RSHIFT,
-                'power': pygame.K_SLASH,
-            }
+            custom_controls = load_custom_controls()
+            if custom_controls is None:
+                custom_controls = {
+                    "player1": dict(DEFAULT_CONTROLS["player1"]),
+                    "player2": dict(DEFAULT_CONTROLS["player2"]),
+                }
+            local_controls = custom_controls["player1"]
+            remote_controls = custom_controls["player2"]
             for idx in range(2):
                 controls = local_controls if idx == self.local_player_index else remote_controls
                 self.players.append(
