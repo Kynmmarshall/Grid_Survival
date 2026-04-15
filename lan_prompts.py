@@ -132,14 +132,20 @@ def prompt_host_or_join(screen, clock):
         {
             "value": "host",
             "title": "HOST GAME",
-            "desc": "Create a LAN match for another player on the same network.",
-            "hint": "Your machine becomes visible to others on this Wi-Fi.",
+            "desc": "Open a match for players on your LAN or anywhere on the internet.",
+            "hint": "Your LAN IP and public IP will both be displayed.",
         },
         {
             "value": "discover",
             "title": "FIND GAMES ON LAN",
             "desc": "Scan for visible hosts on the same Wi-Fi or router.",
             "hint": "Choose a visible machine instead of typing an IP.",
+        },
+        {
+            "value": "join_ip",
+            "title": "JOIN BY IP",
+            "desc": "Connect to any host using their IP address.",
+            "hint": "Works on LAN (local IP) or over the internet (public IP).",
         },
     ]
 
@@ -182,9 +188,9 @@ def prompt_host_or_join(screen, clock):
         eased = 1.0 - (1.0 - progress) ** 3
         header_offset = 80.0 * (1.0 - eased)
 
-        title = font_header.render("PLAY OVER LAN", True, (255, 255, 255))
+        title = font_header.render("PLAY ONLINE", True, (255, 255, 255))
         subtitle = font_body.render(
-            "Both machines must be on the same local network.",
+            "Host on your LAN or invite anyone over the internet.",
             True,
             (205, 210, 225),
         )
@@ -471,7 +477,7 @@ def prompt_ip_entry(screen, clock):
         _draw_rounded_rect(screen, card_rect, MODE_CARD_BASE_COLOR, MODE_CARD_BORDER_ONLINE_MP, 2, 18)
         title = font_title.render("Enter Host IP", True, (255, 255, 255))
         screen.blit(title, title.get_rect(center=(card_rect.centerx, card_rect.top + 28)))
-        prompt = font_small.render("Type the host machine's IP and press Enter", True, (200, 200, 200))
+        prompt = font_small.render("LAN IP (e.g. 192.168.x.x)  or  Public IP for internet play", True, (200, 200, 200))
         screen.blit(prompt, prompt.get_rect(center=(card_rect.centerx, card_rect.top + 60)))
         ip_display = input_str + ("_" if show_cursor else "")
         ip_surf = font_body.render(ip_display, True, (255, 220, 90))
