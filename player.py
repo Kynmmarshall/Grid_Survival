@@ -28,10 +28,18 @@ from settings import (
     POWER_ORBS_REQUIRED,
     ORB_SHIELD_WARNING,
     SHIELD_EFFECT_PATH,
+    VOID_WALK_WING_PATH,
+    ATTACK_COOLDOWN,
+    ATTACK_RANGE,
+    ATTACK_DAMAGE,
+    KNOCKBACK_FORCE,
 )
 
 
 _SHIELD_EFFECT_SURFACE: pygame.Surface | None = None
+_VOID_WALK_WING_CACHE: dict[
+    int, tuple[list[pygame.Surface], list[pygame.Surface], list[pygame.Surface], list[pygame.Surface]]
+] = {}
 
 
 def _get_shield_effect_surface() -> pygame.Surface | None:
@@ -46,6 +54,57 @@ def _get_shield_effect_surface() -> pygame.Surface | None:
     else:
         _SHIELD_EFFECT_SURFACE = None
     return _SHIELD_EFFECT_SURFACE
+
+
+def _get_void_walk_wing_frames(
+    target_size: int,
+) -> tuple[list[pygame.Surface], list[pygame.Surface], list[pygame.Surface], list[pygame.Surface]] | None:
+    """
+    Returns (left_light, right_light, left_dark, right_dark) where each is [frame0, frame1].
+    Uses the bundled CC0 wing spritesheet (2x2 of 32x32 cells).
+    """
+    target_size = int(target_size)
+    if target_size <= 0:
+        return None
+
+    cached = _VOID_WALK_WING_CACHE.get(target_size)
+    if cached is not None:
+        return cached
+
+    if not VOID_WALK_WING_PATH or not VOID_WALK_WING_PATH.exists():
+        return None
+
+    try:
+        sheet = pygame.image.load(VOID_WALK_WING_PATH.as_posix()).convert_alpha()
+    except Exception:
+        return None
+
+    cell = 32
+    if sheet.get_width() < cell * 2 or sheet.get_height() < cell * 2:
+        return None
+
+    def extract(col: int, row: int) -> pygame.Surface:
+        frame = pygame.Surface((cell, cell), pygame.SRCALPHA)
+        frame.blit(sheet, (0, 0), (col * cell, row * cell, cell, cell))
+        if target_size != cell:
+            frame = pygame.transform.smoothscale(frame, (target_size, target_size))
+        return frame
+
+    def tint_black(src: pygame.Surface) -> pygame.Surface:
+        out = src.copy()
+        tint = pygame.Surface(out.get_size(), pygame.SRCALPHA)
+        tint.fill((0, 0, 0, 255))
+        out.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        return out
+
+    # Column 0 = left wing, Column 1 = right wing; Row 0/1 = flap frames.
+    left_light = [extract(0, 0), extract(0, 1)]
+    right_light = [extract(1, 0), extract(1, 1)]
+    left_dark = [tint_black(frame) for frame in left_light]
+    right_dark = [tint_black(frame) for frame in right_light]
+
+    _VOID_WALK_WING_CACHE[target_size] = (left_light, right_light, left_dark, right_dark)
+    return _VOID_WALK_WING_CACHE[target_size]
 
 
 class Player:
@@ -113,9 +172,16 @@ class Player:
         self._active_orb_timer = 0.0
         self._active_orb_indefinite = False
         self._active_orb_duration = 0.0
+        self._max_health = 3
+        self._health = self._max_health  # Current health
         self._extra_lives = 0  # Extra lives from LIFE orbs
-        self._revival_blink_timer = 0.0
-        self._revival_immunity_timer = 0.0
+        self._projectile_ammo = 5  # Ammo for projectiles (shuriken/stone)
+        self._max_projectile_ammo = 5
+        self._projectile_cooldown = 0.0  # Cooldown to reload ammo
+        self._projectile_reload_time = 5.0  # Time to reload 5 ammo
+        self._ultimate_charges = 0  # Ultimate charges from ULTIMATE orbs
+        self._attack_cooldown = 0.0
+        self._is_attacking = False
 
     def _load_animations(self):
         animations = {}
@@ -189,20 +255,189 @@ class Player:
     def has_active_shield(self) -> bool:
         return self._shield_timer > 0
 
-    def add_life(self):
-        """Add an extra life from a LIFE orb."""
+    def add_extra_life(self):
+        """Add an extra life from LIFE orb."""
         self._extra_lives += 1
+        print(f"DEBUG: Player now has {self._extra_lives} extra lives")
 
-    def has_extra_life(self) -> bool:
+    def has_extra_life_available(self) -> bool:
         """Check if player has an extra life available."""
         return self._extra_lives > 0
 
-    def use_life(self) -> bool:
-        """Use an extra life to revive. Returns True if life was used."""
+    def use_extra_life(self) -> bool:
+        """Use an extra life to get full health. Returns True if life was used."""
         if self._extra_lives > 0:
             self._extra_lives -= 1
+            self._health = self._max_health
+            print(f"DEBUG: Used extra life! Health restored to {self._health}/{self._max_health}")
             return True
         return False
+
+    def add_ultimate_charge(self):
+        """Add an ultimate charge from ULTIMATE orb."""
+        self._ultimate_charges += 1
+        print(f"DEBUG: Player now has {self._ultimate_charges} ultimate charges")
+
+    def use_ultimate(self) -> bool:
+        """Use an ultimate charge. Returns True if used."""
+        if self._ultimate_charges > 0:
+            self._ultimate_charges -= 1
+            return True
+        return False
+
+    def has_ultimate(self) -> bool:
+        """Check if player has an ultimate charge."""
+        return self._ultimate_charges > 0
+
+    def get_health(self) -> int:
+        return self._health
+
+    def get_max_health(self) -> int:
+        return self._max_health
+
+    def take_damage(self, damage: int = 1) -> bool:
+        """Take damage. Returns True if player died."""
+        if self.has_active_shield():
+            return False
+        self._health -= damage
+        print(f"DEBUG: Player took {damage} damage, health now {self._health}/{self._max_health}")
+        if self._health <= 0:
+            # Check for extra life
+            if self.has_extra_life_available():
+                if self.use_extra_life():
+                    print(f"DEBUG: Extra life used! Health restored to {self._health}/{self._max_health}")
+                    return False
+            return True
+        return False
+
+    def is_alive(self) -> bool:
+        return self._health > 0
+
+    def can_attack(self) -> bool:
+        return self._attack_cooldown <= 0 and self._health > 0
+
+    def try_attack(self, game, target_players: list) -> bool:
+        """Attempt to attack nearby players. Returns True if attack was performed."""
+        if not self.can_attack():
+            return False
+        
+        hit_any = False
+        for target in target_players:
+            if target in game.eliminated_players:
+                continue
+            if target is self:
+                continue
+            distance = self.position.distance_to(target.position)
+            if distance < ATTACK_RANGE:
+                if target.take_damage(ATTACK_DAMAGE):
+                    game._eliminate_player(target, "combat")
+                else:
+                    self._apply_knockback(target)
+                hit_any = True
+        
+        if hit_any:
+            self._attack_cooldown = ATTACK_COOLDOWN
+            self._is_attacking = True
+            return True
+        return False
+
+    def _apply_knockback(self, target):
+        """Apply knockback to target player."""
+        direction = target.position - self.position
+        if direction.length() > 0:
+            direction = direction.normalize()
+        else:
+            direction = pygame.Vector2(1, 0) if self.facing == "right" else pygame.Vector2(-1, 0)
+        target.velocity += direction * KNOCKBACK_FORCE
+
+    def get_facing_vector(self) -> pygame.Vector2:
+        """Get direction vector based on facing direction."""
+        direction_map = {
+            "right": pygame.Vector2(1, 0),
+            "left": pygame.Vector2(-1, 0),
+            "down": pygame.Vector2(0, 1),
+            "up": pygame.Vector2(0, -1),
+        }
+        return direction_map.get(self.facing, pygame.Vector2(1, 0))
+
+    def spawn_projectile(self, game, projectile_type: str):
+        """Spawn a projectile based on character and type. Returns True if spawned."""
+        from settings import PROJECTILE_SPEED, ULTIMATE_DAMAGE
+        from hazards import Bullet
+        
+        # Check ammo
+        if self._projectile_ammo <= 0:
+            print(f"DEBUG: No ammo left! Waiting for reload...")
+            return False
+        
+        self._projectile_ammo -= 1
+        print(f"DEBUG: Projectile fired! Ammo: {self._projectile_ammo}/{self._max_projectile_ammo}")
+        
+        start_pos = (self.position.x, self.position.y)
+        direction = self.get_facing_vector()
+        
+        if self.character_name.lower() == "ninja":
+            if projectile_type == "shuriken":
+                bullet = Bullet(start_pos, direction, speed=PROJECTILE_SPEED)
+                bullet.radius = 6
+                bullet.color = (100, 100, 120)
+                bullet.damage = ATTACK_DAMAGE
+                bullet.owner = self
+                game.projectiles.append(bullet)
+            elif projectile_type == "fireball":
+                bullet = Bullet(start_pos, direction, speed=PROJECTILE_SPEED * 0.7)
+                bullet.radius = 15
+                bullet.color = (255, 80, 20)
+                bullet.damage = ULTIMATE_DAMAGE
+                bullet.owner = self
+                bullet.is_fireball = True
+                game.projectiles.append(bullet)
+        
+        elif self.character_name.lower() == "caveman":
+            if projectile_type == "stone":
+                bullet = Bullet(start_pos, direction, speed=PROJECTILE_SPEED * 0.8)
+                bullet.radius = 8
+                bullet.color = (160, 140, 100)
+                bullet.damage = ATTACK_DAMAGE
+                bullet.owner = self
+                game.projectiles.append(bullet)
+        
+        return True
+
+    def activate_big_stick(self, game):
+        """Caveman ultimate - big stick melee attack that hits all nearby enemies."""
+        from settings import ULTIMATE_COOLDOWN, ATTACK_RANGE, ULTIMATE_DAMAGE_PERCENT
+        
+        if not self.can_attack():
+            return
+        
+        # Bigger attack range for ultimate
+        big_range = ATTACK_RANGE * 2
+        hit_any = False
+        
+        for target in game.players:
+            if target in game.eliminated_players:
+                continue
+            if target is self:
+                continue
+            
+            distance = self.position.distance_to(target.position)
+            if distance < big_range:
+                damage = max(1, math.ceil(target.get_max_health() * ULTIMATE_DAMAGE_PERCENT))
+                if target.take_damage(damage):
+                    game._eliminate_player(target, "combat")
+                else:
+                    self._apply_knockback(target)
+                    # Extra knockback for ultimate
+                    direction = target.position - self.position
+                    if direction.length() > 0:
+                        direction = direction.normalize()
+                    target.velocity += direction * (KNOCKBACK_FORCE * 1.5)
+                hit_any = True
+        
+        if hit_any:
+            self._attack_cooldown = ULTIMATE_COOLDOWN
+            self._is_attacking = True
 
     def apply_freeze(self, duration: float):
         self._freeze_timer = duration
@@ -223,6 +458,17 @@ class Player:
             self._freeze_timer = max(0.0, self._freeze_timer - dt)
         if self._void_walk_timer > 0:
             self._void_walk_timer = max(0.0, self._void_walk_timer - dt)
+        if self._attack_cooldown > 0:
+            self._attack_cooldown = max(0.0, self._attack_cooldown - dt)
+            if self._attack_cooldown == 0:
+                self._is_attacking = False
+        # Projectile ammo reload
+        if self._projectile_ammo < self._max_projectile_ammo:
+            self._projectile_cooldown += dt
+            if self._projectile_cooldown >= self._projectile_reload_time:
+                self._projectile_ammo = self._max_projectile_ammo
+                self._projectile_cooldown = 0.0
+                print(f"DEBUG: Projectile ammo reloaded!")
         if self._active_orb_label and not self._active_orb_indefinite:
             if self._active_orb_timer > 0:
                 self._active_orb_timer = max(0.0, self._active_orb_timer - dt)
@@ -235,8 +481,6 @@ class Player:
             self._active_orb_indefinite = False
             self._active_orb_duration = 0.0
         self._status_flash_timer += dt
-        self._revival_blink_timer = max(0.0, self._revival_blink_timer - dt)
-        self._revival_immunity_timer = max(0.0, self._revival_immunity_timer - dt)
 
     def _speed_multiplier(self) -> float:
         """Combine all speed buffs into a single multiplier."""
@@ -475,9 +719,6 @@ class Player:
     def draw(self, surface: pygame.Surface):
         death_alpha = self._death_fade_alpha if self.state == "death" else 255
         render_alpha = min(self._power_alpha, death_alpha)
-        if self._revival_blink_timer > 0:
-            blink_alpha = int(128 + 127 * math.sin(pygame.time.get_ticks() * 0.01))
-            render_alpha = min(render_alpha, blink_alpha)
         if render_alpha <= 0:
             return
 
@@ -497,13 +738,27 @@ class Player:
         # Apply Z-offset to draw position
         draw_rect = self.rect.copy()
         draw_rect.y -= round(self.z)
+
+        wing_blits_behind: list[tuple[pygame.Surface, tuple[int, int]]] = []
+        wing_blits_front: list[tuple[pygame.Surface, tuple[int, int]]] = []
+        if self._has_void_walk_wings():
+            wing_blits_behind, wing_blits_front = self._void_walk_wing_blits(
+                draw_rect, render_alpha / 255.0
+            )
+            for wing_surface, wing_pos in wing_blits_behind:
+                surface.blit(wing_surface, wing_pos)
         frame = self.current_animation.image
         if render_alpha != 255:
             frame = frame.copy()
             frame.set_alpha(render_alpha)
         surface.blit(frame, draw_rect.topleft)
 
+        for wing_surface, wing_pos in wing_blits_front:
+            surface.blit(wing_surface, wing_pos)
+
         death_opacity = death_alpha / 255.0
+        if self._has_speed_orb_glow():
+            self._draw_speed_orb_glow(surface, draw_rect, death_opacity)
         if self._shield_timer > 0:
             self._draw_shield_overlay(surface, draw_rect, death_opacity)
         if self.is_frozen():
@@ -555,6 +810,8 @@ class Player:
         self._freeze_timer = 0.0
         self._void_walk_timer = 0.0
         self._orb_speed_boost = 1.0
+        if hasattr(self, "_orb_speed_timer"):
+            object.__delattr__(self, "_orb_speed_timer")
         self._power_speed_boost = 1.0
         self._power_jump_boost = 1.0
         self._status_flash_timer = 0.0
@@ -562,46 +819,13 @@ class Player:
         self._power_alpha = 255
         self._death_fade_alpha = 255
         self.clear_active_orb()
+        self._health = self._max_health
         self._extra_lives = 0
-        self._revival_blink_timer = 0.0
-        self._revival_immunity_timer = 0.0
-        self._refresh_collision_shape(force=True)
-
-    def reset_state_for_respawn(self):
-        """Reset player state for respawning in story mode - preserves extra lives."""
-        self._eliminated = False
-        self.position = self.spawn_position.copy()
-        self.velocity.update(0, 0)
-        self.state = "idle"
-        self.facing = PLAYER_DEFAULT_DIRECTION
-        self.current_animation = self.animations[self.state][self.facing]
-        self.current_animation.reset()
-        self.rect.center = (round(self.position.x), round(self.position.y))
-        self.falling = False
-        self.fall_velocity = 0.0
-        self.fall_draw_behind = False
-        self.drowning = False
-        self.drown_animation_done = False
-        self.drown_surface_y = None
-        self.jumping = False
-        self.z = 0.0
-        self.z_velocity = 0.0
-        self.on_ground = True
-        self.power_orb_charges = 0
-        self._shield_timer = 0.0
-        self._freeze_timer = 0.0
-        self._void_walk_timer = 0.0
-        self._orb_speed_boost = 1.0
-        self._power_speed_boost = 1.0
-        self._power_jump_boost = 1.0
-        self._status_flash_timer = 0.0
-        self._immune_to_hazards = False
-        self._power_alpha = 255
-        self._death_fade_alpha = 255
-        self.clear_active_orb()
-        # Preserve extra lives - don't reset!
-        self._revival_blink_timer = 0.0
-        self._revival_immunity_timer = 0.0
+        self._projectile_ammo = 5
+        self._projectile_cooldown = 0.0
+        self._ultimate_charges = 0
+        self._attack_cooldown = 0.0
+        self._is_attacking = False
         self._refresh_collision_shape(force=True)
 
     def snapshot_state(self) -> dict[str, Any]:
@@ -633,7 +857,11 @@ class Player:
             "active_orb_indefinite": bool(orb_indefinite),
             "active_orb_duration": float(orb_duration),
             "eliminated": bool(self._eliminated),
+            "health": int(self._health),
+            "max_health": int(self._max_health),
             "extra_lives": int(self._extra_lives),
+            "projectile_ammo": int(self._projectile_ammo),
+            "ultimate_charges": int(self._ultimate_charges),
         }
 
     def apply_snapshot_state(self, snapshot: dict[str, Any]):
@@ -664,7 +892,11 @@ class Player:
         self._orb_speed_boost = float(snapshot.get("orb_speed_boost", self._orb_speed_boost))
         self._eliminated = bool(snapshot.get("eliminated", self._eliminated))
         self._active_orb_label = snapshot.get("active_orb_label")
+        self._health = int(snapshot.get("health", self._health))
+        self._max_health = int(snapshot.get("max_health", self._max_health))
         self._extra_lives = int(snapshot.get("extra_lives", self._extra_lives))
+        self._projectile_ammo = int(snapshot.get("projectile_ammo", self._projectile_ammo))
+        self._ultimate_charges = int(snapshot.get("ultimate_charges", self._ultimate_charges))
         self._active_orb_timer = float(snapshot.get("active_orb_timer", self._active_orb_timer))
         self._active_orb_indefinite = bool(
             snapshot.get("active_orb_indefinite", self._active_orb_indefinite)
@@ -852,6 +1084,145 @@ class Player:
         shield_surf = pygame.Surface((radius * 2 + 4, radius * 2 + 4), pygame.SRCALPHA)
         pygame.draw.circle(shield_surf, (*base_color, alpha), (radius + 2, radius + 2), radius, 4)
         surface.blit(shield_surf, (draw_rect.centerx - radius - 2, draw_rect.centery - radius - 2))
+
+    def _has_speed_orb_glow(self) -> bool:
+        if self.state == "death":
+            return False
+
+        if self._orb_speed_boost > 1.01:
+            return True
+
+        if self._active_orb_label != "Speed Boost":
+            return False
+
+        return self._active_orb_indefinite or self._active_orb_timer > 0.0
+
+    def _has_void_walk_wings(self) -> bool:
+        if self.state == "death":
+            return False
+
+        if self.has_void_walk():
+            return True
+
+        if self._active_orb_label != "Void Walk":
+            return False
+
+        return self._active_orb_indefinite or self._active_orb_timer > 0.0
+
+    def _void_walk_wing_blits(self, draw_rect: pygame.Rect, opacity_scale: float = 1.0):
+        alpha = max(0, min(255, int(255 * opacity_scale)))
+        if alpha <= 0:
+            return [], []
+
+        wing_size = int(max(draw_rect.width, draw_rect.height) * 0.55)
+        wing_size = max(18, min(72, wing_size))
+        frames = _get_void_walk_wing_frames(wing_size)
+        if frames is None:
+            return [], []
+
+        left_light, right_light, left_dark, right_dark = frames
+        frame_idx = int(self._status_flash_timer * 10.0) % 2
+
+        # For side-facing sprites, tint the far wing to help it read as "behind" the body.
+        if self.facing == "left":
+            left = left_light[frame_idx]
+            right = right_dark[frame_idx]
+        elif self.facing == "right":
+            left = left_dark[frame_idx]
+            right = right_light[frame_idx]
+        else:
+            left = left_dark[frame_idx]
+            right = right_light[frame_idx]
+
+        # Fold the wings so they cling to the player's back (angel-like).
+        openness = 0.5 + 0.5 * math.sin(self._status_flash_timer * 6.2)
+        openness = 0.20 + 0.80 * openness  # 0.20..1.00
+        angle = 30.0 - 14.0 * openness     # ~16..30 degrees
+        scale = 0.78 + 0.08 * openness
+        squash = 0.78 + 0.12 * openness    # keep wings visible while tucked
+
+        try:
+            left = pygame.transform.rotozoom(left, angle, scale)
+            right = pygame.transform.rotozoom(right, -angle, scale)
+
+            # Squash width to look like the wings are tucked against the back (but still readable).
+            lw, lh = left.get_size()
+            rw, rh = right.get_size()
+            left = pygame.transform.smoothscale(left, (max(1, int(lw * squash)), lh))
+            right = pygame.transform.smoothscale(right, (max(1, int(rw * squash)), rh))
+        except Exception:
+            pass
+
+        if alpha != 255:
+            left = left.copy()
+            right = right.copy()
+            left.set_alpha(alpha)
+            right.set_alpha(alpha)
+
+        # Anchor at upper-back / shoulders (close to spine), using the visible-pixels bounds
+        # so direction sprites with extra padding still line up.
+        body = None
+        try:
+            body = self.current_animation.image.get_bounding_rect(min_alpha=10)
+        except Exception:
+            body = None
+        if not body or body.width <= 0 or body.height <= 0:
+            body = pygame.Rect(0, 0, draw_rect.width, draw_rect.height)
+
+        anchor_x = draw_rect.left + body.centerx
+        anchor_y = draw_rect.top + body.top + int(body.height * 0.36)
+        spine_offset = max(2, int(body.width * 0.06))
+
+        # When running sideways, shift the wings toward the back of the sprite so they don't
+        # "float" around the midline.
+        if self.facing in ("left", "right"):
+            back_shift = max(0, int(body.width * 0.08))
+            anchor_x += back_shift if self.facing == "left" else -back_shift
+
+        left_rect = left.get_rect(center=(anchor_x - spine_offset, anchor_y))
+        right_rect = right.get_rect(center=(anchor_x + spine_offset, anchor_y))
+
+        if self.facing == "left":
+            return [(right, right_rect.topleft)], [(left, left_rect.topleft)]
+        if self.facing == "right":
+            return [(left, left_rect.topleft)], [(right, right_rect.topleft)]
+        return [(left, left_rect.topleft), (right, right_rect.topleft)], []
+
+    def _draw_speed_orb_glow(self, surface: pygame.Surface, draw_rect: pygame.Rect, opacity_scale: float = 1.0):
+        """Draw a yellow shimmering aura around the player's collision silhouette."""
+        self._refresh_collision_shape()
+        pulse = 0.5 + 0.5 * math.sin(self._status_flash_timer * 10.0)
+        glow_pad = 16
+
+        if len(self._collision_outline) >= 2:
+            glow_size = (draw_rect.width + glow_pad * 2, draw_rect.height + glow_pad * 2)
+            glow = pygame.Surface(glow_size, pygame.SRCALPHA)
+            points = [(x + glow_pad, y + glow_pad) for x, y in self._collision_outline]
+
+            outer_alpha = int((30 + 50 * pulse) * opacity_scale)
+            mid_alpha = int((70 + 90 * pulse) * opacity_scale)
+            inner_alpha = int((140 + 90 * pulse) * opacity_scale)
+
+            pygame.draw.lines(glow, (255, 215, 40, outer_alpha), True, points, 8)
+            pygame.draw.lines(glow, (255, 235, 95, mid_alpha), True, points, 4)
+            pygame.draw.lines(glow, (255, 255, 185, inner_alpha), True, points, 2)
+
+            step = max(1, len(points) // 10)
+            sparkle_alpha = int((130 + 90 * (1.0 - pulse)) * opacity_scale)
+            for idx in range(0, len(points), step):
+                x, y = points[idx]
+                pygame.draw.circle(glow, (255, 245, 155, sparkle_alpha), (x, y), 2)
+
+            surface.blit(glow, (draw_rect.left - glow_pad, draw_rect.top - glow_pad))
+            return
+
+        fallback = pygame.Surface((draw_rect.width + 36, draw_rect.height + 36), pygame.SRCALPHA)
+        f_rect = fallback.get_rect()
+        outer_alpha = int((40 + 60 * pulse) * opacity_scale)
+        inner_alpha = int((120 + 80 * pulse) * opacity_scale)
+        pygame.draw.ellipse(fallback, (255, 215, 60, outer_alpha), f_rect, 6)
+        pygame.draw.ellipse(fallback, (255, 255, 180, inner_alpha), f_rect.inflate(-10, -10), 3)
+        surface.blit(fallback, (draw_rect.left - 18, draw_rect.top - 18))
 
     def _draw_freeze_overlay(self, surface: pygame.Surface, draw_rect: pygame.Rect, opacity_scale: float = 1.0):
         self._refresh_collision_shape()

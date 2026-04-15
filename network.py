@@ -181,7 +181,7 @@ class NetworkManager:
 
 
 class NetworkHost(NetworkManager):
-    """Host-side connection manager."""
+    """Host-side connection manager supporting up to 8 players."""
 
     def __init__(self, port: int = DEFAULT_PORT):
         super().__init__(is_host=True)
@@ -193,16 +193,20 @@ class NetworkHost(NetworkManager):
         self.discovery_socket: Optional[socket.socket] = None
         self.discovery_thread: Optional[threading.Thread] = None
         self.discovery_running = False
+        self.max_players = 8
+        self._clients: dict[int, "NetworkManager"] = {}
+        self._next_client_id = 0
+        self._accept_lock = threading.Lock()
 
     def start_hosting(self, advertised_name: str | None = None) -> bool:
-        """Start listening for a LAN client without blocking the UI thread."""
+        """Start listening for up to 8 LAN clients without blocking the UI thread."""
         try:
             if advertised_name:
                 self.advertised_name = advertised_name
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind(("0.0.0.0", self.port))
-            self.server_socket.listen(1)
+            self.server_socket.listen(self.max_players)
             self.server_socket.setblocking(False)
             self._start_discovery_responder()
             self.listening = True
@@ -220,38 +224,88 @@ class NetworkHost(NetworkManager):
             self._stop_discovery_responder()
             return False
 
-    def poll_connection(self) -> bool:
-        """Accept a client if one is waiting."""
-        if self.connected:
-            return True
+    def poll_connections(self) -> list[int]:
+        """Accept all waiting clients and return list of new client IDs."""
+        new_ids = []
         if not self.server_socket or not self.listening:
-            return False
+            return new_ids
+        
+        if len(self._clients) >= self.max_players:
+            return new_ids
+        
+        while len(self._clients) < self.max_players:
+            try:
+                client_socket, addr = self.server_socket.accept()
+            except BlockingIOError:
+                break
+            except (socket.error, OSError) as exc:
+                self.last_error = str(exc)
+                break
 
-        try:
-            client_socket, addr = self.server_socket.accept()
-        except BlockingIOError:
-            return False
-        except (socket.error, OSError) as exc:
-            self.last_error = str(exc)
-            return False
+            client_id = self._next_client_id
+            self._next_client_id += 1
+            
+            client_socket.settimeout(0.25)
+            client_manager = NetworkManager(is_host=True)
+            client_manager.socket = client_socket
+            client_manager.peer_address = addr
+            client_manager.connected = True
+            client_manager._start_receive_loop()
+            
+            self._clients[client_id] = client_manager
+            new_ids.append(client_id)
+        
+        return new_ids
 
-        client_socket.settimeout(0.25)
-        self.socket = client_socket
-        self.peer_address = addr
-        self.connected = True
-        self.last_error = None
-        self._start_receive_loop()
-        return True
+    def poll_connection(self) -> bool:
+        """Legacy single-client compatibility."""
+        new_ids = self.poll_connections()
+        return len(new_ids) > 0 or len(self._clients) > 0
+
+    def get_client_count(self) -> int:
+        """Return number of connected clients."""
+        return len(self._clients)
+
+    def get_client(self, client_id: int) -> Optional["NetworkManager"]:
+        """Get a specific client manager."""
+        return self._clients.get(client_id)
+
+    def remove_client(self, client_id: int) -> None:
+        """Remove a client by ID."""
+        if client_id in self._clients:
+            self._clients[client_id].disconnect()
+            del self._clients[client_id]
+
+    def get_all_messages(self) -> dict[int, list[dict]]:
+        """Get all messages from all clients grouped by client ID."""
+        messages = {}
+        for client_id, client in self._clients.items():
+            client_messages = client.get_messages()
+            if client_messages:
+                messages[client_id] = client_messages
+        return messages
+
+    def broadcast_message(self, message_type: str, **payload: Any) -> int:
+        """Send a message to all connected clients. Returns count of successful sends."""
+        sent_count = 0
+        for client in self._clients.values():
+            if client.send_message(message_type, **payload):
+                sent_count += 1
+        return sent_count
 
     def wait_for_connection(self, timeout: float = 30.0) -> bool:
+        """Wait for at least one client connection (legacy compatibility)."""
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if self.poll_connection():
+            if self.poll_connections():
                 return True
             time.sleep(0.05)
         return False
 
     def disconnect(self) -> None:
+        for client in list(self._clients.values()):
+            client.disconnect()
+        self._clients.clear()
         super().disconnect()
         self.listening = False
         self._stop_discovery_responder()

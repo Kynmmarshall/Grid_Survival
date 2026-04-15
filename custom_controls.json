@@ -1,0 +1,22 @@
+{
+  "player1": {
+    "up": "K_W",
+    "down": "K_S",
+    "left": "K_A",
+    "right": "K_D",
+    "jump": "K_SPACE",
+    "power": "K_RETURN",
+    "attack": "K_F",
+    "ultimate": "K_G"
+  },
+  "player2": {
+    "up": "K_UP",
+    "down": "K_DOWN",
+    "left": "K_LEFT",
+    "right": "K_RIGHT",
+    "jump": "K_RSHIFT",
+    "power": "K_RCTRL",
+    "attack": "K_RCTRL",
+    "ultimate": "K_END"
+  }
+}

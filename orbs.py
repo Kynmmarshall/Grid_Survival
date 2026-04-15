@@ -8,7 +8,7 @@ Six types exist, each with a distinct colour, icon, and effect:
   SHIELD  (gold)   — absorbs the next hazard hit
   FREEZE  (blue)   — freeze all tiles and hazards for 3 s (same as Wizard power)
   POWER   (purple) — immediately recharge all power cooldowns
-  BOMB    (red)    — smash every WARNING tile on the map instantly
+    LIFE    (pink)   — revive on pickup if eliminated, otherwise grant extra life
     PHASE   (mint)   — walk over missing tiles for 10 s
 
 The OrbManager spawns orbs on random walkable positions, tracks collection,
@@ -46,9 +46,10 @@ class OrbType(Enum):
     SHIELD = "shield"
     FREEZE = "freeze"
     POWER  = "power"
-    BOMB   = "bomb"
     LIFE   = "life"
     PHASE  = "phase"
+    ULTIMATE = "ultimate"
+    CAVEMAN_ULTIMATE = "caveman_ultimate"
 
 
 # Visual config per type  (color, label, glow_color)
@@ -57,9 +58,10 @@ _ORB_VISUALS: dict[OrbType, tuple] = {
     OrbType.SHIELD: ((255, 210, 50), (255, 240, 120)),
     OrbType.FREEZE: ((80,  140, 255), (140, 180, 255)),
     OrbType.POWER:  ((200, 80,  255), (230, 140, 255)),
-    OrbType.BOMB:   ((255, 70,  50),  (255, 140, 80)),
     OrbType.LIFE:   ((255, 105, 180), (255, 182, 193)),  # Pink heart
     OrbType.PHASE:  ((120, 255, 190), (190, 255, 230)),
+    OrbType.ULTIMATE: ((255, 80, 0), (255, 150, 50)),  # Fiery red - for ninja ultimate
+    OrbType.CAVEMAN_ULTIMATE: ((120, 120, 120), (180, 180, 180)),  # Grey - for caveman ultimate
 }
 
 _ORB_IMAGES: dict[OrbType, pygame.Surface | None] = {}
@@ -215,43 +217,27 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
             return f"POWER CHARGE {charges}/{POWER_ORBS_REQUIRED}"
         return "POWER CHARGE"
 
-    elif orb_type == OrbType.BOMB:
-        # Smash every WARNING tile immediately
-        from tile_system import TileState
-        smashed = 0
-        for tile in game.tile_manager.tiles.values():
-            if tile.state == TileState.WARNING:
-                tile._start_crumble()
-                smashed += 1
-        if hasattr(collector, "set_active_orb"):
-            collector.set_active_orb("Bomb Detonation", 1.5)
-        return f"BOMB  {smashed} tiles destroyed"
-
     elif orb_type == OrbType.LIFE:
-        # Grant extra life and revive if eliminated
-        if hasattr(collector, "add_life"):
-            collector.add_life()
-            # If player is eliminated, revive them
-            if getattr(collector, '_eliminated', False):
-                collector._eliminated = False
-                # Remove from eliminated list if game has it
-                if hasattr(game, 'eliminated_players') and collector in game.eliminated_players:
-                    game.eliminated_players.remove(collector)
-                # Reset revival timers
-                collector._revival_blink_timer = 2.0
-                collector._revival_immunity_timer = 10.0
-                # Properly reset player state for revival
-                if hasattr(collector, 'reset_state_for_respawn'):
-                    collector.reset_state_for_respawn()
-                # Use rescue function to properly position the player
-                if hasattr(game, '_rescue_player_to_safe_tile'):
-                    game._rescue_player_to_safe_tile(collector)
-            # Schedule next LIFE orb spawn
-            if hasattr(game, 'orb_manager'):
-                game.orb_manager._life_spawn_timer = 10.0
+        # Grant extra life - revives at full health when HP reaches 0
+        is_eliminated = getattr(collector, '_eliminated', False)
+        if is_eliminated:
+            # Revive immediately if eliminated
+            if collector in game.eliminated_players:
+                game.eliminated_players.remove(collector)
+            collector._eliminated = False
+            collector._health = collector._max_health
+            game._rescue_player_to_safe_tile(collector)
             if hasattr(collector, "set_active_orb"):
-                collector.set_active_orb("Extra Life", None)
-            return "LIFE  Extra life granted!"
+                collector.set_active_orb("Revived", None)
+            print("Player revived by LIFE orb!")
+            return "LIFE  Revived!"
+        else:
+            # Grant extra life for future use
+            if hasattr(collector, "add_extra_life"):
+                collector.add_extra_life()
+                if hasattr(collector, "set_active_orb"):
+                    collector.set_active_orb("EXTRA LIFE", None)
+                return "LIFE  Extra life granted!"
         return "LIFE  Extra life granted!"
 
     elif orb_type == OrbType.PHASE:
@@ -260,6 +246,14 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
         if hasattr(collector, "set_active_orb"):
             collector.set_active_orb("Void Walk", ORB_VOID_WALK_DURATION)
         return f"VOID WALK {int(ORB_VOID_WALK_DURATION)}s"
+
+    elif orb_type == OrbType.ULTIMATE or orb_type == OrbType.CAVEMAN_ULTIMATE:
+        if hasattr(collector, "add_ultimate_charge"):
+            collector.add_ultimate_charge()
+            if hasattr(collector, "set_active_orb"):
+                collector.set_active_orb("ULTIMATE READY", None)
+            return "ULTIMATE CHARGE +1!"
+        return "ULTIMATE CHARGE +1!"
 
     return ""
 
@@ -276,21 +270,23 @@ class OrbManager:
       - Orbs appear on random positions within walkable_bounds
       - At most MAX_ORBS active at once
       - After an orb is collected a cooldown passes before a new one spawns
-      - Orb type distribution is weighted (SPEED/SHIELD most common, BOMB rarest)
+            - Orb type distribution is weighted (SPEED/PHASE most common)
     """
 
     MAX_ORBS = 3
     BASE_SPAWN_INTERVAL = 8.0   # seconds between spawn attempts
     SPAWN_JITTER = 4.0          # ± random jitter on interval
 
-    # Weighted type pool — higher count = more common (LIFE not included - spawned separately)
+    # Weighted type pool — higher count = more common
     _TYPE_POOL: list[OrbType] = (
         [OrbType.SPEED]  * 4 +
         [OrbType.SHIELD] * 3 +
         [OrbType.FREEZE] * 2 +
         [OrbType.POWER]  * 2 +
-        [OrbType.BOMB]   * 1 +
-        [OrbType.PHASE]  * 5
+        [OrbType.LIFE]   * 2 +  # Life orb - heart-shaped pink heart
+        [OrbType.PHASE]  * 4 +
+        [OrbType.ULTIMATE] * 3 +  # Ultimate orb for ninja special attacks
+        [OrbType.CAVEMAN_ULTIMATE] * 3  # Ultimate orb for caveman special attacks
     )
 
     def __init__(self, level_number: int = 1):
@@ -302,8 +298,6 @@ class OrbManager:
         self._notification_timer = 0.0
         # Scale spawn frequency with level (higher level = more orbs)
         self._spawn_scale = max(0.4, 1.0 - (level_number - 1) * 0.08)
-        self._life_orb_count = 0
-        self._life_spawn_timer = 5.0  # First LIFE orb spawns at 5 seconds for revival chance
 
     def _roll_interval(self) -> float:
         return (self.BASE_SPAWN_INTERVAL +
@@ -315,14 +309,15 @@ class OrbManager:
         for orb in self.orbs:
             orb.update(dt)
 
-        # Check collection for every player including eliminated ones
+        # Check collection for every active player
         for player in players:
+            # Allow LIFE orb collection even for eliminated players (they might be about to be eliminated)
             is_eliminated = getattr(player, '_eliminated', False)
             for orb in self.orbs:
                 if not orb.active:
                     continue
                 if orb.check_collection(player):
-                    # Only allow LIFE orbs for eliminated players
+                    # LIFE orbs can be collected even by eliminated players (for revival)
                     if is_eliminated and orb.orb_type != OrbType.LIFE:
                         continue
                     orb.collect()
@@ -360,17 +355,6 @@ class OrbManager:
             self._spawn_timer = 0.0
             self._next_spawn = self._roll_interval() * self._spawn_scale
             self._try_spawn(walkable_bounds, getattr(game, "tile_manager", None))
-
-        # Spawn LIFE orbs for revival chance
-        self._life_spawn_timer -= dt
-        if (self._life_spawn_timer <= 0 and
-                len(self.orbs) < self.MAX_ORBS and
-                walkable_bounds is not None):
-            pos = self._spawn_position_from_bounds(walkable_bounds)
-            if pos:
-                self.orbs.append(MagicOrb(OrbType.LIFE, pos))
-                self._life_orb_count += 1
-                self._life_spawn_timer = 30.0  # Spawn LIFE orbs every 30 seconds (more forgiving)
 
     def _try_spawn(self, walkable_bounds: pygame.Rect,
                    tile_manager) -> None:
@@ -435,21 +419,12 @@ class OrbManager:
         except Exception:
             pass
 
-    def spawn_initial_life_orbs(self, count: int, walkable_bounds):
-        for _ in range(count):
-            pos = self._spawn_position_from_bounds(walkable_bounds)
-            if pos:
-                self.orbs.append(MagicOrb(OrbType.LIFE, pos))
-                self._life_orb_count += 1
-
     def reset(self):
         self.orbs.clear()
         self._spawn_timer = 0.0
         self._next_spawn = self._roll_interval()
         self._notification = ""
         self._notification_timer = 0.0
-        self._life_orb_count = 0
-        self._life_spawn_timer = 30.0  # Spawn LIFE orbs every 30 seconds (more forgiving for story mode)
 
     def advance_visuals(self, dt: float):
         """Client-side visual smoothing between host snapshots."""

@@ -1,6 +1,6 @@
 """
 Hazard system for Grid Survival.
-Implements bullets and moving traps that threaten players.
+Implements bullets, animated hazards (snakes, spiders), and moving traps that threaten players.
 """
 
 import random
@@ -10,7 +10,330 @@ from typing import List, Tuple, Optional
 
 from audio import get_audio
 from collision_manager import CollisionManager
-from settings import WINDOW_SIZE
+from settings import ASSETS_DIR, WINDOW_SIZE
+
+
+HAZARD_ASSETS_DIR = ASSETS_DIR / "Hazards"
+
+
+class AnimatedHazard:
+    """Animated hazard (snake, spider, etc.) with sprite animation."""
+    
+    HAZARD_CONFIGS = {
+        "snake": {
+            "scale": 0.3,
+            "speed": 80,
+            "damage": 1,
+            "animation_dirs": ["idle", "move"],
+            "color": (80, 180, 60),
+        },
+        "spider": {
+            "scale": 0.35,
+            "speed": 60,
+            "damage": 1,
+            "animation_dirs": ["idle", "move"],
+            "color": (40, 40, 40),
+        },
+        "scorpion": {
+            "scale": 0.4,
+            "speed": 70,
+            "damage": 2,
+            "animation_dirs": ["idle", "move"],
+            "color": (160, 80, 20),
+        },
+        "bat": {
+            "scale": 0.25,
+            "speed": 120,
+            "damage": 1,
+            "animation_dirs": ["idle", "move"],
+            "color": (80, 60, 80),
+        },
+    }
+    
+    def __init__(self, hazard_type: str, position: Tuple[float, float], patrol_points: Optional[List[Tuple[float, float]]] = None):
+        self.hazard_type = hazard_type
+        self.position = pygame.Vector2(position)
+        self.patrol_points = patrol_points or []
+        self.current_patrol_index = 0
+        self.patrol_direction = 1
+        
+        config = self.HAZARD_CONFIGS.get(hazard_type, self.HAZARD_CONFIGS["snake"])
+        self.speed = config["speed"]
+        self.damage = config["damage"]
+        self.color = config["color"]
+        self.scale = config["scale"]
+        
+        self.active = True
+        self.facing = "right"
+        
+        self.animation_frames: dict = {}
+        self.current_anim = "idle"
+        self.frame_index = 0
+        self.frame_timer = 0.0
+        self.frame_duration = 0.15
+        
+        self._load_assets()
+    
+    def _load_assets(self):
+        """Load hazard assets - try sprite sheets first, then folder, or use procedural fallback."""
+        loaded = False
+        
+        sprite_sheet_map = {
+            "snake": "Snake sprite sheet.png",
+            "spider": "DungeonSpider.png",
+        }
+        
+        sheet_name = sprite_sheet_map.get(self.hazard_type)
+        if sheet_name:
+            sheet_path = HAZARD_ASSETS_DIR / sheet_name
+            if sheet_path.exists():
+                try:
+                    sheet = pygame.image.load(sheet_path.as_posix()).convert_alpha()
+                    sheet_width, sheet_height = sheet.get_size()
+                    
+                    if self.hazard_type == "snake":
+                        frame_width = sheet_width // 4
+                        frame_height = sheet_height // 2
+                        for row, anim_name in enumerate(["idle", "move"]):
+                            frames = []
+                            for col in range(4):
+                                rect = pygame.Rect(col * frame_width, row * frame_height, frame_width, frame_height)
+                                frame = pygame.Surface(rect.size, pygame.SRCALPHA)
+                                frame.blit(sheet, (0, 0), rect)
+                                new_size = (int(frame_width * self.scale), int(frame_height * self.scale))
+                                frame = pygame.transform.smoothscale(frame, new_size)
+                                frames.append(frame)
+                            if frames:
+                                self.animation_frames[anim_name] = frames
+                        loaded = True
+                    
+                    elif self.hazard_type == "spider":
+                        frame_width = sheet_width // 4
+                        frame_height = sheet_height // 2
+                        for row, anim_name in enumerate(["idle", "move"]):
+                            frames = []
+                            for col in range(4):
+                                rect = pygame.Rect(col * frame_width, row * frame_height, frame_width, frame_height)
+                                frame = pygame.Surface(rect.size, pygame.SRCALPHA)
+                                frame.blit(sheet, (0, 0), rect)
+                                new_size = (int(frame_width * self.scale), int(frame_height * self.scale))
+                                frame = pygame.transform.smoothscale(frame, new_size)
+                                frames.append(frame)
+                            if frames:
+                                self.animation_frames[anim_name] = frames
+                        loaded = True
+                except Exception as e:
+                    print(f"Failed to load sprite sheet for {self.hazard_type}: {e}")
+        
+        if not loaded:
+            hazard_dir = HAZARD_ASSETS_DIR / self.hazard_type
+            if not hazard_dir.exists():
+                self._create_procedural_frames()
+                return
+            
+            for anim_name in self.HAZARD_CONFIGS.get(self.hazard_type, {}).get("animation_dirs", ["idle", "move"]):
+                anim_dir = hazard_dir / anim_name
+                if anim_dir.exists():
+                    frames = []
+                    for frame_file in sorted(anim_dir.glob("*.png")):
+                        try:
+                            frame = pygame.image.load(frame_file.as_posix()).convert_alpha()
+                            w, h = frame.get_size()
+                            new_size = (int(w * self.scale), int(h * self.scale))
+                            frame = pygame.transform.smoothscale(frame, new_size)
+                            frames.append(frame)
+                        except Exception:
+                            continue
+                    if frames:
+                        self.animation_frames[anim_name] = frames
+            
+            if not self.animation_frames:
+                self._create_procedural_frames()
+    
+    def _create_procedural_frames(self):
+        """Create procedural animation frames when no assets exist."""
+        base_size = 64
+        frames_idle = []
+        frames_move = []
+        
+        for i in range(4):
+            surf = pygame.Surface((base_size, base_size), pygame.SRCALPHA)
+            
+            if self.hazard_type == "snake":
+                body_color = self.color
+                head_color = (self.color[0] + 40, self.color[1] + 40, self.color[2])
+                center = base_size // 2
+                offset = math.sin(i * math.pi / 2) * 3
+                pygame.draw.ellipse(surf, body_color, (10, center - 8 + offset, 44, 16))
+                pygame.draw.ellipse(surf, body_color, (20, center - 12 + offset, 30, 24))
+                pygame.draw.circle(surf, head_color, (base_size - 12, center + offset), 10)
+                eye_color = (255, 255, 0)
+                pygame.draw.circle(surf, eye_color, (base_size - 8, center - 2 + offset), 3)
+                pygame.draw.circle(surf, eye_color, (base_size - 16, center - 2 + offset), 3)
+                if i % 2 == 0:
+                    tongue_color = (200, 50, 50)
+                    pygame.draw.line(surf, tongue_color, (base_size - 2, center + offset), (base_size + 8, center + offset), 2)
+            
+            elif self.hazard_type == "spider":
+                body_color = self.color
+                leg_color = (self.color[0] + 30, self.color[1] + 30, self.color[2] + 30)
+                center = base_size // 2
+                leg_offset = math.sin(i * math.pi / 2) * 4
+                pygame.draw.ellipse(surf, body_color, (24, center - 12, 16, 24))
+                pygame.draw.circle(surf, body_color, (center, center - 6), 12)
+                leg_pairs = [(-1, -20), (-1, 20), (1, -20), (1, 20)]
+                for side, y_off in leg_pairs:
+                    for j in range(3):
+                        start = (center + side * 8, center - 10 + j * 8)
+                        end = (center + side * (24 + j * 4 + leg_offset), center - 20 + j * 12)
+                        pygame.draw.line(surf, leg_color, start, end, 2)
+                pygame.draw.circle(surf, (255, 0, 0), (center - 3, center - 8), 2)
+                pygame.draw.circle(surf, (255, 0, 0), (center + 3, center - 8), 2)
+            
+            elif self.hazard_type == "scorpion":
+                body_color = self.color
+                tail_color = (self.color[0] + 20, self.color[1] - 20, self.color[2] - 20)
+                center = base_size // 2
+                tail_curve = i * 8
+                pygame.draw.ellipse(surf, body_color, (16, center - 10, 32, 20))
+                for seg in range(5):
+                    x = base_size - 8 - seg * 6
+                    y = center - 8 - seg * 2 + (2 if seg < 2 else tail_curve // 4)
+                    pygame.draw.circle(surf, tail_color, (x, y), 6 - seg)
+                pincer_offset = math.sin(i * math.pi / 2) * 3
+                pygame.draw.ellipse(surf, (200, 150, 100), (8, center - 20 + pincer_offset, 12, 8))
+                pygame.draw.ellipse(surf, (200, 150, 100), (8, center + 12 + pincer_offset, 12, 8))
+                pygame.draw.circle(surf, (255, 255, 255), (30, center - 4), 2)
+                pygame.draw.circle(surf, (255, 255, 255), (36, center - 4), 2)
+            
+            elif self.hazard_type == "bat":
+                body_color = self.color
+                wing_color = (self.color[0] - 20, self.color[1] - 20, self.color[2] - 20)
+                center = base_size // 2
+                wing_fold = i % 2 * 8
+                pygame.draw.circle(surf, body_color, (center, center), 10)
+                for side in [-1, 1]:
+                    wing_points = [
+                        (center + side * 8, center - 4),
+                        (center + side * (24 + wing_fold), center - 8 - (i % 2) * 4),
+                        (center + side * (20 + wing_fold), center + 4 + (i % 2) * 4),
+                        (center + side * 8, center + 4),
+                    ]
+                    pygame.draw.polygon(surf, wing_color, wing_points)
+                eye_color = (255, 100, 100)
+                pygame.draw.circle(surf, eye_color, (center - 3, center - 2), 2)
+                pygame.draw.circle(surf, eye_color, (center + 3, center - 2), 2)
+            
+            new_size = (int(base_size * self.scale), int(base_size * self.scale))
+            surf = pygame.transform.smoothscale(surf, new_size)
+            frames_idle.append(surf)
+            frames_move.append(surf)
+        
+        self.animation_frames = {"idle": frames_idle, "move": frames_move}
+    
+    def update(self, dt: float):
+        """Update hazard position and animation."""
+        if not self.active:
+            return
+        
+        if self.patrol_points:
+            self._update_patrol(dt)
+        
+        self.frame_timer += dt
+        if self.frame_timer >= self.frame_duration:
+            self.frame_timer = 0
+            frames = self.animation_frames.get(self.current_anim, self.animation_frames.get("idle", []))
+            if frames:
+                self.frame_index = (self.frame_index + 1) % len(frames)
+    
+    def _update_patrol(self, dt: float):
+        """Move between patrol points."""
+        if len(self.patrol_points) < 2:
+            return
+        
+        target = pygame.Vector2(self.patrol_points[self.current_patrol_index])
+        direction = target - self.position
+        distance = direction.length()
+        
+        if distance < 5:
+            self.current_patrol_index += self.patrol_direction
+            if self.current_patrol_index >= len(self.patrol_points):
+                self.current_patrol_index = max(0, len(self.patrol_points) - 2)
+                self.patrol_direction = -1
+            elif self.current_patrol_index < 0:
+                self.current_patrol_index = min(1, len(self.patrol_points) - 1)
+                self.patrol_direction = 1
+            self.current_anim = "idle"
+        else:
+            direction = direction.normalize()
+            self.position += direction * self.speed * dt
+            self.current_anim = "move"
+            if direction.x > 0:
+                self.facing = "right"
+            elif direction.x < 0:
+                self.facing = "left"
+    
+    def draw(self, surface: pygame.Surface):
+        """Draw hazard with animation."""
+        if not self.active:
+            return
+        
+        frames = self.animation_frames.get(self.current_anim, self.animation_frames.get("idle", []))
+        if not frames:
+            return
+        
+        frame = frames[self.frame_index % len(frames)]
+        
+        if self.facing == "left":
+            frame = pygame.transform.flip(frame, True, False)
+        
+        rect = frame.get_rect(center=(int(self.position.x), int(self.position.y)))
+        surface.blit(frame, rect)
+    
+    def get_rect(self) -> pygame.Rect:
+        """Get collision rect."""
+        size = int(32 * self.scale)
+        return pygame.Rect(
+            int(self.position.x - size // 2),
+            int(self.position.y - size // 2),
+            size,
+            size
+        )
+    
+    def check_collision(self, player) -> bool:
+        """Check if hazard hits player."""
+        if not self.active:
+            return False
+        hitbox = player.get_hitbox() if hasattr(player, 'get_hitbox') else player.rect
+        return self.get_rect().colliderect(hitbox)
+    
+    def snapshot_state(self) -> dict:
+        """Serialize hazard state for network sync."""
+        return {
+            "type": self.hazard_type,
+            "x": float(self.position.x),
+            "y": float(self.position.y),
+            "patrol_points": self.patrol_points,
+            "current_patrol_index": self.current_patrol_index,
+            "patrol_direction": self.patrol_direction,
+            "active": self.active,
+            "current_anim": self.current_anim,
+            "frame_index": self.frame_index,
+        }
+    
+    @classmethod
+    def from_snapshot(cls, snapshot: dict) -> "AnimatedHazard":
+        """Create hazard from snapshot."""
+        hazard_type = snapshot.get("type", "snake")
+        position = (snapshot.get("x", 0), snapshot.get("y", 0))
+        patrol_points = snapshot.get("patrol_points", [])
+        hazard = cls(hazard_type, position, patrol_points)
+        hazard.current_patrol_index = snapshot.get("current_patrol_index", 0)
+        hazard.patrol_direction = snapshot.get("patrol_direction", 1)
+        hazard.active = snapshot.get("active", True)
+        hazard.current_anim = snapshot.get("current_anim", "idle")
+        hazard.frame_index = snapshot.get("frame_index", 0)
+        return hazard
 
 
 class Bullet:
@@ -23,6 +346,9 @@ class Bullet:
         self.radius = 8
         self.color = (255, 50, 50)
         self.active = True
+        self.damage = 1
+        self.owner = None
+        self.is_fireball = False
     
     def update(self, dt: float):
         """Update bullet position."""
@@ -207,9 +533,11 @@ class HazardManager:
         self.bullets: List[Bullet] = []
         self.traps: List[MovingTrap] = []
         self.explosions: List[Explosion] = []
+        self.animated_hazards: List[AnimatedHazard] = []
         self.time_elapsed = 0.0
         self.bullet_spawn_timer = 0.0
         self.trap_spawn_timer = 0.0
+        self.hazard_spawn_timer = 0.0
         
         # Difficulty scaling
         self.bullet_spawn_interval = 3.0  # seconds
@@ -244,6 +572,9 @@ class HazardManager:
         
         for trap in self.traps:
             trap.update(dt)
+        
+        for hazard in self.animated_hazards:
+            hazard.update(dt)
 
         # Update explosions
         self.explosions = [e for e in self.explosions if e.update(dt)]
@@ -269,6 +600,29 @@ class HazardManager:
                 self.min_trap_interval,
                 self.trap_spawn_interval * self.difficulty_scale_rate
             )
+        
+        # Spawn animated hazards (snakes, spiders, etc)
+        self.hazard_spawn_timer += dt
+        if self.hazard_spawn_timer >= 12.0 and len(self.animated_hazards) < 3:
+            self.hazard_spawn_timer = 0.0
+            self._spawn_animated_hazard()
+    
+    def _spawn_animated_hazard(self):
+        """Spawn an animated hazard (snake, spider, etc)."""
+        hazard_types = list(AnimatedHazard.HAZARD_CONFIGS.keys())
+        hazard_type = random.choice(hazard_types)
+        
+        margin = 100
+        start_x = random.randint(margin, WINDOW_SIZE[0] - margin)
+        start_y = random.randint(margin, WINDOW_SIZE[1] - margin)
+        
+        offset_x = random.randint(-150, 150)
+        offset_y = random.randint(-150, 150)
+        end_x = max(margin, min(WINDOW_SIZE[0] - margin, start_x + offset_x))
+        end_y = max(margin, min(WINDOW_SIZE[1] - margin, start_y + offset_y))
+        
+        patrol_points = [(float(start_x), float(start_y)), (float(end_x), float(end_y))]
+        self.animated_hazards.append(AnimatedHazard(hazard_type, (start_x, start_y), patrol_points))
     
     def _spawn_bullet(self):
         """Spawn a bullet from a random edge."""
@@ -310,6 +664,8 @@ class HazardManager:
             bullet.draw(surface)
         for trap in self.traps:
             trap.draw(surface)
+        for hazard in self.animated_hazards:
+            hazard.draw(surface)
         for explosion in self.explosions:
             explosion.draw(surface)
     
@@ -341,6 +697,12 @@ class HazardManager:
                 get_audio().play_sfx("explosions.mp3")
                 hit = True
         
+        for hazard in self.animated_hazards:
+            if hazard.check_collision(player):
+                self.explosions.append(Explosion((hazard.position.x, hazard.position.y), hazard.color))
+                get_audio().play_sfx("explosions.mp3")
+                hit = True
+        
         return hit
     
     def is_position_safe(self, position, radius: float = 24) -> bool:
@@ -355,6 +717,10 @@ class HazardManager:
         for trap in self.traps:
             if rect.colliderect(trap.get_rect()):
                 return False
+        
+        for hazard in self.animated_hazards:
+            if hazard.active and rect.colliderect(hazard.get_rect()):
+                return False
 
         return True
 
@@ -362,10 +728,12 @@ class HazardManager:
         """Reset all hazards."""
         self.bullets.clear()
         self.traps.clear()
+        self.animated_hazards.clear()
         self.explosions.clear()
         self.time_elapsed = 0.0
         self.bullet_spawn_timer = 0.0
         self.trap_spawn_timer = 0.0
+        self.hazard_spawn_timer = 0.0
         self.bullet_spawn_interval = 3.0
         self.trap_spawn_interval = 8.0
         if self.collision_manager:
@@ -377,6 +745,7 @@ class HazardManager:
             "time_elapsed": float(self.time_elapsed),
             "bullet_spawn_timer": float(self.bullet_spawn_timer),
             "trap_spawn_timer": float(self.trap_spawn_timer),
+            "hazard_spawn_timer": float(self.hazard_spawn_timer),
             "bullet_spawn_interval": float(self.bullet_spawn_interval),
             "trap_spawn_interval": float(self.trap_spawn_interval),
             "bullets": [
@@ -406,6 +775,7 @@ class HazardManager:
                 }
                 for trap in self.traps
             ],
+            "animated_hazards": [h.snapshot_state() for h in self.animated_hazards],
         }
 
     def apply_snapshot(self, snapshot: dict | None) -> None:
@@ -418,6 +788,7 @@ class HazardManager:
             snapshot.get("bullet_spawn_timer", self.bullet_spawn_timer)
         )
         self.trap_spawn_timer = float(snapshot.get("trap_spawn_timer", self.trap_spawn_timer))
+        self.hazard_spawn_timer = float(snapshot.get("hazard_spawn_timer", self.hazard_spawn_timer))
         self.bullet_spawn_interval = float(
             snapshot.get("bullet_spawn_interval", self.bullet_spawn_interval)
         )
@@ -469,5 +840,10 @@ class HazardManager:
             )
             trap.active = bool(trap_state.get("active", True))
             self.traps.append(trap)
+        
+        self.animated_hazards = []
+        for hazard_state in snapshot.get("animated_hazards", []) or []:
+            if isinstance(hazard_state, dict):
+                self.animated_hazards.append(AnimatedHazard.from_snapshot(hazard_state))
 
         self.explosions.clear()

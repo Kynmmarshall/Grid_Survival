@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).parent
 ASSETS_DIR = BASE_DIR / "Assets"
 
 MAP_PATH = ASSETS_DIR / "maps" / "level_1.tmx"
-BACKGROUND_PATH = ASSETS_DIR / "Background" / "background.jpg"
+BACKGROUND_PATH = ASSETS_DIR / "Background" / "sky1.png"
 
 CHARACTER_BASE = ASSETS_DIR / "Characters" / "Caveman"
 PLAYER_PORTRAIT_DIR = ASSETS_DIR / "Characters" / "portrait"
@@ -77,6 +77,191 @@ PLAYER_JUMP_VELOCITY = 650         # Initial upward Z velocity (Positive = UP)
 PLAYER_JUMP_GRAVITY = 2000         # Gravity acceleration on Z axis
 PLAYER_MAX_FALL_SPEED = 1000       # Max fall speed for Z axis
 PLAYER_JUMP_KEY = pygame.K_SPACE   # Default jump key
+
+COMBAT_MAX_HEALTH = 5
+COMBAT_DEFAULT_HEALTH = 3
+ATTACK_RANGE = 60
+ATTACK_COOLDOWN = 0.5
+ATTACK_DAMAGE = 1
+ULTIMATE_COOLDOWN = 10.0
+ULTIMATE_DAMAGE = 2
+ULTIMATE_DAMAGE_PERCENT = 0.60
+KNOCKBACK_FORCE = 300
+PROJECTILE_SPEED = 400
+
+DEFAULT_CONTROLS = {
+    "player1": {
+        "up": pygame.K_w,
+        "down": pygame.K_s,
+        "left": pygame.K_a,
+        "right": pygame.K_d,
+        "jump": pygame.K_SPACE,
+        "power": pygame.K_q,
+        "attack": pygame.K_f,
+        "ultimate": pygame.K_g,
+    },
+    "player2": {
+        "up": pygame.K_UP,
+        "down": pygame.K_DOWN,
+        "left": pygame.K_LEFT,
+        "right": pygame.K_RIGHT,
+        "jump": pygame.K_RSHIFT,
+        "power": pygame.K_SLASH,
+        "attack": pygame.K_RCTRL,
+        "ultimate": pygame.K_END,
+    },
+}
+
+CUSTOM_CONTROLS_FILE = BASE_DIR / "custom_controls.json"
+
+_KEY_TO_NAME = {
+    pygame.K_SPACE: "SPACE",
+    pygame.K_RETURN: "RETURN",
+    pygame.K_BACKSPACE: "BACKSPACE",
+    pygame.K_TAB: "TAB",
+    pygame.K_ESCAPE: "ESCAPE",
+    pygame.K_UP: "UP",
+    pygame.K_DOWN: "DOWN",
+    pygame.K_LEFT: "LEFT",
+    pygame.K_RIGHT: "RIGHT",
+    pygame.K_LSHIFT: "LSHIFT",
+    pygame.K_RSHIFT: "RSHIFT",
+    pygame.K_LCTRL: "LCTRL",
+    pygame.K_RCTRL: "RCTRL",
+    pygame.K_LALT: "LALT",
+    pygame.K_RALT: "RALT",
+    pygame.K_CAPSLOCK: "CAPSLOCK",
+    pygame.K_F1: "F1",
+    pygame.K_F2: "F2",
+    pygame.K_F3: "F3",
+    pygame.K_F4: "F4",
+    pygame.K_F5: "F5",
+    pygame.K_F6: "F6",
+    pygame.K_F7: "F7",
+    pygame.K_F8: "F8",
+    pygame.K_F9: "F9",
+    pygame.K_F10: "F10",
+    pygame.K_F11: "F11",
+    pygame.K_F12: "F12",
+    pygame.K_SCROLLOCK: "SCROLLOCK",
+    pygame.K_SYSREQ: "SYSREQ",
+    pygame.K_PRINTSCREEN: "PRINTSCREEN",
+    pygame.K_PAGEUP: "PAGEUP",
+    pygame.K_PAGEDOWN: "PAGEDOWN",
+    pygame.K_HOME: "HOME",
+    pygame.K_END: "END",
+    pygame.K_INSERT: "INSERT",
+    pygame.K_DELETE: "DELETE",
+    pygame.K_NUMLOCK: "NUMLOCK",
+    pygame.K_KP_0: "KP_0",
+    pygame.K_KP_1: "KP_1",
+    pygame.K_KP_2: "KP_2",
+    pygame.K_KP_3: "KP_3",
+    pygame.K_KP_4: "KP_4",
+    pygame.K_KP_5: "KP_5",
+    pygame.K_KP_6: "KP_6",
+    pygame.K_KP_7: "KP_7",
+    pygame.K_KP_8: "KP_8",
+    pygame.K_KP_9: "KP_9",
+    pygame.K_KP_PERIOD: "KP_PERIOD",
+    pygame.K_KP_DIVIDE: "KP_DIVIDE",
+    pygame.K_KP_MULTIPLY: "KP_MULTIPLY",
+    pygame.K_KP_MINUS: "KP_MINUS",
+    pygame.K_KP_PLUS: "KP_PLUS",
+    pygame.K_KP_ENTER: "KP_ENTER",
+    pygame.K_SLASH: "SLASH",
+    pygame.K_BACKSLASH: "BACKSLASH",
+    pygame.K_PERIOD: "PERIOD",
+    pygame.K_COMMA: "COMMA",
+    pygame.K_SEMICOLON: "SEMICOLON",
+    pygame.K_QUOTE: "QUOTE",
+    pygame.K_BACKQUOTE: "BACKQUOTE",
+    pygame.K_LEFTBRACKET: "LEFTBRACKET",
+    pygame.K_RIGHTBRACKET: "RIGHTBRACKET",
+    pygame.K_MINUS: "MINUS",
+    pygame.K_EQUALS: "EQUALS",
+}
+
+_NAME_TO_KEY = {v: k for k, v in _KEY_TO_NAME.items()}
+
+
+def _default_controls():
+    return {
+        "player1": {
+            "up": "K_w",
+            "down": "K_s",
+            "left": "K_a",
+            "right": "K_d",
+            "jump": "K_SPACE",
+            "power": "K_q",
+        },
+        "player2": {
+            "up": "K_UP",
+            "down": "K_DOWN",
+            "left": "K_LEFT",
+            "right": "K_RIGHT",
+            "jump": "K_RSHIFT",
+            "power": "K_SLASH",
+        },
+    }
+
+
+def load_custom_controls():
+    import json
+
+    if not CUSTOM_CONTROLS_FILE.exists():
+        return None
+    try:
+        with open(CUSTOM_CONTROLS_FILE, "r") as f:
+            data = json.load(f)
+        converted = {}
+        for player_key in DEFAULT_CONTROLS:
+            controls = data.get(player_key, {})
+            converted_controls = {}
+            # Load in the order defined in DEFAULT_CONTROLS
+            for action in DEFAULT_CONTROLS[player_key]:
+                key_name = controls.get(action)
+                if key_name:
+                    if key_name.startswith("K_"):
+                        key_str = key_name[2:]
+                        if key_str in _NAME_TO_KEY:
+                            converted_controls[action] = _NAME_TO_KEY[key_str]
+                        else:
+                            converted_controls[action] = getattr(pygame, f"K_{key_str.lower()}", pygame.K_UNKNOWN)
+                    else:
+                        converted_controls[action] = getattr(pygame, key_name, pygame.K_UNKNOWN)
+                else:
+                    converted_controls[action] = DEFAULT_CONTROLS[player_key][action]
+            converted[player_key] = converted_controls
+        return converted
+    except Exception:
+        return None
+
+
+def save_custom_controls(controls):
+    import json
+
+    try:
+        serializable = {}
+        for player_key, player_controls in controls.items():
+            serializable_controls = {}
+            for action, key_code in player_controls.items():
+                key_name = _KEY_TO_NAME.get(key_code)
+                if key_name:
+                    serializable_controls[action] = f"K_{key_name}"
+                else:
+                    regular_name = pygame.key.name(key_code)
+                    if regular_name and regular_name != "":
+                        serializable_controls[action] = f"K_{regular_name.upper()}"
+                    else:
+                        serializable_controls[action] = f"K_UNKNOWN"
+            serializable[player_key] = serializable_controls
+        with open(CUSTOM_CONTROLS_FILE, "w") as f:
+            json.dump(serializable, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving controls: {e}")
+        return False
 
 PLAYER_ANIMATION_PATHS = {
 	"idle": {
@@ -165,7 +350,7 @@ AI_DEFAULT_DIFFICULTY = 5
 ORB_LIFETIME = 20.0
 ORB_SHIELD_DURATION = 20.0
 ORB_SHIELD_WARNING = 4.0
-ORB_FREEZE_DURATION = 10.0
+ORB_FREEZE_DURATION = 5.0
 ORB_VOID_WALK_DURATION = 10.0
 POWER_ORBS_REQUIRED = 1
 ORB_ICON_PATHS = {
@@ -173,11 +358,11 @@ ORB_ICON_PATHS = {
 	"shield": str(ASSETS_DIR / "orbs" / "shield.png"),
 	"freeze": str(ASSETS_DIR / "orbs" / "freeze.png"),
 	"power": str(ASSETS_DIR / "orbs" / "power.png"),
-	"bomb": str(ASSETS_DIR / "orbs" / "bomb.png"),
 	"life": str(ASSETS_DIR / "orbs" / "life.png"),
 	"phase": str(ASSETS_DIR / "orbs" / "phase.png"),
 }
 SHIELD_EFFECT_PATH = ASSETS_DIR / "effects" / "shield.png"
+VOID_WALK_WING_PATH = ASSETS_DIR / "effects" / "void_walk_wing.png"
 
 # Opening scene audio
 BACKGROUND_MUSIC_TRACKS = [
@@ -186,6 +371,7 @@ BACKGROUND_MUSIC_TRACKS = [
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 3.mp3",
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 4.mp3",
 ]
+TUTORIAL_VIDEO_PATH = ASSETS_DIR / "tutorial" / "1.mp4"
 MUSIC_PATH = BACKGROUND_MUSIC_TRACKS[0]
 MUSIC_VOLUME = 0.45
 AUDIO_VOLUME_STEP = 0.05
@@ -202,7 +388,9 @@ TILE_GRACE_PERIOD = 3.0
 
 # Sound file paths
 SOUND_TILE_WARNING = str(ASSETS_DIR / "Audio" / "SFX" / "hit.wav")
+SOUND_TILE_CRUMBLE = str(ASSETS_DIR / "Audio" / "sfx_generated" / "tile_crumble.wav")
 SOUND_TILE_DISAPPEAR = str(ASSETS_DIR / "Audio" / "SFX" / "destroy.wav")
+SOUND_TILE_GRACE_END = str(ASSETS_DIR / "Audio" / "sfx_generated" / "tile_grace_end.wav")
 SOUND_PLAYER_FALL = str(ASSETS_DIR / "Audio" / "SFX" / "fall.wav")
 SOUND_PLAYER_JUMP = str(ASSETS_DIR / "Audio" / "SFX" / "jump.wav")
 
@@ -297,9 +485,9 @@ TITLE_PARTICLE_MAX_SPEED = 70
 NAME_MAX_LENGTH = 16
 INPUT_BOX_WIDTH = 320
 INPUT_BOX_HEIGHT = 52
-MODE_CARD_WIDTH = 380
-MODE_CARD_HEIGHT = 145
-MODE_CARD_SPACING = 34 + 145  # gap + card height
+MODE_CARD_WIDTH = 440
+MODE_CARD_HEIGHT = 115
+MODE_CARD_SPACING = 34 + 115  # gap + card height
 
 SCENE_FADE_SPEED = 420  # alpha units per second
 TITLE_DROP_DURATION = 0.85
@@ -346,6 +534,7 @@ MODE_HEADER_COLOR = (255, 255, 255)
 MODE_HEADER_NAME_COLOR = (255, 200, 0)   # GOLD for player name
 MODE_SUBTITLE_COLOR = (200, 200, 200)
 MODE_CARD_BASE_COLOR = (25, 25, 40, 200)
+MODE_CARD_DISABLED_COLOR = (24, 28, 44, 200)
 MODE_CARD_HOVER_COLOR = (40, 40, 70, 230)
 MODE_CARD_BORDER_COLOR = (230, 190, 80)
 MODE_CARD_TITLE_COLOR = (255, 255, 255)
@@ -355,16 +544,14 @@ TITLE_PARTICLE_COLOR_BASE = (255, 180, 60)
 SCENE_OVERLAY_COLOR = (0, 0, 0)
 
 # Mode card border colors per mode
-MODE_CARD_BORDER_STORY = (255, 215, 0)              # GOLD
-MODE_CARD_BORDER_VS_COMPUTER = (0, 200, 255)        # CYAN
-MODE_CARD_BORDER_SURVIVAL = (255, 140, 40)          # ORANGE
+MODE_CARD_BORDER_VS_COMPUTER = (0, 200, 255)       # CYAN
 MODE_CARD_BORDER_LOCAL_MP = (50, 220, 80)           # GREEN
 MODE_CARD_BORDER_ONLINE_MP = (180, 80, 255)         # PURPLE
+MODE_CARD_BORDER_CAMPAIGN = (255, 180, 50)          # GOLD
+MODE_CARD_HOVER_BORDER_CAMPAIGN = (255, 220, 130)
 
 # Mode card hover border (lightened)
-MODE_CARD_HOVER_BORDER_STORY = (255, 235, 100)
 MODE_CARD_HOVER_BORDER_VS_COMPUTER = (80, 220, 255)
-MODE_CARD_HOVER_BORDER_SURVIVAL = (255, 160, 80)
 MODE_CARD_HOVER_BORDER_LOCAL_MP = (100, 255, 130)
 MODE_CARD_HOVER_BORDER_ONLINE_MP = (210, 130, 255)
 
@@ -374,8 +561,7 @@ TITLE_COLORS = [
 	(255, 70, 70),    # RED
 ]
 
-MODE_STORY = "story"
 MODE_VS_COMPUTER = "vs_computer"
-MODE_SURVIVAL = "survival"
 MODE_LOCAL_MULTIPLAYER = "local_multiplayer"
 MODE_ONLINE_MULTIPLAYER = "online_multiplayer"
+MODE_CAMPAIGN = "campaign"

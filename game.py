@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 
 import pygame
 
@@ -8,6 +9,7 @@ from audio import get_audio
 from collision_manager import CollisionManager
 from player import Player
 from orbs import OrbManager
+from pacman_enemies import PacmanEnemyManager
 from powers import (
     apply_power_state,
     get_power_for_character,
@@ -16,37 +18,29 @@ from powers import (
 )
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
-from hazards import HazardManager
+from hazards import HazardManager, Bullet
+from obstacles import ObstacleManager
 from ui import GameHUD, EliminationScreen, VictoryScreen
-from level_config import get_level, MAX_LEVEL
 from settings import (
     BACKGROUND_COLOR,
+    BACKGROUND_MUSIC_TRACKS,
+    AUDIO_VOLUME_STEP,
     DEBUG_DRAW_WALKABLE,
     DEBUG_VISUALS_ENABLED,
     DEBUG_WALKABLE_COLOR,
-    MODE_STORY,
-    MODE_VS_COMPUTER,
-    MODE_SURVIVAL,
+    MODE_CAMPAIGN,
     MODE_LOCAL_MULTIPLAYER,
     MODE_ONLINE_MULTIPLAYER,
     PLAYER_START_POS,
-    PLAYER_DEFAULT_DIRECTION,
     TARGET_FPS,
     WINDOW_FLAGS,
     USE_AI_PLAYER,
     WINDOW_SIZE,
     WINDOW_TITLE,
     SOUND_PLAYER_FALL,
+    DEFAULT_CONTROLS,
+    load_custom_controls,
 )
-
-
-class Flag:
-    def __init__(self, position):
-        self.position = pygame.Vector2(position)
-
-    def draw(self, screen):
-        pygame.draw.circle(screen, (255, 255, 0), self.position, 20)  # Yellow flag
-        pygame.draw.rect(screen, (139, 69, 19), (self.position.x - 2, self.position.y - 30, 4, 30))  # Pole
 
 
 class GameManager:
@@ -57,11 +51,13 @@ class GameManager:
         screen=None,
         clock=None,
         player_name: str = "Player",
-        game_mode: str = MODE_SURVIVAL,
+        game_mode: str = MODE_CAMPAIGN,
         selected_characters: list[str] | None = None,
         network=None,
         local_player_index: int = 0,
-        selected_level: int = 1,
+        level_map_path: str | Path | None = None,
+        level_background_path: str | Path | None = None,
+        target_score: int = 3,
     ):
         if screen is None or clock is None:
             pygame.init()
@@ -71,6 +67,7 @@ class GameManager:
         self.running = True
         self.player_name = player_name
         self.game_mode = game_mode
+        self.paused = False
         self.selected_characters = selected_characters or []
         self.network = network
         self.is_network_game = (
@@ -82,24 +79,25 @@ class GameManager:
         self._pending_power_press = False
         self._remote_input_state = self._empty_network_input_state()
         self._authoritative_network_inputs = None
-        self._snapshot_send_timer = 1 / 20
-        self._snapshot_interval = 1 / 20
-
-        # Level progression
-        self.current_level = selected_level
-        self.level_config = get_level(self.current_level)
-        self.level_mode = (self.game_mode == MODE_STORY)
-        self.level_complete = False  # Always define this attribute
-        if self.level_mode:
-            self.flag = None
-            self.flag_spawned = False
-            self.level_display_timer = 3.0
-        self.paused = False
-        self.advancing = False
-        self.advance_timer = 0.0
+        self._snapshot_send_timer = 1 / 30
+        self._snapshot_interval = 1 / 30
+        self._world_snapshot_send_timer = 0.0
+        self._world_snapshot_interval = 1 / 6
+        self._client_position_blend = 0.35
+        self._client_snap_distance = 180.0
+        self.level_map_path = Path(level_map_path) if level_map_path else None
+        self.level_background_path = Path(level_background_path) if level_background_path else None
+        self.target_score = max(1, int(target_score))
+        self.round_wins: list[int] = []
+        self._round_restart_delay = 2.0
+        self._round_restart_timer = 0.0
+        self._match_complete = False
         
         # Load assets
-        self.background_surface = load_background_surface(WINDOW_SIZE)
+        self.background_surface = load_background_surface(
+            WINDOW_SIZE,
+            self.level_background_path,
+        )
         (
             self.map_surface,
             self.tmx_data,
@@ -108,7 +106,7 @@ class GameManager:
             self.map_scale_x,
             self.map_scale_y,
             self.map_offset,
-        ) = load_tilemap_surface(WINDOW_SIZE)
+        ) = load_tilemap_surface(WINDOW_SIZE, self.level_map_path)
         
         # Calculate spawn points after map loads
         slot_count = self._player_slot_count()
@@ -129,59 +127,51 @@ class GameManager:
         )
         self.collision_manager = CollisionManager()
         self.hazard_manager = HazardManager(self.collision_manager)
+        self.obstacle_manager = ObstacleManager()
         self.hud = GameHUD()
         self.water = AnimatedWater()
-        self.orb_manager = OrbManager(level_number=self.current_level)
+        self.orb_manager = OrbManager()
         self.pacman_enemy_manager = None
+        self.projectiles: list[Bullet] = []
 
         # Initialize players based on game mode
         self.players = []
         self.eliminated_players = []
         self.elimination_screen = None
+        self.victory_screen = None
+        self.game_over_state = None
         self._spawn_adjusted = False
         self._spawn_rescue_window = 1.0
         self._time_since_start = 0.0
-        self._pending_initial_restart = (self.game_mode == MODE_VS_COMPUTER and USE_AI_PLAYER)
-
-        if self.level_mode:
-            self._spawn_initial_life_orbs()
-        if self.game_mode == MODE_VS_COMPUTER:
+        self._pending_initial_restart = (self.game_mode == MODE_CAMPAIGN and USE_AI_PLAYER)
+        if self.game_mode == MODE_CAMPAIGN:
+            custom_controls = load_custom_controls()
+            if custom_controls is None:
+                custom_controls = {
+                    "player1": dict(DEFAULT_CONTROLS["player1"]),
+                    "player2": dict(DEFAULT_CONTROLS["player2"]),
+                }
+            player1_controls = dict(custom_controls.get("player1", DEFAULT_CONTROLS["player1"]))
             primary_char = self._character_choice(0)
             self.players.append(
                 Player(
                     position=next(spawn_positions, PLAYER_START_POS),
+                    controls=player1_controls,
                     character_name=primary_char,
                 )
             )
-            for i in range(self.level_config.ai.count):
+            if USE_AI_PLAYER:
                 ai_pos = next(spawn_positions, PLAYER_START_POS)
                 self.players.append(AIPlayer(position=ai_pos))
-        elif self.game_mode == MODE_SURVIVAL:
-            primary_char = self._character_choice(0)
-            self.players.append(
-                Player(
-                    position=next(spawn_positions, PLAYER_START_POS),
-                    character_name=primary_char,
-                )
-            )
-            # Survival mode: single player, no AI
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
-            player1_controls = {
-                'up': pygame.K_w,
-                'down': pygame.K_s,
-                'left': pygame.K_a,
-                'right': pygame.K_d,
-                'jump': pygame.K_SPACE,
-                'power': pygame.K_q,
-            }
-            player2_controls = {
-                'up': pygame.K_UP,
-                'down': pygame.K_DOWN,
-                'left': pygame.K_LEFT,
-                'right': pygame.K_RIGHT,
-                'jump': pygame.K_RSHIFT,
-                'power': pygame.K_SLASH,
-            }
+            custom_controls = load_custom_controls()
+            if custom_controls is None:
+                custom_controls = {
+                    "player1": dict(DEFAULT_CONTROLS["player1"]),
+                    "player2": dict(DEFAULT_CONTROLS["player2"]),
+                }
+            player1_controls = custom_controls["player1"]
+            player2_controls = custom_controls["player2"]
             player1_pos = next(spawn_positions, PLAYER_START_POS)
             player2_pos = next(spawn_positions, PLAYER_START_POS)
             self.players.append(
@@ -199,22 +189,14 @@ class GameManager:
                 )
             )
         elif self.is_network_game:
-            local_controls = {
-                'up': pygame.K_w,
-                'down': pygame.K_s,
-                'left': pygame.K_a,
-                'right': pygame.K_d,
-                'jump': pygame.K_SPACE,
-                'power': pygame.K_q,
-            }
-            remote_controls = {
-                'up': pygame.K_UP,
-                'down': pygame.K_DOWN,
-                'left': pygame.K_LEFT,
-                'right': pygame.K_RIGHT,
-                'jump': pygame.K_RSHIFT,
-                'power': pygame.K_SLASH,
-            }
+            custom_controls = load_custom_controls()
+            if custom_controls is None:
+                custom_controls = {
+                    "player1": dict(DEFAULT_CONTROLS["player1"]),
+                    "player2": dict(DEFAULT_CONTROLS["player2"]),
+                }
+            local_controls = custom_controls["player1"]
+            remote_controls = custom_controls["player2"]
             for idx in range(2):
                 controls = local_controls if idx == self.local_player_index else remote_controls
                 self.players.append(
@@ -235,18 +217,23 @@ class GameManager:
         self._ensure_players_on_walkable_surface()
         self._force_safe_spawns()
         self._configure_powers_for_players()
+        enemy_count = self._pacman_enemy_count()
+        if enemy_count > 0:
+            enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
+            self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
 
-        if not self.is_network_game:
-            enemy_count = self._pacman_enemy_count()
-            if enemy_count > 0:
-                enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
-                self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
-
+        self.round_wins = [0 for _ in self.players]
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
+        self.hud.set_round_scoreboard(self.round_wins, self.target_score)
 
         self.game_over = False
         self.audio = get_audio()
-        self.audio.play_music()
+        self.audio.play_music_playlist(
+            BACKGROUND_MUSIC_TRACKS,
+            start_random=True,
+            loop=True,
+            fade_ms=1500,
+        )
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -254,25 +241,41 @@ class GameManager:
                 self.running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
+                    if self.hud.pause_rect and self.hud.pause_rect.collidepoint(event.pos):
+                        self._toggle_pause()
+                        continue
                     if self.hud.mute_rect and self.hud.mute_rect.collidepoint(event.pos):
                         self.audio.toggle_mute()
                     elif self._handle_ninja_target_click(event.pos):
                         continue
+            elif event.type == pygame.MOUSEWHEEL:
+                if event.y:
+                    self._adjust_audio_volume(event.y * AUDIO_VOLUME_STEP)
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_l and not self.is_network_game:
+                if event.key in (pygame.K_PAGEUP, pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_RIGHTBRACKET):
+                    self._adjust_audio_volume(AUDIO_VOLUME_STEP)
+                    continue
+                if event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
+                    self._adjust_audio_volume(-AUDIO_VOLUME_STEP)
+                    continue
+                if event.key == pygame.K_TAB:
+                    self._toggle_pause()
+                    continue
+                elif event.key == pygame.K_l and not self.is_network_game:
                     for player in self.players:
                         player.reset()
-                elif event.key == pygame.K_r and self.game_over and not self.is_network_game:
-                    self._restart_game()
-                elif event.key == pygame.K_p:
-                    self.paused = not self.paused
-                elif self.paused and event.key == pygame.K_r:
-                    self._restart_game()
-                    self.paused = False
-                elif self.level_mode and self.level_complete and event.key == pygame.K_SPACE:
-                    self.advancing = True
-                    self.advance_timer = 2.0
-                    self.victory_screen = None
+                elif event.key == pygame.K_r and self.game_over:
+                    if not self._can_use_end_of_match_actions():
+                        continue
+                    reset_match = bool(self._match_complete)
+                    if self.is_network_game:
+                        if self.is_network_host:
+                            self._restart_network_round(reset_match=reset_match)
+                        elif self.network and self.network.connected:
+                            self.network.send_message("restart_request", reset_match=reset_match)
+                    else:
+                        self._restart_game(reset_match=reset_match)
+                    continue
                 else:
                     if self.is_network_game:
                         local_player = self._local_network_player()
@@ -281,9 +284,35 @@ class GameManager:
                             self._pending_power_press = True
                     else:
                         self._handle_power_key(event.key)
+                        self._handle_attack_key(event.key)
+            
+            if not self.is_network_game:
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_r and self.game_over:
+                        pass  # Already handled above
+                    else:
+                        self._handle_ultimate_key(event.key)
 
     def update(self, dt: float, keys):
-        if keys[pygame.K_ESCAPE]:
+        self.audio.update()
+
+        if getattr(self, "paused", False):
+            if self.is_network_game and self.network and self.network.connected:
+                self._process_network_messages()
+                if not self.running or not self.network.connected:
+                    return
+            if keys[pygame.K_ESCAPE]:
+                if self.is_network_game and self.network and self.network.connected:
+                    self.network.send_message("disconnect")
+                self.running = False
+            elif keys[pygame.K_LCTRL]:
+                if self.is_network_game and self.network and self.network.connected:
+                    self.network.send_message("disconnect")
+                self.return_to_main_menu = True
+                self.running = False
+            return
+
+        if keys[pygame.K_ESCAPE] and (not self.game_over or self._can_use_end_of_match_actions()):
             if self.is_network_game and self.network and self.network.connected:
                 self.network.send_message("disconnect")
             self.running = False
@@ -314,31 +343,35 @@ class GameManager:
         # Hidden first-frame restart to ensure AI is visible on first launch
         if self._pending_initial_restart:
             self._pending_initial_restart = False
-            self._restart_game()
+            self._restart_game(reset_match=True)
             return
 
         if self.game_over:
-            if self.elimination_screen:
-                self.elimination_screen.update(dt)
-            return
+            if self._can_use_end_of_match_actions() and keys[pygame.K_LCTRL]:
+                if self.is_network_game and self.network and self.network.connected:
+                    self.network.send_message("disconnect")
+                self.return_to_main_menu = True
+                self.running = False
 
-        if self.level_complete:
             if self.victory_screen:
                 self.victory_screen.update(dt)
-            elif self.advancing:
-                self.advance_timer -= dt
-                if self.advance_timer <= 0:
-                    self._advance_level()
-                    self.advancing = False
+            elif self.elimination_screen:
+                self.elimination_screen.update(dt)
+
+            if len(self.players) > 1 and not self._match_complete:
+                self._round_restart_timer += dt
+                if self._round_restart_timer >= self._round_restart_delay:
+                    if self.is_network_game:
+                        if self.is_network_host:
+                            self._restart_network_round(reset_match=False)
+                    else:
+                        self._restart_game(reset_match=False)
             return
 
-        if self.paused:
+        if getattr(self, "paused", False) or self.paused:
             return
 
         self._time_since_start += dt
-        self.hud.score = int(self._time_since_start * 10)
-        if self.level_mode:
-            self.level_display_timer = max(0.0, self.level_display_timer - dt)
 
         # Update game systems
         if not self._spawn_adjusted and self.walkable_mask:
@@ -352,6 +385,7 @@ class GameManager:
         self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
 
         self.hazard_manager.update(dt)
+        self.obstacle_manager.update(dt, self._time_since_start)
         self.hud.update(dt)
         for player in self.players:
             player._immune_to_hazards = False
@@ -376,7 +410,13 @@ class GameManager:
             was_falling_before = player.is_falling()
 
             if player.is_ai:
-                player.update_ai(dt, self.walkable_mask, self.walkable_bounds)
+                player.update_ai(
+                    dt,
+                    self.walkable_mask,
+                    self.walkable_bounds,
+                    self.hazard_manager,
+                    self.pacman_enemy_manager,
+                )
             elif network_inputs is not None and idx in network_inputs:
                 player_input = self._sanitize_network_input(network_inputs[idx])
                 if player_input.get("power_pressed"):
@@ -407,22 +447,21 @@ class GameManager:
             # Check water contact
             self._check_water_contact(player)
 
-            # Check flag touch (for level progression)
-            if self.level_mode and self.flag and player not in self.eliminated_players and player.position.distance_to(self.flag.position) < 30:
-                self.level_complete = True
-                self.eliminated_players.append(player)
-                player._eliminated = True
-                # Auto-advance to next level
-                self.advancing = True
-                self.advance_timer = 2.0
-                self.victory_screen = None
-
             # Check hazard collisions
-            if self.hazard_manager.check_player_collision(player) and player._revival_immunity_timer <= 0 and not self.level_complete:
+            if self.hazard_manager.check_player_collision(player):
+                # Check for LIFE orb collection before elimination
+                self._check_life_orb_collection(player)
                 self._eliminate_player(player, "hit by hazard")
+            
+            # Check obstacle collisions
+            if self.obstacle_manager.check_player_collision(player):
+                self._check_life_orb_collection(player)
+                self._eliminate_player(player, "hit by obstacle")
 
             # Check if player fell off screen
-            if player.position.y > WINDOW_SIZE[1] + 100 and player._revival_immunity_timer <= 0 and not self.level_complete:
+            if player.position.y > WINDOW_SIZE[1] + 100:
+                # Check for LIFE orb collection before elimination
+                self._check_life_orb_collection(player)
                 self._eliminate_player(player, "fell off")
 
         for player in self.players:
@@ -444,42 +483,58 @@ class GameManager:
                 if victim_id in seen_victims:
                     continue
                 seen_victims.add(victim_id)
-                if victim._revival_immunity_timer <= 0 and not self.level_complete:
-                    self._eliminate_player(victim, "hit by hazard")
+                self._eliminate_player(victim, "hit by hazard")
 
         self.orb_manager.update(dt, self.walkable_bounds, self.players, self)
+
+        # Update projectiles
+        self._update_projectiles(dt)
 
         # Update player count in HUD
         alive_count = len(self.players) - len(self.eliminated_players)
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
-        lives = sum(getattr(p, '_extra_lives', 0) for p in self.players if p not in self.eliminated_players)
-        self.hud.set_lives(lives)
 
-        # Check game over condition — either everyone eliminated or no one remains on the platform.
-        platform_empty = not self._any_player_on_platform()
-        if alive_count == 0 or platform_empty:
+        # Check completion only after elimination animations finish so death sequences play out.
+        completion_ready = self._elimination_animations_finished()
+
+        # Victory for the last remaining participant.
+        if len(self.players) > 1 and alive_count == 1:
+            if completion_ready:
+                winner_index = next(
+                    (idx for idx, player in enumerate(self.players) if player not in self.eliminated_players),
+                    0,
+                )
+                winner = self.players[winner_index] if self.players else None
+                winner_label = getattr(winner, "character_name", self.player_name) if winner else self.player_name
+                self._handle_round_victory(winner_index, winner_label)
+            return
+
+        # Elimination when everyone is gone.
+        if alive_count == 0 and completion_ready:
             self._trigger_game_over()
 
         for player in self.players:
             player._eliminated = player in self.eliminated_players
 
-        if self.level_mode:
-            # Flag spawn
-            if not self.flag_spawned and self.hud.score >= self.level_config.score_threshold:
-                cx, cy = WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2
-                self.flag = Flag((cx, cy))
-                self.flag_spawned = True
-
         if self.is_network_game and self.is_network_host:
             if self._snapshot_send_timer >= self._snapshot_interval:
                 self._snapshot_send_timer = 0.0
-                self.network.send_message("snapshot", state=self._build_network_snapshot())
+                self._world_snapshot_send_timer += self._snapshot_interval
+                include_world = self._world_snapshot_send_timer >= self._world_snapshot_interval
+                if include_world:
+                    self._world_snapshot_send_timer = 0.0
+                self.network.send_message(
+                    "snapshot",
+                    state=self._build_network_snapshot(include_world=include_world),
+                )
             self._pending_power_press = False
             self._authoritative_network_inputs = None
 
     def _update_client_network_game(self, dt: float):
         self.water.update(dt)
         self.orb_manager.advance_visuals(dt)
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.advance_visuals(dt)
         if self.elimination_screen:
             self.elimination_screen.update(dt)
         for player in self.players:
@@ -493,7 +548,13 @@ class GameManager:
             if message_type == "disconnect":
                 self.running = False
                 return
-            if self.is_network_host and message_type == "input_state":
+            if message_type == "pause_state":
+                self.paused = bool(message.get("paused", False))
+            elif self.is_network_host and message_type == "pause_toggle_request":
+                self._toggle_pause()
+            elif self.is_network_host and message_type == "restart_request":
+                self._restart_network_round(reset_match=bool(message.get("reset_match", False)))
+            elif self.is_network_host and message_type == "input_state":
                 self._remote_input_state = self._sanitize_network_input(message.get("input"))
             elif (not self.is_network_host) and message_type == "snapshot":
                 latest_snapshot = message.get("state")
@@ -538,10 +599,82 @@ class GameManager:
             return self.players[self.local_player_index]
         return None
 
-    def _build_network_snapshot(self) -> dict:
-        return {
+    def _send_pause_state(self):
+        if self.is_network_game and self.is_network_host and self.network and self.network.connected:
+            self.network.send_message("pause_state", paused=bool(self.paused))
+
+    def _toggle_pause(self):
+        if self.is_network_game:
+            if self.is_network_host:
+                self.paused = not bool(self.paused)
+                self._send_pause_state()
+            elif self.network and self.network.connected:
+                self.network.send_message("pause_toggle_request")
+            return
+
+        self.paused = not bool(self.paused)
+
+    def _blend_client_player_snapshot(self, player, player_state: dict) -> dict:
+        """Smooth host snapshots on the client to reduce visible jitter."""
+        if self.is_network_host or not isinstance(player_state, dict):
+            return player_state
+
+        try:
+            target = pygame.Vector2(
+                float(player_state.get("x", player.position.x)),
+                float(player_state.get("y", player.position.y)),
+            )
+        except (TypeError, ValueError):
+            return player_state
+
+        # Snap immediately during major state transitions to avoid desync artifacts.
+        if bool(player_state.get("falling", False)) != bool(getattr(player, "falling", False)):
+            return player_state
+        if bool(player_state.get("drowning", False)) != bool(getattr(player, "drowning", False)):
+            return player_state
+        if bool(player_state.get("eliminated", False)) != bool(getattr(player, "_eliminated", False)):
+            return player_state
+        if str(player_state.get("state", "")) == "death":
+            return player_state
+
+        current = pygame.Vector2(player.position)
+        distance = current.distance_to(target)
+        if distance > self._client_snap_distance:
+            return player_state
+
+        local_player = self._local_network_player()
+        blend = 0.58 if player is local_player else self._client_position_blend
+        blended = dict(player_state)
+        blended["x"] = current.x + (target.x - current.x) * blend
+        blended["y"] = current.y + (target.y - current.y) * blend
+        return blended
+
+    def _build_network_snapshot(self, include_world: bool = True) -> dict:
+        end_state = None
+        if self.game_over_state == "victory" and self.victory_screen:
+            end_state = {
+                "type": "victory",
+                "winner_name": self.victory_screen.player_name,
+                "winner_character": self.victory_screen.character_name,
+                "survival_time": float(self.victory_screen.survival_time),
+            }
+        elif self.game_over_state == "elimination" and self.elimination_screen:
+            end_state = {
+                "type": "elimination",
+                "player_name": self.elimination_screen.player_name,
+                "character_name": self.elimination_screen.character_name,
+                "survival_time": float(self.elimination_screen.survival_time),
+                "reason": self.elimination_screen.reason,
+            }
+
+        snapshot = {
             "time_since_start": float(self._time_since_start),
+            "paused": bool(self.paused),
             "game_over": bool(self.game_over),
+            "target_score": int(self.target_score),
+            "round_wins": [int(value) for value in self.round_wins],
+            "match_complete": bool(self._match_complete),
+            "end_state": end_state,
             "players": [
                 {
                     "player": player.snapshot_state(),
@@ -549,40 +682,77 @@ class GameManager:
                 }
                 for player in self.players
             ],
-            "tiles": self.tile_manager.snapshot_state(),
-            "hazards": self.hazard_manager.snapshot_state(),
-            "orbs": self.orb_manager.snapshot_state(),
             "hud": self.hud.snapshot_state(),
         }
+
+        if include_world:
+            snapshot["tiles"] = self.tile_manager.snapshot_state()
+            snapshot["hazards"] = self.hazard_manager.snapshot_state()
+            snapshot["obstacles"] = self.obstacle_manager.snapshot_state()
+            snapshot["orbs"] = self.orb_manager.snapshot_state()
+
+        snapshot["pacman_enemies"] = (
+            self.pacman_enemy_manager.snapshot_state()
+            if self.pacman_enemy_manager
+            else None
+        )
+
+        return snapshot
 
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
             return
 
         self._time_since_start = float(snapshot.get("time_since_start", self._time_since_start))
+        self.paused = bool(snapshot.get("paused", self.paused))
+        self.target_score = max(1, int(snapshot.get("target_score", self.target_score)))
+        incoming_round_wins = snapshot.get("round_wins", self.round_wins)
+        if isinstance(incoming_round_wins, list):
+            self.round_wins = [int(max(0, value)) for value in incoming_round_wins]
+        if len(self.round_wins) < len(self.players):
+            self.round_wins.extend([0] * (len(self.players) - len(self.round_wins)))
+        elif len(self.round_wins) > len(self.players):
+            self.round_wins = self.round_wins[: len(self.players)]
+        self._match_complete = bool(snapshot.get("match_complete", self._match_complete))
         self.tile_manager.apply_snapshot(snapshot.get("tiles"))
         self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
         self.hazard_manager.apply_snapshot(snapshot.get("hazards"))
+        self.obstacle_manager.apply_snapshot(snapshot.get("obstacles"))
         self.orb_manager.apply_snapshot(snapshot.get("orbs"))
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
         self.hud.apply_snapshot(snapshot.get("hud"))
+        self.hud.set_round_scoreboard(self.round_wins, self.target_score)
 
         self.eliminated_players.clear()
+        self.victory_screen = None
+        self.elimination_screen = None
+        self.game_over_state = None
         for idx, entry in enumerate(snapshot.get("players", []) or []):
             if idx >= len(self.players) or not isinstance(entry, dict):
                 continue
             player_state = entry.get("player") or {}
             player = self.players[idx]
-            player.apply_snapshot_state(player_state)
+            blended_state = self._blend_client_player_snapshot(player, player_state)
+            player.apply_snapshot_state(blended_state)
             apply_power_state(player.power, entry.get("power"))
             if player_state.get("eliminated"):
                 self.eliminated_players.append(player)
 
         next_game_over = bool(snapshot.get("game_over", False))
         if next_game_over and not self.game_over:
-            self._trigger_game_over()
+            end_state = snapshot.get("end_state") or {}
+            if isinstance(end_state, dict) and end_state.get("type") == "victory":
+                winner_name = str(end_state.get("winner_name", self.player_name))
+                char_name = str(end_state.get("winner_character", "Caveman"))
+                self._trigger_victory(winner_name, char_name)
+            else:
+                self._trigger_game_over()
         elif not next_game_over and self.game_over:
             self.game_over = False
             self.elimination_screen = None
+            self.victory_screen = None
+            self.game_over_state = None
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
@@ -614,32 +784,24 @@ class GameManager:
         # Draw orbs floating above the arena
         self.orb_manager.draw(self.screen)
 
+        # Draw pacman-style enemies before the player front layer
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.draw(self.screen)
+
         # Draw players in front of map
         for player in players_front:
             player.draw(self.screen)
 
         # Draw hazards
         self.hazard_manager.draw(self.screen)
+        
+        # Draw obstacles
+        self.obstacle_manager.draw(self.screen)
 
-        # Draw flag
-        if self.level_mode and self.flag:
-            self.flag.draw(self.screen)
-
-        # Draw level display
-        if self.level_mode and self.level_display_timer > 0:
-            font = pygame.font.SysFont("consolas", 36, bold=True)
-            text = f"Level {self.current_level}"
-            surf = font.render(text, True, (255, 255, 255))
-            rect = surf.get_rect(midtop=(WINDOW_SIZE[0] // 2, 20))
-            self.screen.blit(surf, rect)
-
-        # Draw advancing text
-        if self.advancing:
-            font = pygame.font.SysFont("consolas", 48, bold=True)
-            text = f"Advancing to Level {self.current_level + 1}"
-            surf = font.render(text, True, (255, 255, 255))
-            rect = surf.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2))
-            self.screen.blit(surf, rect)
+        # Draw projectiles
+        for projectile in self.projectiles:
+            if projectile.active:
+                projectile.draw(self.screen)
 
         # Draw active power visuals
         for player in self.players:
@@ -649,15 +811,40 @@ class GameManager:
                 player.power.draw(self.screen, player)
 
         # Draw HUD
-        self.hud.draw(self.screen, self.players, is_muted=self.audio.is_muted)
-
-        # Draw pause menu
-        if self.paused:
-            self._draw_pause_menu()
+        self.hud.draw(
+            self.screen,
+            self.players,
+            is_muted=self.audio.is_muted,
+            volume=self.audio.get_volume(),
+            is_paused=bool(self.paused),
+        )
 
         # Draw elimination screen if game over
-        if self.elimination_screen:
+        if self.victory_screen:
+            self.victory_screen.draw(self.screen)
+        elif self.elimination_screen:
             self.elimination_screen.draw(self.screen)
+            
+        if getattr(self, "paused", False):
+            s_overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+            s_overlay.fill((0, 0, 0, 128))
+            self.screen.blit(s_overlay, (0, 0))
+            
+            # Using default pygame font since settings.py isn't guaranteed to have standard sizes loaded here
+            font = pygame.font.Font(None, 74)
+            text = font.render(f"PAUSED", True, (255, 255, 255))
+            text_rect = text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2))
+            
+            font_small = pygame.font.Font(None, 36)
+            sub_text = font_small.render(f"Press TAB to Resume", True, (200, 200, 220))
+            sub_rect = sub_text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2 + 50))
+            
+            menu_text = font_small.render(f"To go to Main Menu, press Left Ctrl", True, (150, 150, 180))
+            menu_rect = menu_text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2 + 85))
+            
+            self.screen.blit(text, text_rect)
+            self.screen.blit(sub_text, sub_rect)
+            self.screen.blit(menu_text, menu_rect)
 
         pygame.display.flip()
 
@@ -750,7 +937,7 @@ class GameManager:
         walkable_center = self._walkable_center()
         safe_position = self._find_valid_fallback(player, occupied, walkable_center)
         if not safe_position:
-            safe_position = pygame.Vector2(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2)
+            return False
         self._apply_spawn_position(player, safe_position)
         player.falling = False
         player.fall_velocity = 0.0
@@ -762,12 +949,6 @@ class GameManager:
         player.z_velocity = 0.0
         player.on_ground = True
         player.velocity.update(0, 0)
-        # Reset state and animation
-        player.state = "idle"
-        player.facing = PLAYER_DEFAULT_DIRECTION
-        player.current_animation = player.animations["idle"][player.facing]
-        player.current_animation.reset()
-        player._refresh_collision_shape(force=True)
         if hasattr(player, "_death_fade_alpha"):
             player._death_fade_alpha = 255
         if hasattr(player, "_set_state"):
@@ -792,9 +973,6 @@ class GameManager:
         if player not in self.eliminated_players:
             self._eliminate_player(player, "drowned")
 
-        # Check if player can collect LIFE orb before final elimination
-        self._check_life_orb_collection(player)
-
     def _check_life_orb_collection(self, player):
         """Check if player can collect a LIFE orb before elimination."""
         # Check if player is about to be eliminated and can collect a LIFE orb
@@ -812,25 +990,25 @@ class GameManager:
 
     def _eliminate_player(self, player, reason: str):
         """Mark a player as eliminated."""
-        # Check FIRST if player has an extra life to revive - this takes priority over shields
+        if self._can_block_elimination(player, reason):
+            print(f"Elimination blocked by shield/immunity (Reason: {reason})")
+            return
+        # Check if player has an extra life to revive
         if hasattr(player, 'has_extra_life') and player.has_extra_life():
-            # Try to rescue first, only consume life if rescue succeeds
-            if hasattr(player, 'has_extra_life') and player.has_extra_life():
-                player.use_life()
-                rescued = self._rescue_player_to_safe_tile(player)
+            if player.use_life():
+                # Remove from eliminated list if they were in it
                 if player in self.eliminated_players:
                     self.eliminated_players.remove(player)
+                # Reset eliminated flag
                 player._eliminated = False
-                player._shield_timer = 0.0
-                player._revival_blink_timer = 2.0
-                player._revival_immunity_timer = 10.0
+                # Revive the player at a safe position
+                self._rescue_player_to_safe_tile(player)
+                print(f"Player revived with extra life! (Reason: {reason})")
                 return
-        # Check if shield can block elimination (only after checking extra lives)
-        if self._can_block_elimination(player, reason):
-            return
         if player not in self.eliminated_players:
             self.eliminated_players.append(player)
             player._eliminated = True
+            print(f"Player eliminated: {reason}")
             # Trigger death state if available
             if hasattr(player, 'die'):
                 player.die()
@@ -842,6 +1020,27 @@ class GameManager:
             if self._player_on_platform(player):
                 return True
         return False
+
+    def _elimination_animations_finished(self) -> bool:
+        """Return True when all eliminated players have fully finished death visuals."""
+        for player in self.eliminated_players:
+            if getattr(player, "state", "") != "death":
+                return False
+
+            animation = getattr(player, "current_animation", None)
+            if animation is not None and not bool(getattr(animation, "finished", False)):
+                return False
+
+            # Keep end-of-round/game UI hidden until the death fade has finished too.
+            if int(getattr(player, "_death_fade_alpha", 255)) > 0:
+                return False
+
+            if bool(getattr(player, "drowning", False)) and not bool(
+                getattr(player, "drown_animation_done", False)
+            ):
+                return False
+
+        return True
 
     def _player_on_platform(self, player) -> bool:
         if player.is_falling() or player.is_drowning():
@@ -867,75 +1066,98 @@ class GameManager:
                 return True
         return False
 
+    def _can_use_end_of_match_actions(self) -> bool:
+        """Allow restart/quit/menu shortcuts only on final match end screens."""
+        return bool(self._match_complete or len(self.players) <= 1)
+
     def _trigger_game_over(self):
         """Trigger game over state."""
+        self._trigger_elimination()
+
+    def _trigger_elimination(self):
+        """Trigger the elimination end screen."""
         if not self.game_over:
             self.game_over = True
+            self.game_over_state = "elimination"
+            self._match_complete = False
+            self._round_restart_timer = 0.0
+            self.victory_screen = None
+            
+            char_name = getattr(self.player, "character_name", "Caveman") if hasattr(self, "player") and self.player else "Caveman"
+            allow_actions = self._can_use_end_of_match_actions()
+            status_text = None if allow_actions else "Next round starts automatically..."
+            
             self.elimination_screen = EliminationScreen(
                 self.player_name,
                 self.hud.survival_time,
-                "eliminated"
+                "eliminated",
+                char_name,
+                allow_actions=allow_actions,
+                status_message=status_text,
             )
             self.elimination_screen.show()
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
-    def _trigger_victory(self, winner_name: str):
+    def _trigger_victory(self, winner_name: str, character_name: str = "Caveman"):
         """Trigger the victory end screen."""
         if not self.game_over:
             self.game_over = True
             self.game_over_state = "victory"
+            self._round_restart_timer = 0.0
             self.elimination_screen = None
-            self.victory_screen = VictoryScreen(f"{winner_name} Wins!", self.hud.survival_time)
+            allow_actions = self._can_use_end_of_match_actions()
+            status_text = None if allow_actions else "Next round starts automatically..."
+            self.victory_screen = VictoryScreen(
+                winner_name,
+                self.hud.survival_time,
+                character_name,
+                allow_actions=allow_actions,
+                status_message=status_text,
+            )
             self.victory_screen.show()
             if self.is_network_game and self.is_network_host and self.network and self.network.connected:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
-    def _restart_game(self):
-        """Restart the game."""
-        self.game_over = False
-        self.elimination_screen = None
-        self.eliminated_players.clear()
-
-        self.tile_manager.reset()
-        self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
-        self.hazard_manager.reset()
-        self.orb_manager.reset()
-        self.hud.reset()
-        self._spawn_adjusted = False
-        self._time_since_start = 0.0
-
-        for player in self.players:
-            player.reset()
-            if player.power:
-                player.power.reset()
-
-    def _advance_level(self):
-        """Advance to the next level."""
-        self.current_level += 1
-        if self.current_level > MAX_LEVEL:
-            # Game complete
-            self.victory_screen = VictoryScreen("Congratulations! You completed all levels!", self._time_since_start)
-            self.level_complete = False
+    def _handle_round_victory(self, winner_index: int, winner_label: str):
+        """Count the round winner and decide whether the match is complete."""
+        if not self.players:
             return
 
-        self.level_config = get_level(self.current_level)
-        self.flag = None
-        self.flag_spawned = False
-        self.level_complete = False
-        self.paused = False
+        winner_index = max(0, min(len(self.players) - 1, int(winner_index)))
+        if len(self.round_wins) != len(self.players):
+            self.round_wins = [0 for _ in self.players]
 
-        # Reset game state
+        self.round_wins[winner_index] += 1
+        self.hud.set_round_scoreboard(self.round_wins, self.target_score)
+        self._round_restart_timer = 0.0
+        self._match_complete = self.round_wins[winner_index] >= self.target_score
+
+        result_suffix = "WINS MATCH" if self._match_complete else "WINS ROUND"
+        self._trigger_victory(f"P{winner_index + 1} - {winner_label} {result_suffix}", winner_label)
+
+    def _restart_game(self, reset_match: bool = False):
+        """Restart the game."""
         self.game_over = False
+        self.paused = False
         self.elimination_screen = None
         self.victory_screen = None
         self.game_over_state = None
+        self._match_complete = False
+        self._round_restart_timer = 0.0
+        if reset_match or len(self.round_wins) != len(self.players):
+            self.round_wins = [0 for _ in self.players]
         self.eliminated_players.clear()
+        self._pending_power_press = False
+        self._remote_input_state = self._empty_network_input_state()
+        self._authoritative_network_inputs = None
 
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
-        self.orb_manager = OrbManager(level_number=self.current_level)
+        self.obstacle_manager.reset()
+        self.orb_manager.reset()
+        self.projectiles.clear()
         self.hud.reset()
         self._spawn_adjusted = False
         self._time_since_start = 0.0
@@ -943,44 +1165,60 @@ class GameManager:
         if self.pacman_enemy_manager:
             self.pacman_enemy_manager.reset()
 
-        # Initialize players with new level config
-        slot_count = self._player_slot_count()
-        spawn_positions = iter(self._initial_spawns(slot_count))
-        
-        # Keep existing players and their extra lives, just reset positions
         for player in self.players:
-            pos = next(spawn_positions, PLAYER_START_POS)
-            player.spawn_position = pygame.Vector2(pos)
-            player.position = pygame.Vector2(pos)
-            player.rect.center = pos
-            player.reset_state_for_respawn()
+            player.reset()
+            if player.power:
+                player.power.reset()
+
+        self._ensure_players_on_walkable_surface()
+        self._force_safe_spawns()
+        self._configure_powers_for_players()
+        self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
+        self.hud.set_round_scoreboard(self.round_wins, self.target_score)
+
+    def _update_projectiles(self, dt: float):
+        """Update all projectiles and check for collisions with players."""
+        if not self.projectiles:
+            return
         
-        # Add any missing players up to slot_count
-        while len(self.players) < slot_count:
-            primary_char = self._character_choice(len(self.players))
-            self.players.append(
-                Player(
-                    position=next(spawn_positions, PLAYER_START_POS),
-                    character_name=primary_char,
-                )
-            )
+        for projectile in self.projectiles[:]:
+            if not projectile.active:
+                self.projectiles.remove(projectile)
+                continue
+            
+            projectile.update(dt)
+            
+            # Check collision with players
+            for player in self.players:
+                if player in self.eliminated_players:
+                    continue
+                if player is projectile.owner:
+                    continue
+                
+                if projectile.check_collision(player):
+                    if getattr(projectile, 'is_fireball', False):
+                        from settings import ULTIMATE_DAMAGE_PERCENT
+                        damage = max(1, math.ceil(player.get_max_health() * ULTIMATE_DAMAGE_PERCENT))
+                    else:
+                        damage = getattr(projectile, 'damage', 1)
 
-        self._ensure_players_on_walkable_surface()
-        self._force_safe_spawns()
-        self._configure_powers_for_players()
-        if not self.is_network_game:
-            enemy_count = self._pacman_enemy_count()
-            if enemy_count > 0:
-                enemy_spawns = self._initial_pacman_enemy_spawns(enemy_count)
-                self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
+                    if player.take_damage(damage):
+                        self._eliminate_player(player, "combat")
+                    else:
+                        direction = projectile.direction
+                        player.velocity += direction * 300
+                    
+                    projectile.active = False
+                    self.projectiles.remove(projectile)
+                    break
 
-        self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
-
-        self._ensure_players_on_walkable_surface()
-        self._force_safe_spawns()
-        self._configure_powers_for_players()
-
-        self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
+    def _restart_network_round(self, reset_match: bool = False):
+        """Host-authoritative restart path for LAN games."""
+        self._restart_game(reset_match=reset_match)
+        if self.is_network_game and self.is_network_host and self.network and self.network.connected:
+            self._snapshot_send_timer = 0.0
+            self._world_snapshot_send_timer = 0.0
+            self.network.send_message("snapshot", state=self._build_network_snapshot(include_world=True))
 
     def _force_safe_spawns(self):
         """Clamp every player to a valid walkable tile and clear fall/drown flags."""
@@ -1036,20 +1274,6 @@ class GameManager:
         for idx, player in enumerate(self.players):
             self._configure_power_for_player(player, idx)
 
-    def _spawn_initial_life_orbs(self):
-        """Spawn initial life orbs for all non-AI players at random map positions."""
-        from orbs import MagicOrb, OrbType
-        if not hasattr(self, 'orb_manager') or self.orb_manager is None:
-            return
-        if not self.walkable_bounds:
-            return
-        for player in self.players:
-            if not player.is_ai:
-                pos = self.orb_manager._spawn_position_from_bounds(self.walkable_bounds)
-                if pos:
-                    self.orb_manager.orbs.append(MagicOrb(OrbType.LIFE, pos))
-                    self.orb_manager._life_orb_count += 1
-
     def _configure_power_for_player(self, player, slot_index: int):
         if getattr(player, "power", None):
             return
@@ -1077,6 +1301,52 @@ class GameManager:
                     break
                 if player.try_use_power(self):
                     break
+
+    def _handle_attack_key(self, key: int):
+        """Handle attack key press - basic attack (melee or projectile)."""
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            controls = getattr(player, "controls", {})
+            if controls.get("attack") == key:
+                character = getattr(player, "character_name", "").lower()
+                
+                # Ranged characters spawn projectiles
+                if character == "ninja":
+                    player.spawn_projectile(self, "shuriken")
+                elif character == "caveman":
+                    player.spawn_projectile(self, "stone")
+                else:
+                    # Melee characters
+                    target_players = [p for p in self.players if p is not player]
+                    player.try_attack(self, target_players)
+                break
+
+    def _handle_ultimate_key(self, key: int):
+        """Handle ultimate key press - character special attack."""
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            controls = getattr(player, "controls", {})
+            if controls.get("ultimate") == key:
+                # Check if player has ultimate charge
+                if not player.has_ultimate():
+                    print(f"DEBUG: No ultimate charge! Collect ULTIMATE orbs to use.")
+                    break
+                
+                character = getattr(player, "character_name", "").lower()
+                
+                if character == "ninja":
+                    player.spawn_projectile(self, "fireball")
+                elif character == "caveman":
+                    player.activate_big_stick(self)
+                
+                # Use the ultimate charge
+                player.use_ultimate()
+                break
+
+    def _adjust_audio_volume(self, delta: float):
+        self.audio.adjust_volume(delta)
 
     def _handle_ninja_target_click(self, pos) -> bool:
         for player in self.players:
@@ -1159,12 +1429,9 @@ class GameManager:
             return 2
         if self.game_mode == MODE_LOCAL_MULTIPLAYER:
             return max(2, len(self.selected_characters))
-        if self.game_mode == MODE_VS_COMPUTER:
+        if self.game_mode == MODE_CAMPAIGN:
             human_slots = max(1, len(self.selected_characters))
-            return human_slots + self.level_config.ai.count
-        elif self.game_mode == MODE_SURVIVAL:
-            human_slots = max(1, len(self.selected_characters))
-            return human_slots  # No AI
+            return human_slots + (1 if USE_AI_PLAYER else 0)
         return max(1, len(self.selected_characters))
 
     def _spawn_positions(self, count: int) -> list[tuple[int, int]]:
@@ -1202,36 +1469,15 @@ class GameManager:
             return positions
         return self._spawn_positions(count)
 
-    def _draw_pause_menu(self):
-        """Draw the pause menu overlay."""
-        overlay = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 128))  # Semi-transparent black
-        self.screen.blit(overlay, (0, 0))
-
-        font = pygame.font.SysFont(None, 48)
-        title = font.render("Paused", True, (255, 255, 255))
-        self.screen.blit(title, (WINDOW_SIZE[0] // 2 - title.get_width() // 2, WINDOW_SIZE[1] // 2 - 100))
-
-        font_small = pygame.font.SysFont(None, 36)
-        resume = font_small.render("P - Resume", True, (255, 255, 255))
-        restart = font_small.render("R - Restart Level", True, (255, 255, 255))
-        quit = font_small.render("ESC - Quit to Menu", True, (255, 255, 255))
-
-        self.screen.blit(resume, (WINDOW_SIZE[0] // 2 - resume.get_width() // 2, WINDOW_SIZE[1] // 2 - 20))
-        self.screen.blit(restart, (WINDOW_SIZE[0] // 2 - restart.get_width() // 2, WINDOW_SIZE[1] // 2 + 20))
-        self.screen.blit(quit, (WINDOW_SIZE[0] // 2 - quit.get_width() // 2, WINDOW_SIZE[1] // 2 + 60))
-
     def _initial_spawns(self, count: int) -> list[tuple[int, int]]:
-        if self.game_mode == MODE_SURVIVAL:
+        if self.game_mode == MODE_CAMPAIGN:
             return self._vs_computer_spawns(count)
         return self._spawn_positions(count)
 
-
-
     def _pacman_enemy_count(self) -> int:
-        if self.is_network_game:
-            return 0
-        if self.game_mode == MODE_SURVIVAL:
+        if self.game_mode == MODE_ONLINE_MULTIPLAYER:
+            return 2
+        if self.game_mode == MODE_CAMPAIGN:
             return 1
         if self.game_mode == MODE_LOCAL_MULTIPLAYER:
             return 2
@@ -1272,7 +1518,6 @@ class GameManager:
             occupied.add(spawn)
         return spawns
 
-
     def _character_choice(self, index: int) -> str | None:
         if not self.selected_characters:
             return None
@@ -1292,7 +1537,12 @@ class GameManager:
             self.audio.stop_music()
         if self.network:
             self.network.disconnect()
-        pygame.quit()
+            
+        if getattr(self, "return_to_main_menu", False):
+            return "main_menu"
+        else:
+            pygame.quit()
+            return "quit"
 
 
 # Backward compatibility for older imports.
