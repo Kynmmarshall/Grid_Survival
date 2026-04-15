@@ -6,8 +6,14 @@ import pygame
 from audio import get_audio
 from game import GameManager
 from host_waiting_screen import host_waiting_screen
-from lan_prompts import draw_lan_backdrop, prompt_host_or_join, prompt_ip_entry, toast_message
-from network import NetworkClient, NetworkHost, get_local_ip
+from lan_prompts import (
+    draw_lan_backdrop,
+    prompt_discovered_host,
+    prompt_host_or_join,
+    prompt_ip_entry,
+    toast_message,
+)
+from network import NetworkClient, NetworkHost, get_local_ip, get_public_ip
 from scenes import (
     LevelSelectionScreen,
     ModeSelectionScreen,
@@ -194,21 +200,73 @@ def main():
                     if not hosting:
                         toast_message(screen, clock, "Hosting failed.")
                         continue
+
                     host_ip = get_local_ip()
-                    # Show waiting/connected screen
-                    ok = host_waiting_screen(screen, clock, host_ip, network)
+
+                    # Fetch the public IP and try UPnP in background threads so
+                    # the waiting screen renders immediately without freezing.
+                    import threading as _threading
+
+                    _pub_result: list[str | None] = [None]
+                    _upnp_result: list[str | None] = [None]
+
+                    def _fetch_public_ip():
+                        _pub_result[0] = get_public_ip(timeout=6.0)
+
+                    def _try_upnp():
+                        status = network.try_upnp_mapping()
+                        if status:
+                            _upnp_result[0] = f"UPnP OK \u2013 port {network.port} opened automatically"
+                        else:
+                            _upnp_result[0] = (
+                                f"UPnP unavailable \u2013 forward port {network.port} "
+                                "on your router for internet play"
+                            )
+
+                    _threading.Thread(target=_fetch_public_ip, daemon=True).start()
+                    _threading.Thread(target=_try_upnp, daemon=True).start()
+
+                    # Pass lambdas so the waiting screen reads the latest value
+                    # from the background threads on every display tick — the
+                    # public IP and UPnP status appear as soon as they resolve.
+                    ok = host_waiting_screen(
+                        screen,
+                        clock,
+                        host_ip,
+                        network,
+                        public_ip=lambda: _pub_result[0],
+                        upnp_status=lambda: _upnp_result[0],
+                    )
                     if not ok:
+                        # The host_waiting_screen already returned False; respect that.
+                        if network:
+                            network.disconnect()
                         toast_message(screen, clock, "Hosting cancelled.")
+                        network = None
                         continue
+
                     local_player_index = 0
-                else:
+
+                elif choice == "discover":
+                    # LAN auto-discovery: scan for broadcasting hosts.
+                    result = prompt_discovered_host(screen, clock)
+                    if not result:
+                        continue
+                    network = NetworkClient()
+                    connected = network.connect_to_host(result["address"], result["port"])
+                    if not connected:
+                        toast_message(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
+                        continue
+                    local_player_index = 1
+
+                else:  # join_ip — manual entry, works for both LAN and internet
                     ip = prompt_ip_entry(screen, clock)
                     if not ip:
                         continue
                     network = NetworkClient()
                     connected = network.connect_to_host(ip)
                     if not connected:
-                        toast_message(screen, clock, "Connection failed.")
+                        toast_message(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
                         continue
                     local_player_index = 1
 
