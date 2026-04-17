@@ -82,6 +82,8 @@ class GameManager:
         self._snapshot_interval = 1 / 30
         self._world_snapshot_send_timer = 0.0
         self._world_snapshot_interval = 1 / 6
+        self._last_client_snapshot_time = -1.0
+        self._last_client_world_snapshot_time = -1.0
         self._client_position_blend = 0.35
         self._client_snap_distance = 180.0
         # Rate-limiting for client input messages: only send when the state
@@ -518,8 +520,13 @@ class GameManager:
                     self._world_snapshot_send_timer = 0.0
                 self.network.send_message(
                     "snapshot",
-                    state=self._build_network_snapshot(include_world=include_world),
+                    state=self._build_network_snapshot(),
                 )
+                if include_world:
+                    self.network.send_message(
+                        "world_snapshot",
+                        state=self._build_network_world_snapshot(),
+                    )
             self._pending_power_press = False
             self._authoritative_network_inputs = None
 
@@ -540,6 +547,7 @@ class GameManager:
 
     def _process_network_messages(self):
         latest_snapshot = None
+        latest_world_snapshot = None
         for message in self.network.get_messages():
             message_type = message.get("type")
             if message_type == "disconnect":
@@ -555,9 +563,13 @@ class GameManager:
                 self._remote_input_state = self._sanitize_network_input(message.get("input"))
             elif (not self.is_network_host) and message_type == "snapshot":
                 latest_snapshot = message.get("state")
+            elif (not self.is_network_host) and message_type == "world_snapshot":
+                latest_world_snapshot = message.get("state")
 
         if latest_snapshot is not None:
             self._apply_network_snapshot(latest_snapshot)
+        if latest_world_snapshot is not None:
+            self._apply_network_world_snapshot(latest_world_snapshot)
 
     def _build_local_input_state(self, keys) -> dict:
         player = self._local_network_player()
@@ -646,7 +658,7 @@ class GameManager:
         blended["y"] = current.y + (target.y - current.y) * blend
         return blended
 
-    def _build_network_snapshot(self, include_world: bool = True) -> dict:
+    def _build_network_snapshot(self) -> dict:
         end_state = None
         if self.game_over_state == "victory" and self.victory_screen:
             end_state = {
@@ -681,25 +693,30 @@ class GameManager:
             ],
             "hud": self.hud.snapshot_state(),
         }
-
-        if include_world:
-            snapshot["tiles"] = self.tile_manager.snapshot_state()
-            snapshot["hazards"] = self.hazard_manager.snapshot_state()
-            snapshot["orbs"] = self.orb_manager.snapshot_state()
-
-        snapshot["pacman_enemies"] = (
-            self.pacman_enemy_manager.snapshot_state()
-            if self.pacman_enemy_manager
-            else None
-        )
-
         return snapshot
+
+    def _build_network_world_snapshot(self) -> dict:
+        return {
+            "time_since_start": float(self._time_since_start),
+            "tiles": self.tile_manager.snapshot_state(),
+            "hazards": self.hazard_manager.snapshot_state(),
+            "orbs": self.orb_manager.snapshot_state(),
+            "pacman_enemies": (
+                self.pacman_enemy_manager.snapshot_state()
+                if self.pacman_enemy_manager
+                else None
+            ),
+        }
 
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
             return
 
-        self._time_since_start = float(snapshot.get("time_since_start", self._time_since_start))
+        incoming_time = float(snapshot.get("time_since_start", self._time_since_start))
+        if incoming_time + 1e-6 < self._last_client_snapshot_time:
+            return
+        self._last_client_snapshot_time = incoming_time
+        self._time_since_start = incoming_time
         self.paused = bool(snapshot.get("paused", self.paused))
         self.target_score = max(1, int(snapshot.get("target_score", self.target_score)))
         incoming_round_wins = snapshot.get("round_wins", self.round_wins)
@@ -710,14 +727,12 @@ class GameManager:
         elif len(self.round_wins) > len(self.players):
             self.round_wins = self.round_wins[: len(self.players)]
         self._match_complete = bool(snapshot.get("match_complete", self._match_complete))
-        self.tile_manager.apply_snapshot(snapshot.get("tiles"))
-        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
-        self.hazard_manager.apply_snapshot(snapshot.get("hazards"))
-        self.orb_manager.apply_snapshot(snapshot.get("orbs"))
-        if self.pacman_enemy_manager:
-            self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
         self.hud.apply_snapshot(snapshot.get("hud"))
         self.hud.set_round_scoreboard(self.round_wins, self.target_score)
+
+        # Backward compatibility path if an older host still sends full snapshots.
+        if any(key in snapshot for key in ("tiles", "hazards", "orbs", "pacman_enemies")):
+            self._apply_network_world_snapshot(snapshot)
 
         self.eliminated_players.clear()
         self.victory_screen = None
@@ -748,6 +763,25 @@ class GameManager:
             self.elimination_screen = None
             self.victory_screen = None
             self.game_over_state = None
+
+    def _apply_network_world_snapshot(self, snapshot):
+        if not isinstance(snapshot, dict):
+            return
+
+        incoming_time = float(snapshot.get("time_since_start", self._time_since_start))
+        if incoming_time + 1e-6 < self._last_client_world_snapshot_time:
+            return
+        self._last_client_world_snapshot_time = incoming_time
+
+        if "tiles" in snapshot:
+            self.tile_manager.apply_snapshot(snapshot.get("tiles"))
+            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        if "hazards" in snapshot:
+            self.hazard_manager.apply_snapshot(snapshot.get("hazards"))
+        if "orbs" in snapshot:
+            self.orb_manager.apply_snapshot(snapshot.get("orbs"))
+        if "pacman_enemies" in snapshot and self.pacman_enemy_manager:
+            self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
@@ -1138,6 +1172,8 @@ class GameManager:
         self._pending_power_press = False
         self._remote_input_state = self._empty_network_input_state()
         self._authoritative_network_inputs = None
+        self._last_client_snapshot_time = -1.0
+        self._last_client_world_snapshot_time = -1.0
         # Reset input rate-limiter so stale state from the previous round does
         # not suppress the first input message of the new round.
         self._last_sent_input = None
@@ -1171,7 +1207,8 @@ class GameManager:
         if self.is_network_game and self.is_network_host and self.network and self.network.connected:
             self._snapshot_send_timer = 0.0
             self._world_snapshot_send_timer = 0.0
-            self.network.send_message("snapshot", state=self._build_network_snapshot(include_world=True))
+            self.network.send_message("snapshot", state=self._build_network_snapshot())
+            self.network.send_message("world_snapshot", state=self._build_network_world_snapshot())
 
     def _force_safe_spawns(self):
         """Clamp every player to a valid walkable tile and clear fall/drown flags."""

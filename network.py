@@ -101,6 +101,8 @@ class NetworkManager:
     )
     # High-frequency gameplay traffic prefers UDP, with automatic TCP fallback.
     _UDP_PREFERRED_MESSAGES = frozenset({"input_state", "snapshot"})
+    # Keep only the latest packet for high-frequency stream types.
+    _LATEST_ONLY_MESSAGES = frozenset({"input_state", "snapshot", "world_snapshot"})
 
     def __init__(self, *, is_host: bool):
         self.is_host = is_host
@@ -115,6 +117,8 @@ class NetworkManager:
         self._send_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=128)
         self._send_thread: Optional[threading.Thread] = None
         self.message_queue: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        self._latest_messages: dict[str, dict[str, Any]] = {}
+        self._latest_messages_lock = threading.Lock()
         self.peer_address: Optional[tuple[str, int]] = None
         self.udp_peer_address: Optional[tuple[str, int]] = None
         self.udp_connected = False
@@ -255,8 +259,15 @@ class NetworkManager:
 
         cleaned = dict(message)
         cleaned.pop("_seq", None)
-        if not isinstance(cleaned.get("type"), str):
+        message_type = cleaned.get("type")
+        if not isinstance(message_type, str):
             return
+
+        if message_type in self._LATEST_ONLY_MESSAGES:
+            with self._latest_messages_lock:
+                self._latest_messages[message_type] = cleaned
+            return
+
         self.message_queue.put(cleaned)
 
     def get_messages(self) -> list[dict[str, Any]]:
@@ -267,6 +278,19 @@ class NetworkManager:
                 messages.append(self.message_queue.get_nowait())
             except queue.Empty:
                 break
+
+        with self._latest_messages_lock:
+            latest_input = self._latest_messages.pop("input_state", None)
+            latest_snapshot = self._latest_messages.pop("snapshot", None)
+            latest_world = self._latest_messages.pop("world_snapshot", None)
+
+        if latest_input is not None:
+            messages.append(latest_input)
+        if latest_snapshot is not None:
+            messages.append(latest_snapshot)
+        if latest_world is not None:
+            messages.append(latest_world)
+
         return messages
 
     def _start_receive_loop(self) -> None:
@@ -425,6 +449,8 @@ class NetworkManager:
         if self._send_thread and self._send_thread.is_alive():
             self._send_thread.join(timeout=1.0)
         self._udp_last_recv_seq.clear()
+        with self._latest_messages_lock:
+            self._latest_messages.clear()
 
 
 class NetworkHost(NetworkManager):
