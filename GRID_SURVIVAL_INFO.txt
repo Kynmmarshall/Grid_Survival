@@ -1,0 +1,40 @@
+GRID SURVIVAL // QUICK INSTALL BRIEF
+===================================
+
+Welcome to Grid Survival, a pulse-pounding arena where the floor literally vanishes beneath your feet. Gear up, grab a friend, and prove you can ride out the collapse.
+
+MENU FLOW
+---------
+- ENTER / LEFT CLICK: advance through title, mode, and character select screens.
+- ESC / BACK BUTTON: return to the previous screen at any time.
+- NUMBER KEYS (1-3): instantly choose Solo vs AI, Local Multiplayer, or Online placeholders on the mode screen.
+- CHARACTER SELECT: hover or use arrow/WASD keys to preview heroes, ENTER/SPACE to lock in, BACKSPACE to undo.
+
+IN-GAME CONTROLS
+----------------
+SOLO OR PLAYER ONE
+- Move: W / A / S / D
+- Jump: SPACE
+- Power Ability: Q (when Power Orbs are charged)
+- Pause / Exit Run: ESC
+
+PLAYER TWO (LOCAL MULTIPLAYER)
+- Move: Arrow Keys
+- Jump: Right SHIFT
+- Power Ability: /
+- Pause / Exit Run: ESC (either player)
+
+GAMEPLAY ESSENTIALS
+-------------------
+- Survive on the shrinking grid by reading tile warnings and keeping your footing.
+- Collect Power Orbs to unlock your character's signature ability; unleash it with the Power key for clutch saves.
+- Shields block a single hazard hit; watch the edge glow to know when it is about to expire.
+- Click the speaker icon in the HUD to toggle music mid-run.
+
+WHY PLAY NOW
+------------
+- Hand-painted arenas, animated water, and cinematic shield effects keep every fall spectacular.
+- Four distinct heroes (Caveman, Giant Goblin, Ninja, Viking Leader) with bespoke animations and powers.
+- Drop-in local co-op lets you challenge a friend instantly with no setup, just press START and fight the collapse.
+
+Need help or have feedback? Let us know how long you lasted before the grid gave way!

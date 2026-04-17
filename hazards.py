@@ -4,9 +4,11 @@ Implements bullets and moving traps that threaten players.
 """
 
 import random
+import math
 import pygame
 from typing import List, Tuple, Optional
 
+from audio import get_audio
 from collision_manager import CollisionManager
 from settings import WINDOW_SIZE
 
@@ -49,11 +51,13 @@ class Bullet:
             self.radius * 2
         )
     
-    def check_collision(self, player_rect: pygame.Rect) -> bool:
+    def check_collision(self, player) -> bool:
         """Check if bullet hits player."""
         if not self.active:
             return False
-        return self.get_rect().colliderect(player_rect)
+        # Use player's tighter hitbox if available
+        hitbox = player.get_hitbox() if hasattr(player, 'get_hitbox') else player.rect
+        return self.get_rect().colliderect(hitbox)
 
 
 class MovingTrap:
@@ -113,11 +117,87 @@ class MovingTrap:
             self.size
         )
     
-    def check_collision(self, player_rect: pygame.Rect) -> bool:
+    def check_collision(self, player) -> bool:
         """Check if trap hits player."""
         if not self.active:
             return False
-        return self.get_rect().colliderect(player_rect)
+        # Use player's tighter hitbox if available
+        hitbox = player.get_hitbox() if hasattr(player, 'get_hitbox') else player.rect
+        return self.get_rect().colliderect(hitbox)
+
+
+class Explosion:
+    """Particle explosion effect with punchy visuals."""
+    
+    def __init__(self, position: Tuple[float, float], color: Tuple[int, int, int] = (255, 100, 50)):
+        self.particles: List[dict] = []
+        self.position = pygame.Vector2(position)
+        self.ring_radius = 5.0
+        self.ring_alpha = 255.0
+        self.active = True
+        
+        colors = [
+            (255, 50, 50),   # Red
+            (255, 140, 0),   # Orange
+            (255, 255, 100), # Yellow
+            (100, 100, 100)  # Smoke Grey
+        ]
+        
+        for _ in range(40):
+            angle = random.uniform(0, 360) 
+            speed = random.uniform(150, 450)  # Much faster initial burst
+            rad = math.radians(angle)
+            velocity = pygame.Vector2(math.cos(rad), math.sin(rad)) * speed
+            
+            self.particles.append({
+                'pos': pygame.Vector2(position),
+                'vel': velocity,
+                'radius': random.uniform(4, 10),
+                'life': 1.0,
+                'max_life': 1.0,
+                'decay': random.uniform(1.5, 4.0),
+                'color': random.choice(colors),
+                'drag': random.uniform(0.01, 0.1)  # Very strong drag
+            })
+
+    def update(self, dt: float) -> bool:
+        """Update particles. Returns True if explosion is still active."""
+        particle_active = False
+        
+        # Expand ring faster
+        if self.ring_alpha > 0:
+            self.ring_radius += 600 * dt
+            self.ring_alpha -= 900 * dt
+            if self.ring_alpha < 0:
+                self.ring_alpha = 0
+            
+        for p in self.particles:
+            p['life'] -= dt * p['decay']
+            if p['life'] > 0:
+                # Strong drag effect: slow down rapidly
+                p['vel'] *= math.pow(p['drag'], dt)
+                p['pos'] += p['vel'] * dt
+                particle_active = True
+        
+        return particle_active or self.ring_alpha > 0
+
+    def draw(self, surface: pygame.Surface):
+        # Draw expanding ring (shockwave)
+        if self.ring_alpha > 0:
+             # Draw a white circle with alpha
+            surf = pygame.Surface((int(self.ring_radius * 2) + 2, int(self.ring_radius * 2) + 2), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (255, 255, 255, int(self.ring_alpha)), 
+                             (int(self.ring_radius), int(self.ring_radius)), int(self.ring_radius), 3)
+            surface.blit(surf, (self.position.x - self.ring_radius, self.position.y - self.ring_radius))
+
+        # Draw particles
+        for p in self.particles:
+            if p['life'] > 0:
+                # Fade out size and alpha
+                life_ratio = p['life'] / p['max_life']
+                radius = int(p['radius'] * life_ratio)
+                if radius > 1:
+                    pygame.draw.circle(surface, p['color'], (int(p['pos'].x), int(p['pos'].y)), radius)
 
 
 class HazardManager:
@@ -126,6 +206,7 @@ class HazardManager:
     def __init__(self, collision_manager: Optional[CollisionManager] = None):
         self.bullets: List[Bullet] = []
         self.traps: List[MovingTrap] = []
+        self.explosions: List[Explosion] = []
         self.time_elapsed = 0.0
         self.bullet_spawn_timer = 0.0
         self.trap_spawn_timer = 0.0
@@ -140,6 +221,12 @@ class HazardManager:
         # Hazard activation threshold
         self.hazard_start_time = 15.0  # Start spawning after 15 seconds
         self.collision_manager = collision_manager
+
+        # Preload explosion sound
+        try:
+            get_audio().preload_sfx("explosions.mp3")
+        except Exception as e:
+            print(f"Warning: Could not preload explosion sound: {e}")
     
     def update(self, dt: float):
         """Update all hazards and spawn new ones."""
@@ -157,6 +244,9 @@ class HazardManager:
         
         for trap in self.traps:
             trap.update(dt)
+
+        # Update explosions
+        self.explosions = [e for e in self.explosions if e.update(dt)]
         
         # Spawn new bullets
         self.bullet_spawn_timer += dt
@@ -220,28 +310,59 @@ class HazardManager:
             bullet.draw(surface)
         for trap in self.traps:
             trap.draw(surface)
+        for explosion in self.explosions:
+            explosion.draw(surface)
     
     def check_player_collision(self, player) -> bool:
         """Check if any hazard hits the player."""
+        if getattr(player, "_immune_to_hazards", False):
+            return False
+
+        hit = False
+        
         for bullet in self.bullets:
+            bullet_hit = False
             if self.collision_manager:
                 if self.collision_manager.bullet_hits_player(bullet, player):
-                    return True
+                    bullet_hit = True
             else:
-                if bullet.check_collision(player.rect):
-                    bullet.active = False
-                    return True
+                if bullet.check_collision(player):
+                    bullet_hit = True
+            
+            if bullet_hit:
+                bullet.active = False
+                self.explosions.append(Explosion((bullet.position.x, bullet.position.y), bullet.color))
+                get_audio().play_sfx("explosions.mp3")
+                hit = True
         
         for trap in self.traps:
-            if trap.check_collision(player.rect):
-                return True
+            if trap.check_collision(player):
+                self.explosions.append(Explosion((trap.position.x, trap.position.y), trap.color))
+                get_audio().play_sfx("explosions.mp3")
+                hit = True
         
-        return False
+        return hit
     
+    def is_position_safe(self, position, radius: float = 24) -> bool:
+        """Return True if no active hazard overlaps the given point."""
+        rect = pygame.Rect(0, 0, int(radius * 2), int(radius * 2))
+        rect.center = (int(position[0]), int(position[1]))
+
+        for bullet in self.bullets:
+            if bullet.active and rect.colliderect(bullet.get_rect()):
+                return False
+
+        for trap in self.traps:
+            if rect.colliderect(trap.get_rect()):
+                return False
+
+        return True
+
     def reset(self):
         """Reset all hazards."""
         self.bullets.clear()
         self.traps.clear()
+        self.explosions.clear()
         self.time_elapsed = 0.0
         self.bullet_spawn_timer = 0.0
         self.trap_spawn_timer = 0.0
@@ -249,3 +370,104 @@ class HazardManager:
         self.trap_spawn_interval = 8.0
         if self.collision_manager:
             self.collision_manager.reset_caches()
+
+    def snapshot_state(self) -> dict:
+        """Serialize host hazard state for LAN snapshot sync."""
+        return {
+            "time_elapsed": float(self.time_elapsed),
+            "bullet_spawn_timer": float(self.bullet_spawn_timer),
+            "trap_spawn_timer": float(self.trap_spawn_timer),
+            "bullet_spawn_interval": float(self.bullet_spawn_interval),
+            "trap_spawn_interval": float(self.trap_spawn_interval),
+            "bullets": [
+                {
+                    "x": float(bullet.position.x),
+                    "y": float(bullet.position.y),
+                    "dx": float(bullet.direction.x),
+                    "dy": float(bullet.direction.y),
+                    "speed": float(bullet.speed),
+                    "active": bool(bullet.active),
+                }
+                for bullet in self.bullets
+            ],
+            "traps": [
+                {
+                    "start_x": float(trap.start_pos.x),
+                    "start_y": float(trap.start_pos.y),
+                    "end_x": float(trap.end_pos.x),
+                    "end_y": float(trap.end_pos.y),
+                    "x": float(trap.position.x),
+                    "y": float(trap.position.y),
+                    "speed": float(trap.speed),
+                    "moving_to_end": bool(trap.moving_to_end),
+                    "dx": float(trap.direction.x),
+                    "dy": float(trap.direction.y),
+                    "active": bool(trap.active),
+                }
+                for trap in self.traps
+            ],
+        }
+
+    def apply_snapshot(self, snapshot: dict | None) -> None:
+        """Apply a host hazard snapshot on the LAN client."""
+        if not isinstance(snapshot, dict):
+            return
+
+        self.time_elapsed = float(snapshot.get("time_elapsed", self.time_elapsed))
+        self.bullet_spawn_timer = float(
+            snapshot.get("bullet_spawn_timer", self.bullet_spawn_timer)
+        )
+        self.trap_spawn_timer = float(snapshot.get("trap_spawn_timer", self.trap_spawn_timer))
+        self.bullet_spawn_interval = float(
+            snapshot.get("bullet_spawn_interval", self.bullet_spawn_interval)
+        )
+        self.trap_spawn_interval = float(
+            snapshot.get("trap_spawn_interval", self.trap_spawn_interval)
+        )
+
+        self.bullets = []
+        for bullet_state in snapshot.get("bullets", []) or []:
+            if not isinstance(bullet_state, dict):
+                continue
+            bullet = Bullet(
+                (
+                    float(bullet_state.get("x", 0.0)),
+                    float(bullet_state.get("y", 0.0)),
+                ),
+                pygame.Vector2(
+                    float(bullet_state.get("dx", 1.0)),
+                    float(bullet_state.get("dy", 0.0)),
+                ),
+                speed=float(bullet_state.get("speed", 300.0)),
+            )
+            bullet.active = bool(bullet_state.get("active", True))
+            self.bullets.append(bullet)
+
+        self.traps = []
+        for trap_state in snapshot.get("traps", []) or []:
+            if not isinstance(trap_state, dict):
+                continue
+            trap = MovingTrap(
+                (
+                    float(trap_state.get("start_x", 0.0)),
+                    float(trap_state.get("start_y", 0.0)),
+                ),
+                (
+                    float(trap_state.get("end_x", 0.0)),
+                    float(trap_state.get("end_y", 0.0)),
+                ),
+                speed=float(trap_state.get("speed", 150.0)),
+            )
+            trap.position = pygame.Vector2(
+                float(trap_state.get("x", trap.position.x)),
+                float(trap_state.get("y", trap.position.y)),
+            )
+            trap.moving_to_end = bool(trap_state.get("moving_to_end", trap.moving_to_end))
+            trap.direction = pygame.Vector2(
+                float(trap_state.get("dx", trap.direction.x)),
+                float(trap_state.get("dy", trap.direction.y)),
+            )
+            trap.active = bool(trap_state.get("active", True))
+            self.traps.append(trap)
+
+        self.explosions.clear()
