@@ -3,7 +3,7 @@ venv/
 .venv/
 env/
 ENV/
-
+custom_controls.json
 # Python cache
 __pycache__/
 *.py[cod]

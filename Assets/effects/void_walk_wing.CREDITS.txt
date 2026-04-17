@@ -1,0 +1,5 @@
+Source: https://opengameart.org/content/white-wing-32x32 (file: wing.png)
+License: CC0 1.0 (Public Domain dedication) — as listed on the asset page.
+Downloaded: 2026-04-13
+
+Used in-game as the "Void Walk" wings overlay.

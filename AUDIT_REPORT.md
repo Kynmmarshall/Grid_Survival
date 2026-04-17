@@ -23,6 +23,18 @@ This report documents a comprehensive audit of the Grid Survival codebase agains
 
 ---
 
+## CRITICAL FIXES (March 20, 2026)
+
+### 🐛 Bug Fixes & Adjustments
+
+| Issue | Status | Fix Implementation | Notes |
+|-------|--------|-------------------|-------|
+| **Player Freezes on Death** | ✅ Fixed | [`game.py`](game.py), [`player.py`](player.py) | Game loop now continues updating players in `death` state until animation finishes. Added explicit `die()` method. |
+| **Invisible Explosions** | ✅ Fixed | [`hazards.py`](hazards.py) | Fixed `Explosion.draw` logic to correctly render shockwaves and particles without performance degradation. |
+| **Unfair Hitboxes** | ✅ Fixed | [`player.py`](player.py) | Implemented `get_hitbox()` to shrink collision rect by 40%, matching visual sprite size. |
+| **Hazard Collision Logic** | ✅ Updated | [`hazards.py`](hazards.py) | Hazards now query `player.get_hitbox()` for precise collision detection. |
+
+
 ## WEEK 1: CORE PROTOTYPE
 
 ### ✅ Already Working (Verified)
@@ -83,6 +95,21 @@ This report documents a comprehensive audit of the Grid Survival codebase agains
 - **Hazards:** Created [`hazards.py`](hazards.py) with `Bullet`, `MovingTrap`, and `HazardManager` classes
 - **Difficulty:** Both tile system and hazards scale difficulty over time (spawn rate increases)
 - **UI:** Created [`ui.py`](ui.py) with `GameHUD`, `EliminationScreen`, and `VictoryScreen` classes
+
+---
+
+## WEEK 4: POLISH & REFINEMENT (LATE MARCH)
+
+### ✅ Implemented & Verified
+
+| Feature | Status | Location | Notes |
+|---------|--------|----------|-------|
+| **Z-Axis Physics** | ✅ Working | [`player.py`](player.py) | 2.5D jumping (up/down z-axis) with shadow rendering |
+| **Physics Tuning** | ✅ Working | [`settings.py`](settings.py) | Increased gravity/velocity for weightier feel |
+| **Color Palette** | ✅ Working | [`settings.py`](settings.py) | Centralized dictionary for unified theme |
+| **Audio Mute** | ✅ Working | [`audio.py`](audio.py) | Toggle mute logic + HUD button integration |
+| **Explosion FX** | ✅ Working | [`hazards.py`](hazards.py) | Shockwave rings, particle drag, size fading |
+| **Game Over Stats** | ✅ Working | [`ui.py`](ui.py) | Display Score and Time on death screen |
 
 ---
 
