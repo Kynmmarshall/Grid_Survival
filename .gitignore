@@ -15,7 +15,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
+player_accounts.db
 # IDE / editor
 .vscode/
 .idea/
