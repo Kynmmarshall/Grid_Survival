@@ -1,6 +1,702 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <map version="1.10" tiledversion="1.11.2" orientation="isometric" renderorder="right-down" width="24" height="24" tilewidth="128" tileheight="64" infinite="0" nextlayerid="2" nextobjectid="1">
- <tileset firstgid="1" source="../../tiles/tilesfloorbig.tsx"/>
+ <tileset firstgid="1" name="tilesfloorbig" tilewidth="128" tileheight="128" tilecount="231" columns="0">
+  <grid orientation="orthogonal" width="1" height="1"/>
+  <tile id="0">
+   <image source="../Blocks/1.png" width="128" height="128"/>
+  </tile>
+  <tile id="1">
+   <image source="../Blocks/2.png" width="128" height="128"/>
+  </tile>
+  <tile id="2">
+   <image source="../Blocks/3.png" width="128" height="128"/>
+  </tile>
+  <tile id="3">
+   <image source="../Blocks/4.png" width="128" height="128"/>
+  </tile>
+  <tile id="4">
+   <image source="../Blocks/5.png" width="128" height="128"/>
+  </tile>
+  <tile id="5">
+   <image source="../Blocks/6.png" width="128" height="128"/>
+  </tile>
+  <tile id="6">
+   <image source="../Blocks/7.png" width="128" height="128"/>
+  </tile>
+  <tile id="7">
+   <image source="../Blocks/8.png" width="128" height="128"/>
+  </tile>
+  <tile id="8">
+   <image source="../Blocks/9.png" width="128" height="128"/>
+  </tile>
+  <tile id="9">
+   <image source="../Blocks/10.png" width="128" height="128"/>
+  </tile>
+  <tile id="10">
+   <image source="../Blocks/11.png" width="128" height="128"/>
+  </tile>
+  <tile id="11">
+   <image source="../Blocks/12.png" width="128" height="128"/>
+  </tile>
+  <tile id="12">
+   <image source="../Blocks/13.png" width="128" height="128"/>
+  </tile>
+  <tile id="13">
+   <image source="../Blocks/14.png" width="128" height="128"/>
+  </tile>
+  <tile id="14">
+   <image source="../Blocks/15.png" width="128" height="128"/>
+  </tile>
+  <tile id="15">
+   <image source="../Blocks/16.png" width="128" height="128"/>
+  </tile>
+  <tile id="16">
+   <image source="../Blocks/17.png" width="128" height="128"/>
+  </tile>
+  <tile id="17">
+   <image source="../Blocks/18.png" width="128" height="128"/>
+  </tile>
+  <tile id="18">
+   <image source="../Blocks/19.png" width="128" height="128"/>
+  </tile>
+  <tile id="19">
+   <image source="../Blocks/20.png" width="128" height="128"/>
+  </tile>
+  <tile id="20">
+   <image source="../Blocks/21.png" width="128" height="128"/>
+  </tile>
+  <tile id="21">
+   <image source="../Blocks/22.png" width="128" height="128"/>
+  </tile>
+  <tile id="22">
+   <image source="../Blocks/23.png" width="128" height="128"/>
+  </tile>
+  <tile id="23">
+   <image source="../Blocks/24.png" width="128" height="128"/>
+  </tile>
+  <tile id="24">
+   <image source="../Blocks/25.png" width="128" height="128"/>
+  </tile>
+  <tile id="25">
+   <image source="../Blocks/26.png" width="128" height="128"/>
+  </tile>
+  <tile id="26">
+   <image source="../Blocks/27.png" width="128" height="128"/>
+  </tile>
+  <tile id="27">
+   <image source="../Blocks/28.png" width="128" height="128"/>
+  </tile>
+  <tile id="28">
+   <image source="../Blocks/29.png" width="128" height="128"/>
+  </tile>
+  <tile id="29">
+   <image source="../Blocks/30.png" width="128" height="128"/>
+  </tile>
+  <tile id="30">
+   <image source="../Blocks/31.png" width="128" height="128"/>
+  </tile>
+  <tile id="31">
+   <image source="../Blocks/32.png" width="128" height="128"/>
+  </tile>
+  <tile id="32">
+   <image source="../Blocks/33.png" width="128" height="128"/>
+  </tile>
+  <tile id="33">
+   <image source="../Blocks/34.png" width="128" height="128"/>
+  </tile>
+  <tile id="34">
+   <image source="../Blocks/35.png" width="128" height="128"/>
+  </tile>
+  <tile id="35">
+   <image source="../Blocks/36.png" width="128" height="128"/>
+  </tile>
+  <tile id="36">
+   <image source="../Blocks/37.png" width="128" height="128"/>
+  </tile>
+  <tile id="37">
+   <image source="../Blocks/38.png" width="128" height="128"/>
+  </tile>
+  <tile id="38">
+   <image source="../Blocks/39.png" width="128" height="128"/>
+  </tile>
+  <tile id="39">
+   <image source="../Blocks/40.png" width="128" height="128"/>
+  </tile>
+  <tile id="40">
+   <image source="../Blocks/41.png" width="128" height="128"/>
+  </tile>
+  <tile id="41">
+   <image source="../Blocks/42.png" width="128" height="128"/>
+  </tile>
+  <tile id="42">
+   <image source="../Blocks/43.png" width="128" height="128"/>
+  </tile>
+  <tile id="43">
+   <image source="../Blocks/44.png" width="128" height="128"/>
+  </tile>
+  <tile id="44">
+   <image source="../Blocks/45.png" width="128" height="128"/>
+  </tile>
+  <tile id="45">
+   <image source="../Blocks/46.png" width="128" height="128"/>
+  </tile>
+  <tile id="46">
+   <image source="../Blocks/47.png" width="128" height="128"/>
+  </tile>
+  <tile id="47">
+   <image source="../Blocks/48.png" width="128" height="128"/>
+  </tile>
+  <tile id="48">
+   <image source="../Blocks/49.png" width="128" height="128"/>
+  </tile>
+  <tile id="49">
+   <image source="../Blocks/50.png" width="128" height="128"/>
+  </tile>
+  <tile id="50">
+   <image source="../Blocks/51.png" width="128" height="128"/>
+  </tile>
+  <tile id="51">
+   <image source="../Blocks/52.png" width="128" height="128"/>
+  </tile>
+  <tile id="52">
+   <image source="../Blocks/53.png" width="128" height="128"/>
+  </tile>
+  <tile id="53">
+   <image source="../Blocks/54.png" width="128" height="128"/>
+  </tile>
+  <tile id="54">
+   <image source="../Blocks/55.png" width="128" height="128"/>
+  </tile>
+  <tile id="55">
+   <image source="../Blocks/56.png" width="128" height="128"/>
+  </tile>
+  <tile id="56">
+   <image source="../Blocks/57.png" width="128" height="128"/>
+  </tile>
+  <tile id="57">
+   <image source="../Blocks/58.png" width="128" height="128"/>
+  </tile>
+  <tile id="58">
+   <image source="../Blocks/59.png" width="128" height="128"/>
+  </tile>
+  <tile id="59">
+   <image source="../Blocks/60.png" width="128" height="128"/>
+  </tile>
+  <tile id="60">
+   <image source="../Blocks/61.png" width="128" height="128"/>
+  </tile>
+  <tile id="61">
+   <image source="../Blocks/62.png" width="128" height="128"/>
+  </tile>
+  <tile id="62">
+   <image source="../Blocks/63.png" width="128" height="128"/>
+  </tile>
+  <tile id="63">
+   <image source="../Blocks/64.png" width="128" height="128"/>
+  </tile>
+  <tile id="64">
+   <image source="../Blocks/65.png" width="128" height="128"/>
+  </tile>
+  <tile id="65">
+   <image source="../Blocks/66.png" width="128" height="128"/>
+  </tile>
+  <tile id="66">
+   <image source="../Blocks/67.png" width="128" height="128"/>
+  </tile>
+  <tile id="67">
+   <image source="../Blocks/68.png" width="128" height="128"/>
+  </tile>
+  <tile id="68">
+   <image source="../Blocks/69.png" width="128" height="128"/>
+  </tile>
+  <tile id="69">
+   <image source="../Blocks/70.png" width="128" height="128"/>
+  </tile>
+  <tile id="70">
+   <image source="../Blocks/71.png" width="128" height="128"/>
+  </tile>
+  <tile id="71">
+   <image source="../Blocks/72.png" width="128" height="128"/>
+  </tile>
+  <tile id="72">
+   <image source="../Blocks/73.png" width="128" height="128"/>
+  </tile>
+  <tile id="73">
+   <image source="../Blocks/74.png" width="128" height="128"/>
+  </tile>
+  <tile id="74">
+   <image source="../Blocks/75.png" width="128" height="128"/>
+  </tile>
+  <tile id="75">
+   <image source="../Blocks/76.png" width="128" height="128"/>
+  </tile>
+  <tile id="76">
+   <image source="../Blocks/77.png" width="128" height="128"/>
+  </tile>
+  <tile id="77">
+   <image source="../Blocks/78.png" width="128" height="128"/>
+  </tile>
+  <tile id="78">
+   <image source="../Blocks/79.png" width="128" height="128"/>
+  </tile>
+  <tile id="79">
+   <image source="../Blocks/80.png" width="128" height="128"/>
+  </tile>
+  <tile id="80">
+   <image source="../Blocks/81.png" width="128" height="128"/>
+  </tile>
+  <tile id="81">
+   <image source="../Blocks/82.png" width="128" height="128"/>
+  </tile>
+  <tile id="82">
+   <image source="../Blocks/83.png" width="128" height="128"/>
+  </tile>
+  <tile id="83">
+   <image source="../Blocks/84.png" width="128" height="128"/>
+  </tile>
+  <tile id="84">
+   <image source="../Blocks/85.png" width="128" height="128"/>
+  </tile>
+  <tile id="85">
+   <image source="../Blocks/86.png" width="128" height="128"/>
+  </tile>
+  <tile id="86">
+   <image source="../Blocks/87.png" width="128" height="128"/>
+  </tile>
+  <tile id="87">
+   <image source="../Blocks/88.png" width="128" height="128"/>
+  </tile>
+  <tile id="88">
+   <image source="../Blocks/89.png" width="128" height="128"/>
+  </tile>
+  <tile id="89">
+   <image source="../Blocks/90.png" width="128" height="128"/>
+  </tile>
+  <tile id="90">
+   <image source="../Blocks/91.png" width="128" height="128"/>
+  </tile>
+  <tile id="91">
+   <image source="../Blocks/92.png" width="128" height="128"/>
+  </tile>
+  <tile id="92">
+   <image source="../Blocks/93.png" width="128" height="128"/>
+  </tile>
+  <tile id="93">
+   <image source="../Blocks/94.png" width="128" height="128"/>
+  </tile>
+  <tile id="94">
+   <image source="../Blocks/95.png" width="128" height="128"/>
+  </tile>
+  <tile id="95">
+   <image source="../Blocks/96.png" width="128" height="128"/>
+  </tile>
+  <tile id="96">
+   <image source="../Blocks/97.png" width="128" height="128"/>
+  </tile>
+  <tile id="97">
+   <image source="../Blocks/98.png" width="128" height="128"/>
+  </tile>
+  <tile id="98">
+   <image source="../Blocks/99.png" width="128" height="128"/>
+  </tile>
+  <tile id="99">
+   <image source="../Blocks/100.png" width="128" height="128"/>
+  </tile>
+  <tile id="100">
+   <image source="../Blocks/101.png" width="128" height="128"/>
+  </tile>
+  <tile id="101">
+   <image source="../Blocks/102.png" width="128" height="128"/>
+  </tile>
+  <tile id="102">
+   <image source="../Blocks/103.png" width="128" height="128"/>
+  </tile>
+  <tile id="103">
+   <image source="../Blocks/104.png" width="128" height="128"/>
+  </tile>
+  <tile id="104">
+   <image source="../Blocks/105.png" width="128" height="128"/>
+  </tile>
+  <tile id="105">
+   <image source="../Blocks/106.png" width="128" height="128"/>
+  </tile>
+  <tile id="106">
+   <image source="../Blocks/107.png" width="128" height="128"/>
+  </tile>
+  <tile id="107">
+   <image source="../Blocks/108.png" width="128" height="128"/>
+  </tile>
+  <tile id="108">
+   <image source="../Blocks/109.png" width="128" height="128"/>
+  </tile>
+  <tile id="109">
+   <image source="../Blocks/110.png" width="128" height="128"/>
+  </tile>
+  <tile id="110">
+   <image source="../Blocks/111.png" width="128" height="128"/>
+  </tile>
+  <tile id="111">
+   <image source="../Blocks/112.png" width="128" height="128"/>
+  </tile>
+  <tile id="112">
+   <image source="../Blocks/113.png" width="128" height="128"/>
+  </tile>
+  <tile id="113">
+   <image source="../Blocks/114.png" width="128" height="128"/>
+  </tile>
+  <tile id="114">
+   <image source="../Blocks/115.png" width="128" height="128"/>
+  </tile>
+  <tile id="115">
+   <image source="../Blocks/116.png" width="128" height="128"/>
+  </tile>
+  <tile id="116">
+   <image source="../Blocks/117.png" width="128" height="128"/>
+  </tile>
+  <tile id="117">
+   <image source="../Blocks/118.png" width="128" height="128"/>
+  </tile>
+  <tile id="118">
+   <image source="../Blocks/119.png" width="128" height="128"/>
+  </tile>
+  <tile id="119">
+   <image source="../Blocks/120.png" width="128" height="128"/>
+  </tile>
+  <tile id="120">
+   <image source="../Blocks/121.png" width="128" height="128"/>
+  </tile>
+  <tile id="121">
+   <image source="../Blocks/122.png" width="128" height="128"/>
+  </tile>
+  <tile id="122">
+   <image source="../Blocks/123.png" width="128" height="128"/>
+  </tile>
+  <tile id="123">
+   <image source="../Blocks/124.png" width="128" height="128"/>
+  </tile>
+  <tile id="124">
+   <image source="../Blocks/125.png" width="128" height="128"/>
+  </tile>
+  <tile id="125">
+   <image source="../Blocks/126.png" width="128" height="128"/>
+  </tile>
+  <tile id="126">
+   <image source="../Blocks/127.png" width="128" height="128"/>
+  </tile>
+  <tile id="127">
+   <image source="../Blocks/128.png" width="128" height="128"/>
+  </tile>
+  <tile id="128">
+   <image source="../Blocks/129.png" width="128" height="128"/>
+  </tile>
+  <tile id="129">
+   <image source="../Blocks/130.png" width="128" height="128"/>
+  </tile>
+  <tile id="130">
+   <image source="../Blocks/131.png" width="128" height="128"/>
+  </tile>
+  <tile id="131">
+   <image source="../Blocks/132.png" width="128" height="128"/>
+  </tile>
+  <tile id="132">
+   <image source="../Blocks/133.png" width="128" height="128"/>
+  </tile>
+  <tile id="133">
+   <image source="../Blocks/134.png" width="128" height="128"/>
+  </tile>
+  <tile id="134">
+   <image source="../Blocks/135.png" width="128" height="128"/>
+  </tile>
+  <tile id="135">
+   <image source="../Blocks/136.png" width="128" height="128"/>
+  </tile>
+  <tile id="136">
+   <image source="../Blocks/137.png" width="128" height="128"/>
+  </tile>
+  <tile id="137">
+   <image source="../Blocks/138.png" width="128" height="128"/>
+  </tile>
+  <tile id="138">
+   <image source="../Blocks/139.png" width="128" height="128"/>
+  </tile>
+  <tile id="139">
+   <image source="../Blocks/140.png" width="128" height="128"/>
+  </tile>
+  <tile id="140">
+   <image source="../Blocks/141.png" width="128" height="128"/>
+  </tile>
+  <tile id="141">
+   <image source="../Blocks/142.png" width="128" height="128"/>
+  </tile>
+  <tile id="142">
+   <image source="../Blocks/143.png" width="128" height="128"/>
+  </tile>
+  <tile id="143">
+   <image source="../Blocks/144.png" width="128" height="128"/>
+  </tile>
+  <tile id="144">
+   <image source="../Blocks/145.png" width="128" height="128"/>
+  </tile>
+  <tile id="145">
+   <image source="../Blocks/146.png" width="128" height="128"/>
+  </tile>
+  <tile id="146">
+   <image source="../Blocks/147.png" width="128" height="128"/>
+  </tile>
+  <tile id="147">
+   <image source="../Blocks/148.png" width="128" height="128"/>
+  </tile>
+  <tile id="148">
+   <image source="../Blocks/149.png" width="128" height="128"/>
+  </tile>
+  <tile id="149">
+   <image source="../Blocks/150.png" width="128" height="128"/>
+  </tile>
+  <tile id="150">
+   <image source="../Blocks/151.png" width="128" height="128"/>
+  </tile>
+  <tile id="151">
+   <image source="../Blocks/152.png" width="128" height="128"/>
+  </tile>
+  <tile id="152">
+   <image source="../Blocks/153.png" width="128" height="128"/>
+  </tile>
+  <tile id="153">
+   <image source="../Blocks/154.png" width="128" height="128"/>
+  </tile>
+  <tile id="154">
+   <image source="../Blocks/155.png" width="128" height="128"/>
+  </tile>
+  <tile id="155">
+   <image source="../Blocks/156.png" width="128" height="128"/>
+  </tile>
+  <tile id="156">
+   <image source="../Blocks/157.png" width="128" height="128"/>
+  </tile>
+  <tile id="157">
+   <image source="../Blocks/158.png" width="128" height="128"/>
+  </tile>
+  <tile id="158">
+   <image source="../Blocks/159.png" width="128" height="128"/>
+  </tile>
+  <tile id="159">
+   <image source="../Blocks/160.png" width="128" height="128"/>
+  </tile>
+  <tile id="160">
+   <image source="../Blocks/161.png" width="128" height="128"/>
+  </tile>
+  <tile id="161">
+   <image source="../Blocks/162.png" width="128" height="128"/>
+  </tile>
+  <tile id="162">
+   <image source="../Blocks/163.png" width="128" height="128"/>
+  </tile>
+  <tile id="163">
+   <image source="../Blocks/164.png" width="128" height="128"/>
+  </tile>
+  <tile id="164">
+   <image source="../Blocks/165.png" width="128" height="128"/>
+  </tile>
+  <tile id="165">
+   <image source="../Blocks/166.png" width="128" height="128"/>
+  </tile>
+  <tile id="166">
+   <image source="../Blocks/167.png" width="128" height="128"/>
+  </tile>
+  <tile id="167">
+   <image source="../Blocks/168.png" width="128" height="128"/>
+  </tile>
+  <tile id="168">
+   <image source="../Blocks/169.png" width="128" height="128"/>
+  </tile>
+  <tile id="169">
+   <image source="../Blocks/170.png" width="128" height="128"/>
+  </tile>
+  <tile id="170">
+   <image source="../Blocks/171.png" width="128" height="128"/>
+  </tile>
+  <tile id="171">
+   <image source="../Blocks/172.png" width="128" height="128"/>
+  </tile>
+  <tile id="172">
+   <image source="../Blocks/173.png" width="128" height="128"/>
+  </tile>
+  <tile id="173">
+   <image source="../Blocks/174.png" width="128" height="128"/>
+  </tile>
+  <tile id="174">
+   <image source="../Blocks/175.png" width="128" height="128"/>
+  </tile>
+  <tile id="175">
+   <image source="../Blocks/176.png" width="128" height="128"/>
+  </tile>
+  <tile id="176">
+   <image source="../Blocks/177.png" width="128" height="128"/>
+  </tile>
+  <tile id="177">
+   <image source="../Blocks/178.png" width="128" height="128"/>
+  </tile>
+  <tile id="178">
+   <image source="../Blocks/179.png" width="128" height="128"/>
+  </tile>
+  <tile id="179">
+   <image source="../Blocks/180.png" width="128" height="128"/>
+  </tile>
+  <tile id="180">
+   <image source="../Blocks/181.png" width="128" height="128"/>
+  </tile>
+  <tile id="181">
+   <image source="../Blocks/182.png" width="128" height="128"/>
+  </tile>
+  <tile id="182">
+   <image source="../Blocks/183.png" width="128" height="128"/>
+  </tile>
+  <tile id="183">
+   <image source="../Blocks/184.png" width="128" height="128"/>
+  </tile>
+  <tile id="184">
+   <image source="../Blocks/185.png" width="128" height="128"/>
+  </tile>
+  <tile id="185">
+   <image source="../Blocks/186.png" width="128" height="128"/>
+  </tile>
+  <tile id="186">
+   <image source="../Blocks/187.png" width="128" height="128"/>
+  </tile>
+  <tile id="187">
+   <image source="../Blocks/188.png" width="128" height="128"/>
+  </tile>
+  <tile id="188">
+   <image source="../Blocks/189.png" width="128" height="128"/>
+  </tile>
+  <tile id="189">
+   <image source="../Blocks/190.png" width="128" height="128"/>
+  </tile>
+  <tile id="190">
+   <image source="../Blocks/191.png" width="128" height="128"/>
+  </tile>
+  <tile id="191">
+   <image source="../Blocks/192.png" width="128" height="128"/>
+  </tile>
+  <tile id="192">
+   <image source="../Blocks/193.png" width="128" height="128"/>
+  </tile>
+  <tile id="193">
+   <image source="../Blocks/194.png" width="128" height="128"/>
+  </tile>
+  <tile id="194">
+   <image source="../Blocks/195.png" width="128" height="128"/>
+  </tile>
+  <tile id="195">
+   <image source="../Blocks/196.png" width="128" height="128"/>
+  </tile>
+  <tile id="196">
+   <image source="../Blocks/197.png" width="128" height="128"/>
+  </tile>
+  <tile id="197">
+   <image source="../Blocks/198.png" width="128" height="128"/>
+  </tile>
+  <tile id="198">
+   <image source="../Blocks/199.png" width="128" height="128"/>
+  </tile>
+  <tile id="199">
+   <image source="../Blocks/200.png" width="128" height="128"/>
+  </tile>
+  <tile id="200">
+   <image source="../Blocks/201.png" width="128" height="128"/>
+  </tile>
+  <tile id="201">
+   <image source="../Blocks/202.png" width="128" height="128"/>
+  </tile>
+  <tile id="202">
+   <image source="../Blocks/203.png" width="128" height="128"/>
+  </tile>
+  <tile id="203">
+   <image source="../Blocks/204.png" width="128" height="128"/>
+  </tile>
+  <tile id="204">
+   <image source="../Blocks/205.png" width="128" height="128"/>
+  </tile>
+  <tile id="205">
+   <image source="../Blocks/206.png" width="128" height="128"/>
+  </tile>
+  <tile id="206">
+   <image source="../Blocks/207.png" width="128" height="128"/>
+  </tile>
+  <tile id="207">
+   <image source="../Blocks/208.png" width="128" height="128"/>
+  </tile>
+  <tile id="208">
+   <image source="../Blocks/209.png" width="128" height="128"/>
+  </tile>
+  <tile id="209">
+   <image source="../Blocks/210.png" width="128" height="128"/>
+  </tile>
+  <tile id="210">
+   <image source="../Blocks/211.png" width="128" height="128"/>
+  </tile>
+  <tile id="211">
+   <image source="../Blocks/212.png" width="128" height="128"/>
+  </tile>
+  <tile id="212">
+   <image source="../Blocks/213.png" width="128" height="128"/>
+  </tile>
+  <tile id="213">
+   <image source="../Blocks/214.png" width="128" height="128"/>
+  </tile>
+  <tile id="214">
+   <image source="../Blocks/215.png" width="128" height="128"/>
+  </tile>
+  <tile id="215">
+   <image source="../Blocks/216.png" width="128" height="128"/>
+  </tile>
+  <tile id="216">
+   <image source="../Blocks/217.png" width="128" height="128"/>
+  </tile>
+  <tile id="217">
+   <image source="../Blocks/218.png" width="128" height="128"/>
+  </tile>
+  <tile id="218">
+   <image source="../Blocks/219.png" width="128" height="128"/>
+  </tile>
+  <tile id="219">
+   <image source="../Blocks/220.png" width="128" height="128"/>
+  </tile>
+  <tile id="220">
+   <image source="../Blocks/221.png" width="128" height="128"/>
+  </tile>
+  <tile id="221">
+   <image source="../Blocks/222.png" width="128" height="128"/>
+  </tile>
+  <tile id="222">
+   <image source="../Blocks/223.png" width="128" height="128"/>
+  </tile>
+  <tile id="223">
+   <image source="../Blocks/224.png" width="128" height="128"/>
+  </tile>
+  <tile id="224">
+   <image source="../Blocks/225.png" width="128" height="128"/>
+  </tile>
+  <tile id="225">
+   <image source="../Blocks/226.png" width="128" height="128"/>
+  </tile>
+  <tile id="226">
+   <image source="../Blocks/227.png" width="128" height="128"/>
+  </tile>
+  <tile id="227">
+   <image source="../Blocks/228.png" width="128" height="128"/>
+  </tile>
+  <tile id="228">
+   <image source="../Blocks/229.png" width="128" height="128"/>
+  </tile>
+  <tile id="229">
+   <image source="../Blocks/230.png" width="128" height="128"/>
+  </tile>
+  <tile id="230">
+   <image source="../Blocks/0.png" width="128" height="128"/>
+  </tile>
+ </tileset>
+ <tileset firstgid="232" source="../../tiles/tilesfloorbig2.tsx"/>
  <layer id="1" name="Top" width="24" height="24">
   <data encoding="csv">
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -9,24 +705,24 @@
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-0,0,0,0,0,0,213,213,213,213,213,213,213,213,213,213,213,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,61,61,61,61,61,61,61,61,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,3,3,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,3,3,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,3,3,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,20,20,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,20,20,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,3,3,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,3,3,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,3,3,3,3,3,3,3,3,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,61,61,61,61,61,61,61,61,61,61,213,0,0,0,0,0,0,
-0,0,0,0,0,0,213,213,213,213,213,213,213,213,213,213,213,213,0,0,0,0,0,0,
+0,0,0,0,0,0,232,232,232,232,232,232,232,232,232,232,232,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,232,241,241,241,241,241,241,241,241,232,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,241,232,232,232,232,232,232,241,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,232,241,241,241,241,241,241,232,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,232,241,241,232,232,241,241,232,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,232,241,232,241,241,232,241,232,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,232,241,232,241,241,232,241,232,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,232,241,241,232,232,241,241,232,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,232,241,241,241,241,241,241,232,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,241,241,232,232,232,232,232,232,241,241,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,232,241,241,241,241,241,241,241,241,232,232,0,0,0,0,0,0,
+0,0,0,0,0,0,232,232,232,232,232,232,232,232,232,232,232,232,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  </data>
+</data>
  </layer>
 </map>

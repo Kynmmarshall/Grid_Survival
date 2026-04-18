@@ -381,6 +381,64 @@ class PacmanEnemyManager:
                 victims.append(victim)
         return victims
 
+    def advance_visuals(self, dt: float) -> None:
+        """Advance animation timers on clients between host snapshots."""
+        for enemy in self.enemies:
+            enemy._anim_time += dt
+
+    def snapshot_state(self) -> dict:
+        """Serialize enemy state for LAN snapshot sync."""
+        return {
+            "enemies": [
+                {
+                    "x": float(enemy.position.x),
+                    "y": float(enemy.position.y),
+                    "dir_x": float(enemy._direction.x),
+                    "dir_y": float(enemy._direction.y),
+                    "activation_timer": float(enemy._activation_timer),
+                    "anim_time": float(enemy._anim_time),
+                }
+                for enemy in self.enemies
+            ]
+        }
+
+    def apply_snapshot(self, snapshot: dict | None) -> None:
+        """Apply host enemy state on the LAN client."""
+        if not isinstance(snapshot, dict):
+            return
+        states = snapshot.get("enemies")
+        if not isinstance(states, list):
+            return
+
+        for enemy, state in zip(self.enemies, states):
+            if not isinstance(state, dict):
+                continue
+
+            target_position = pygame.Vector2(
+                float(state.get("x", enemy.position.x)),
+                float(state.get("y", enemy.position.y)),
+            )
+            delta = target_position - enemy.position
+            if delta.length() > 180.0:
+                enemy.position = target_position
+            else:
+                enemy.position += delta * 0.45
+            enemy.rect.center = (round(enemy.position.x), round(enemy.position.y))
+
+            direction = pygame.Vector2(
+                float(state.get("dir_x", enemy._direction.x)),
+                float(state.get("dir_y", enemy._direction.y)),
+            )
+            if direction.length_squared() > 0:
+                enemy._direction = direction.normalize()
+                enemy._desired_direction = enemy._direction.copy()
+
+            enemy._activation_timer = max(
+                0.0,
+                float(state.get("activation_timer", enemy._activation_timer)),
+            )
+            enemy._anim_time = float(state.get("anim_time", enemy._anim_time))
+
     def draw(self, surface: pygame.Surface):
         for enemy in sorted(self.enemies, key=lambda enemy: enemy.position.y):
             enemy.draw(surface)

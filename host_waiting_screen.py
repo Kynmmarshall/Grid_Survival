@@ -4,7 +4,7 @@ import sys
 import pygame
 
 from lan_prompts import draw_lan_backdrop
-from scenes.common import _draw_rounded_rect, _load_font
+from scenes.common import SceneAudioOverlay, _draw_rounded_rect, _load_font
 from settings import (
     FONT_PATH_BODY,
     FONT_PATH_HEADING,
@@ -19,6 +19,7 @@ def _draw_waiting_panel(
     *,
     accent=(180, 80, 255),
     success=False,
+    audio_overlay: SceneAudioOverlay | None = None,
 ):
     width, height = WINDOW_SIZE
     font_title = _load_font(FONT_PATH_HEADING, 34, bold=True)
@@ -54,23 +55,75 @@ def _draw_waiting_panel(
         screen.blit(surf, surf.get_rect(center=(panel.centerx, y)))
         y += 40 if idx == 0 else 30
 
+    if audio_overlay is not None:
+        audio_overlay.draw(screen)
+
     pygame.display.flip()
 
 
-def host_waiting_screen(screen, clock, host_ip, network):
-    """Wait for a LAN client while keeping the host UI responsive."""
+def host_waiting_screen(
+    screen,
+    clock,
+    host_ip: str,
+    network,
+    public_ip=None,
+    upnp_status=None,
+):
+    """Wait for a LAN or internet client while keeping the host UI responsive.
+
+    Parameters
+    ----------
+    host_ip:
+        The machine's LAN/local IP address.
+    network:
+        The :class:`~network.NetworkHost` instance.
+    public_ip:
+        Either a ``str | None`` value **or** a zero-argument callable that
+        returns one.  Pass a lambda so the display updates as a background
+        thread resolves the public IP.
+    upnp_status:
+        Either a ``str | None`` value **or** a zero-argument callable.
+        Displays the UPnP mapping result (or a manual port-forward hint).
+    """
+    audio_overlay = SceneAudioOverlay()
+    port = getattr(network, "port", 5555)
+
     while True:
         connected = network.poll_connection()
+
+        # Resolve dynamic values each tick so background-thread results appear
+        # on screen as soon as they become available.
+        current_pub_ip = public_ip() if callable(public_ip) else public_ip
+        current_upnp = upnp_status() if callable(upnp_status) else upnp_status
+
+        # Build info lines based on what we know so far.
+        if current_pub_ip:
+            pub_line = f"Internet IP: {current_pub_ip}  (port {port})"
+            hint_line = "LAN players use the LAN IP  \u2022  Internet players use the Internet IP"
+        else:
+            pub_line = "Internet IP: checking\u2026  (port {})".format(port)
+            hint_line = "Ensure port {} is forwarded on your router for internet play".format(port)
+
+        upnp_line = (
+            f"UPnP: {current_upnp}"
+            if current_upnp
+            else f"Port {port} \u2014 forward this on your router for internet play"
+        )
+
         lines = [
-            f"Host IP: {host_ip}",
-            "Share this address with the other player on your LAN.",
+            f"LAN IP: {host_ip}",
+            pub_line,
+            hint_line,
+            upnp_line,
             "Press ESC to cancel.",
         ]
+
         _draw_waiting_panel(
             screen,
             "Waiting For Player To Join",
             lines,
             accent=(180, 80, 255),
+            audio_overlay=audio_overlay,
         )
 
         if connected:
@@ -79,11 +132,9 @@ def host_waiting_screen(screen, clock, host_ip, network):
                 _draw_waiting_panel(
                     screen,
                     "Player Connected",
-                    [
-                        peer_ip,
-                        "Preparing the match lobby...",
-                    ],
+                    [peer_ip, "Preparing the match lobby\u2026"],
                     success=True,
+                    audio_overlay=audio_overlay,
                 )
                 clock.tick(30)
             return True
@@ -92,6 +143,8 @@ def host_waiting_screen(screen, clock, host_ip, network):
             return False
 
         for event in pygame.event.get():
+            if audio_overlay.handle_event(event):
+                continue
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()

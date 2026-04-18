@@ -62,7 +62,14 @@ from .common import SceneAudioOverlay, _draw_rounded_rect, _load_font
 class TitleScreen:
     """Opening title screen with animated logo, particles, and name entry."""
 
-    def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock):
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        clock: pygame.time.Clock,
+        *,
+        start_music: bool = True,
+        enable_tutorial_prompt: bool = True,
+    ):
         self.screen = screen
         self.clock = clock
         self.width, self.height = WINDOW_SIZE
@@ -104,19 +111,20 @@ class TitleScreen:
         self._particles = []
         self._spawn_particles(TITLE_PARTICLE_COUNT)
 
-        self._start_music()
+        if start_music:
+            self._start_music()
         self._tutorial_button_rect = pygame.Rect(24, self.height - 124, 190, 46)
         self._back_button_rect = pygame.Rect(24, self.height - 68, 150, 46)
         self._controls_button_rect = pygame.Rect(self.width - 134, self.height - 68, 110, 46)
 
         # First time playing prompt - only show if not answered yet
-        self._show_tutorial_prompt = not _first_time_prompt_answered
+        self._show_tutorial_prompt = bool(enable_tutorial_prompt and not _first_time_prompt_answered)
         # Adjust tutorial prompt box dimensions
         self._prompt_yes_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
         self._prompt_no_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
         self._tutorial_pages = [
             "Welcome to Grid Survival!\nObjective: Survive as the tiles collapse beneath you.",
-            "Controls:\nPlayer 1: W/A/S/D to move, SPACE to jump, F to attack/throw shurikens/stones, G for ultimate, Q for power.\nPlayer 2: Arrows to move, RIGHT SHIFT to jump, RCTRL to attack/throw, END for ultimate, / for power.",
+            "Controls:\nPlayer 1: W/A/S/D to move, SPACE to jump, Q for powers.\nPlayer 2: Arrows to move, RIGHT SHIFT to jump, / for powers.",
             "Modes:\n- Solo vs AI: Practice against bots.\n- Local: Couch Co-op with a friend.\n- LAN: Play over the local network.\n- Campaign: Story mode coming soon.",
             "Power-ups (Orbs): Collect glowing orbs to unlock powers.\n- Void Walk: Cross missing tiles.\n- Shields: Block one hazard hit.",
             "Hazards & Enemies:\nWatch out for crumbling tiles, the deadly shoreline, and enemy attacks!",
@@ -266,7 +274,7 @@ class TitleScreen:
 
     def _draw_input(self) -> None:
         # Label
-        label = self._font_small.render("ENTER YOUR NAME :", True, INPUT_LABEL_COLOR)
+        label = self._font_small.render("GUEST NAME (OPTIONAL) :", True, INPUT_LABEL_COLOR)
         self.screen.blit(label, label.get_rect(center=(self.width // 2, 310)))
 
         # Input box
@@ -285,7 +293,7 @@ class TitleScreen:
 
         # "PRESS ENTER TO CONTINUE" prompt — blinking fade
         prompt_alpha = int(80 + 175 * abs(math.sin(self._title_time * PROMPT_BLINK_SPEED * math.pi)))
-        prompt_surf = self._font_small.render("PRESS ENTER TO CONTINUE", True, PROMPT_TEXT_COLOR)
+        prompt_surf = self._font_small.render("PRESS ENTER FOR ACCOUNT MENU", True, PROMPT_TEXT_COLOR)
         prompt_surf.set_alpha(prompt_alpha)
         self.screen.blit(prompt_surf, prompt_surf.get_rect(center=(self.width // 2, 440)))
 
@@ -303,8 +311,8 @@ class TitleScreen:
         self._audio_overlay.draw(self.screen)
 
     def _draw_controls_panel(self) -> None:
-        panel_w = 480
-        panel_h = 252
+        panel_w = 420
+        panel_h = 156
         panel_rect = pygame.Rect(self.width - panel_w - 24, self.height - panel_h - 44, panel_w, panel_h)
         bg_color = (16, 20, 34, 232)
         border_color = (120, 150, 200)
@@ -322,9 +330,9 @@ class TitleScreen:
             1,
         )
 
-        column_w = (panel_rect.width - 34) // 2
+        column_w = (panel_rect.width - 28) // 2
         left_x = panel_rect.left + 14
-        right_x = left_x + column_w + 6
+        right_x = left_x + column_w
         rows_y = title_rect.bottom + 18
 
         custom_controls = load_custom_controls()
@@ -380,17 +388,13 @@ class TitleScreen:
 
         p1_rows = [
             ("MOVE", p1_move),
-            ("JUMP", get_key_display(p1_controls.get('jump'))),
-            ("ATTACK", get_key_display(p1_controls.get('attack'))),
-            ("POWER", get_key_display(p1_controls.get('power'))),
-            ("ULTIMATE", get_key_display(p1_controls.get('ultimate'))),
+            ("JUMP", get_key_display(p1_controls['jump'])),
+            ("POWER", get_key_display(p1_controls['power'])),
         ]
         p2_rows = [
             ("MOVE", p2_move),
-            ("JUMP", get_key_display(p2_controls.get('jump'))),
-            ("ATTACK", get_key_display(p2_controls.get('attack'))),
-            ("POWER", get_key_display(p2_controls.get('power'))),
-            ("ULTIMATE", get_key_display(p2_controls.get('ultimate'))),
+            ("JUMP", get_key_display(p2_controls['jump'])),
+            ("POWER", get_key_display(p2_controls['power'])),
         ]
 
         self._draw_control_column(
@@ -417,8 +421,8 @@ class TitleScreen:
             label_surf = self._font_small.render(f"{label}:", True, INPUT_LABEL_COLOR)
             value_surf = self._font_small.render(value, True, INPUT_TEXT_COLOR)
             self.screen.blit(label_surf, (x, cursor_y))
-            self.screen.blit(value_surf, (x + 98, cursor_y))
-            cursor_y += max(label_surf.get_height(), value_surf.get_height()) + 8
+            self.screen.blit(value_surf, (x + 76, cursor_y))
+            cursor_y += max(label_surf.get_height(), value_surf.get_height()) + 6
 
     def _draw_tutorial_prompt(self) -> None:
         overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
@@ -556,7 +560,7 @@ class TitleScreen:
                     px = self.width // 2 - 180 + i * 180
                     py = visual_y - 20 + math.sin(anim_timer * 3 + i) * 10
                     rect = pygame.Rect(0, 0, 140, 80)
-                    rect.center = (int(px), int(py))
+                    rect.center = (px, py)
                     _draw_rounded_rect(self.screen, rect, (30, 40, 60), color, 2, 10)
                     
                     # Draw Icons
@@ -888,11 +892,8 @@ class TitleScreen:
                         self._fade("out")
                         return None
                     if event.key == pygame.K_RETURN:
-                        if self.player_name.strip():
-                            self._fade("out")
-                            return self.player_name.strip()
-                        self.warning_text = "PLEASE ENTER YOUR NAME"
-                        self.warning_timer = WARNING_DISPLAY_DURATION
+                        self._fade("out")
+                        return self.player_name.strip() or "Player"
                     elif event.key == pygame.K_BACKSPACE:
                         self.player_name = self.player_name[:-1]
                     elif event.unicode and event.unicode.isprintable():
@@ -924,24 +925,10 @@ class TitleScreen:
         waiting_for_key = False
         clock = pygame.time.Clock()
 
-        action_names = ["up", "down", "left", "right", "jump", "power", "attack", "ultimate"]
-        action_display = {
-            "up": "UP",
-            "down": "DOWN",
-            "left": "LEFT",
-            "right": "RIGHT",
-            "jump": "JUMP",
-            "power": "POWER",
-            "attack": "ATTACK",
-            "ultimate": "ULTIMATE"
-        }
-        # Get key display in order from DEFAULT_CONTROLS
-        from settings import DEFAULT_CONTROLS
-        p1_controls = custom_controls.get("player1", DEFAULT_CONTROLS["player1"])
-        p2_controls = custom_controls.get("player2", DEFAULT_CONTROLS["player2"])
+        action_names = ["up", "down", "left", "right", "jump", "power"]
 
         panel_w = 540
-        panel_h = 500
+        panel_h = 420
         panel_x = (self.width - panel_w) // 2
         panel_y = (self.height - panel_h) // 2
         panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
@@ -1024,35 +1011,22 @@ class TitleScreen:
 
             for i, action in enumerate(action_names):
                 y_pos = start_y + i * 38
-                for player_key, x_pos, controls in [("player1", col1_x, p1_controls), ("player2", col2_x, p2_controls)]:
+                for player_key, x_pos in [("player1", col1_x), ("player2", col2_x)]:
                     is_selected = player_key == current_player and action == current_action
-                    key_code = controls.get(action, None)
+                    key_code = custom_controls.get(player_key, {}).get(action, None)
                     key_name = pygame.key.name(key_code).upper() if key_code else "?"
+                    if key_name.startswith("K_"):
+                        key_name = key_name[2:]
                     if key_code in (pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT):
                         icon_map = {pygame.K_UP: "↑", pygame.K_DOWN: "↓", pygame.K_LEFT: "←", pygame.K_RIGHT: "→"}
                         key_name = icon_map.get(key_code, key_name)
-                    else:
-                        key_display_map = {
-                            "SEMICOLON": ";",
-                            "COMMA": ",",
-                            "PERIOD": ".",
-                            "SLASH": "/",
-                            "BACKSLASH": "\\",
-                            "LEFTBRACKET": "[",
-                            "RIGHTBRACKET": "]",
-                            "MINUS": "-",
-                            "EQUALS": "=",
-                            "QUOTE": "'",
-                            "BACKQUOTE": "`",
-                        }
-                        key_name = key_display_map.get(key_name, key_name)
 
                     btn_rect = pygame.Rect(x_pos, y_pos, button_w, button_h)
                     bg_color = (70, 100, 140, 240) if is_selected else (35, 50, 80, 220)
                     border_color = (255, 220, 100) if is_selected else (100, 130, 170)
                     _draw_rounded_rect(self.screen, btn_rect, bg_color, border_color, 2, 6)
 
-                    action_surf = self._font_small.render(f"{action_display.get(action, action.upper())}:", True, (180, 200, 220))
+                    action_surf = self._font_small.render(f"{action.upper()}:", True, (180, 200, 220))
                     self.screen.blit(action_surf, (x_pos + 5, y_pos + 8))
                     key_surf = self._font_small.render(key_name, True, (255, 255, 255))
                     self.screen.blit(key_surf, (x_pos + 62, y_pos + 8))
@@ -1075,8 +1049,7 @@ class TitleScreen:
                 overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
                 overlay.fill((0, 0, 0, 150))
                 self.screen.blit(overlay, (0, 0))
-                player_display = "PLAYER 1" if current_player == "player1" else "PLAYER 2"
-                wait_surf = self._font_heading.render("Press any key for " + player_display + " " + action_display.get(current_action, current_action.upper()), True, (255, 200, 100))
+                wait_surf = self._font_heading.render("Press any key for " + current_player.upper() + " " + current_action.upper(), True, (255, 200, 100))
                 self.screen.blit(wait_surf, wait_surf.get_rect(center=(self.width // 2, self.height // 2)))
 
             pygame.display.flip()

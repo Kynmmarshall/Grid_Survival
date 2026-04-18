@@ -5,6 +5,7 @@ Redesigned with polished panels, arcade fonts, urgency styling, and animations.
 """
 
 import math
+import os
 import pygame
 from typing import List
 from settings import (
@@ -90,17 +91,24 @@ class GameHUD:
         self._font_card_small = _load_font(FONT_PATH_HUD, max(10, FONT_SIZE_LABEL - 2))
         self._player_cards = PlayerCardRenderer(self._font_card_small, _draw_panel)
 
-        self.score = 0
         self.survival_time = 0.0
+        self.score = 0
+        self._prev_score = 0
         self.player_name = "Player"
         self.players_alive = 1
         self.total_players = 1
-        self.total_lives = 0
+        self.round_wins: list[int] = []
+        self.target_score = 1
 
         # Timer urgency pulse
         self._pulse_timer = 0.0
 
+        self.pause_rect = None
         self.mute_rect = None   # Mute button hit area
+        self.volume_rect = None
+        self.timer_rect = None
+        self.alive_rect = None
+        self.player_card_rects: List[pygame.Rect] = []
 
     def update(self, dt: float):
         """Update HUD state."""
@@ -130,45 +138,50 @@ class GameHUD:
         remaining_in_minute = 60 - (self.survival_time % 60)
         return remaining_in_minute <= TIMER_WARNING_THRESHOLD
 
-    def draw(self, surface: pygame.Surface, players: List, is_muted: bool = False):
+    def draw(
+        self,
+        surface: pygame.Surface,
+        players: List,
+        is_muted: bool = False,
+        volume: float = 1.0,
+        is_paused: bool = False,
+    ):
         """Draw HUD elements."""
+        self.alive_rect = None
         self._draw_timer_panel(surface)
-        self._draw_lives_panel(surface)
+        self._draw_pause_button(surface, is_paused)
         self._draw_mute_button(surface, is_muted)
+        self._draw_volume_panel(surface, is_muted, volume)
         self._draw_player_cards(surface, players)
         if self.total_players > 1:
             self._draw_alive_panel(surface)
 
-    def _draw_lives_panel(self, surface: pygame.Surface):
-        """Lives counter panel — bottom-left."""
-        if self.total_lives <= 0:
-            return
+    def _draw_pause_button(self, surface: pygame.Surface, is_paused: bool):
+        """Draw a clickable pause toggle button."""
+        label = "PAUSED" if is_paused else "PAUSE"
+        color = HUD_TIMER_URGENT_COLOR if is_paused else HUD_TIMER_BORDER_COLOR
 
-        lives_color = (255, 105, 180)  # Pink heart color
+        label_surf = self._font_label.render(label, True, color)
 
-        label_surf = self._font_label.render("LIVES", True, lives_color)
-        value_surf = self._font_value.render(str(self.total_lives), True, HUD_VALUE_COLOR)
+        panel_w = label_surf.get_width() + HUD_PANEL_PADDING_H * 2
+        panel_h = label_surf.get_height() + HUD_PANEL_PADDING_V * 2
 
-        panel_w = max(label_surf.get_width(), value_surf.get_width()) + HUD_PANEL_PADDING_H * 2
-        panel_h = label_surf.get_height() + value_surf.get_height() + HUD_PANEL_PADDING_V * 3
-        panel_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 20, panel_w, panel_h)
+        self.pause_rect = pygame.Rect(0, WINDOW_SIZE[1] - panel_h - 20, panel_w, panel_h)
+        self.pause_rect.centerx = WINDOW_SIZE[0] // 2
 
-        _draw_panel(surface, panel_rect, HUD_PANEL_BG, lives_color,
-                    HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
+        _draw_panel(
+            surface,
+            self.pause_rect,
+            HUD_PANEL_BG,
+            color,
+            HUD_PANEL_BORDER_WIDTH,
+            8,
+            glow=False,
+        )
 
-        lx = panel_rect.centerx - label_surf.get_width() // 2
-        ly = panel_rect.top + HUD_PANEL_PADDING_V
+        lx = self.pause_rect.centerx - label_surf.get_width() // 2
+        ly = self.pause_rect.centery - label_surf.get_height() // 2
         surface.blit(label_surf, (lx, ly))
-
-        vx = panel_rect.centerx - value_surf.get_width() // 2
-        vy = ly + label_surf.get_height() + HUD_PANEL_PADDING_V
-        surface.blit(value_surf, (vx, vy))
-
-        # Draw heart icon
-        heart = "♥"
-        heart_surf = self._font_value.render(heart, True, lives_color)
-        heart_rect = heart_surf.get_rect(center=(panel_rect.centerx - 40, panel_rect.centery))
-        surface.blit(heart_surf, heart_rect)
 
     def _draw_mute_button(self, surface: pygame.Surface, is_muted: bool):
         """Draw a clickable mute button."""
@@ -180,15 +193,9 @@ class GameHUD:
 
         panel_w = label_surf.get_width() + HUD_PANEL_PADDING_H * 2
         panel_h = label_surf.get_height() + HUD_PANEL_PADDING_V * 2
-<<<<<<< Updated upstream
-        
+
         # Keep the audio control out of the top edge so it stays clear of the player cards.
         self.mute_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 20, panel_w, panel_h)
-=======
-
-        # Position after lives panel
-        self.mute_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 100, panel_w, panel_h)  # Adjusted Y
->>>>>>> Stashed changes
 
         _draw_panel(surface, self.mute_rect, HUD_PANEL_BG, color,
                     HUD_PANEL_BORDER_WIDTH, 8, glow=False)
@@ -196,6 +203,40 @@ class GameHUD:
         lx = self.mute_rect.centerx - label_surf.get_width() // 2
         ly = self.mute_rect.centery - label_surf.get_height() // 2
         surface.blit(label_surf, (lx, ly))
+
+    def _draw_volume_panel(self, surface: pygame.Surface, is_muted: bool, volume: float):
+        """Draw the current master volume and a small fill bar."""
+        volume = max(0.0, min(1.0, volume))
+        panel_w = 176
+        panel_h = 54
+
+        if self.mute_rect is not None:
+            top = max(20, self.mute_rect.top - panel_h - 10)
+            panel_rect = pygame.Rect(self.mute_rect.left, top, panel_w, panel_h)
+        else:
+            panel_rect = pygame.Rect(20, WINDOW_SIZE[1] - panel_h - 84, panel_w, panel_h)
+
+        self.volume_rect = panel_rect
+
+        active = not is_muted and volume > 0.0
+        border_color = HUD_ALIVE_BORDER_COLOR_ALL if active else HUD_TIMER_URGENT_COLOR
+        _draw_panel(surface, panel_rect, HUD_PANEL_BG, border_color,
+                    HUD_PANEL_BORDER_WIDTH, 8, glow=False)
+
+        label_surf = self._font_label.render("VOL", True, border_color)
+        value_text = "MUTED" if is_muted else f"{int(round(volume * 100)):02d}%"
+        value_surf = self._font_label.render(value_text, True, HUD_VALUE_COLOR)
+        surface.blit(label_surf, (panel_rect.left + 12, panel_rect.top + 10))
+        surface.blit(value_surf, value_surf.get_rect(top=panel_rect.top + 10, right=panel_rect.right - 12))
+
+        bar_rect = pygame.Rect(panel_rect.left + 12, panel_rect.bottom - 16, panel_rect.width - 24, 8)
+        pygame.draw.rect(surface, border_color, bar_rect, 1, border_radius=4)
+        inner = bar_rect.inflate(-2, -2)
+        pygame.draw.rect(surface, HUD_PANEL_BG, inner, border_radius=3)
+        fill_width = int(inner.width * volume) if active else 0
+        if fill_width > 0:
+            fill_rect = pygame.Rect(inner.left, inner.top, fill_width, inner.height)
+            pygame.draw.rect(surface, border_color, fill_rect, border_radius=3)
 
     def _draw_timer_panel(self, surface: pygame.Surface):
         """Timer panel — top-center."""
@@ -226,6 +267,7 @@ class GameHUD:
         panel_h = label_surf.get_height() + value_surf.get_height() + HUD_PANEL_PADDING_V * 3
         panel_rect = pygame.Rect(0, 20, panel_w, panel_h)
         panel_rect.centerx = WINDOW_SIZE[0] // 2
+        self.timer_rect = panel_rect.copy()
 
         _draw_panel(surface, panel_rect, bg_color, border_color,
                     HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
@@ -258,6 +300,7 @@ class GameHUD:
         panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
         panel_rect.right = WINDOW_SIZE[0] - 20
         panel_rect.bottom = WINDOW_SIZE[1] - 20
+        self.alive_rect = panel_rect.copy()
 
         _draw_panel(surface, panel_rect, HUD_PANEL_BG, border_color,
                     HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
@@ -271,11 +314,18 @@ class GameHUD:
         surface.blit(value_surf, (vx, vy))
 
     def _draw_player_cards(self, surface: pygame.Surface, players: List):
-        self._player_cards.draw(surface, players)
+        self.player_card_rects = self._player_cards.draw(
+            surface,
+            players,
+            round_wins=self.round_wins,
+            target_score=self.target_score,
+        ) or []
 
     def reset(self):
         """Reset HUD state."""
         self.survival_time = 0.0
+        self.score = 0
+        self._prev_score = 0
         self._pulse_timer = 0.0
 
     def set_player_info(self, name: str, alive: int, total: int):
@@ -284,9 +334,9 @@ class GameHUD:
         self.players_alive = alive
         self.total_players = total
 
-    def set_lives(self, lives: int):
-        """Update total lives display."""
-        self.total_lives = lives
+    def set_round_scoreboard(self, round_wins: list[int], target_score: int):
+        self.round_wins = [int(max(0, value)) for value in round_wins]
+        self.target_score = max(1, int(target_score))
 
     def snapshot_state(self) -> dict:
         """Serialize HUD values for LAN clients."""
@@ -296,6 +346,8 @@ class GameHUD:
             "player_name": self.player_name,
             "players_alive": int(self.players_alive),
             "total_players": int(self.total_players),
+            "round_wins": [int(value) for value in self.round_wins],
+            "target_score": int(self.target_score),
         }
 
     def apply_snapshot(self, snapshot: dict | None):
@@ -308,6 +360,10 @@ class GameHUD:
         self.player_name = str(snapshot.get("player_name", self.player_name))
         self.players_alive = int(snapshot.get("players_alive", self.players_alive))
         self.total_players = int(snapshot.get("total_players", self.total_players))
+        wins = snapshot.get("round_wins", self.round_wins)
+        if isinstance(wins, list):
+            self.round_wins = [int(max(0, value)) for value in wins]
+        self.target_score = max(1, int(snapshot.get("target_score", self.target_score)))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -317,10 +373,33 @@ class GameHUD:
 class EliminationScreen:
     """Screen shown when player is eliminated."""
 
-    def __init__(self, player_name: str, survival_time: float, reason: str = "eliminated"):
+    def __init__(
+        self,
+        player_name: str,
+        survival_time: float,
+        reason: str = "eliminated",
+        character_name: str = "Caveman",
+        allow_actions: bool = True,
+        status_message: str | None = None,
+    ):
         self.player_name = player_name
         self.survival_time = survival_time
         self.reason = reason
+        self.character_name = character_name
+        self.allow_actions = bool(allow_actions)
+        self.status_message = status_message or "Next round starts automatically..."
+
+        self.portrait = None
+        try:
+            portrait_path = os.path.join("Assets", "Characters", "portait", f"{self.character_name}.png")
+            if os.path.exists(portrait_path):
+                raw_portrait = pygame.image.load(portrait_path).convert_alpha()
+                # Scale portrait to 200px tall to fit inside the panel beautifully
+                scale_factor = 200 / raw_portrait.get_height()
+                new_size = (int(raw_portrait.get_width() * scale_factor), 200)
+                self.portrait = pygame.transform.smoothscale(raw_portrait, new_size)
+        except Exception:
+            pass
 
         # Use the same HUD font hierarchy — fits within screen width
         self.font_title = _load_font(FONT_PATH_HUD, 42, bold=True)
@@ -390,24 +469,35 @@ class EliminationScreen:
         surface.blit(title_surf, title_rect)
 
         # ── Panel card ─────────────────────────────────────────────────────
-        panel_w = 520
-        panel_h = 260
+        panel_w = 700 if self.portrait else 560
+        panel_h = 320
         panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
-        panel_rect.center = (cx, WINDOW_SIZE[1] // 2 + 30)
+        panel_rect.center = (cx, WINDOW_SIZE[1] // 2 + 50)
 
         panel_alpha = min(255, text_alpha)
         _draw_panel(surface, panel_rect, (15, 15, 25, panel_alpha),
                     (255, 60, 60), 2, 14, glow=True)
 
+        if self.portrait:
+            portrait_surf = self.portrait.copy()
+            portrait_surf.set_alpha(text_alpha)
+            portrait_rect = portrait_surf.get_rect(midleft=(panel_rect.left + 20, panel_rect.centery - 20))
+            surface.blit(portrait_surf, portrait_rect)
+            text_area_left = portrait_rect.right + 20
+            text_cx = text_area_left + (panel_rect.right - text_area_left) // 2
+        else:
+            text_area_left = panel_rect.left + 20
+            text_cx = cx
+
         # Player name
         name_surf = self.font_large.render(self.player_name, True, (255, 255, 255))
         name_surf.set_alpha(text_alpha)
-        surface.blit(name_surf, name_surf.get_rect(center=(cx, panel_rect.top + 45)))
+        surface.blit(name_surf, name_surf.get_rect(center=(text_cx, panel_rect.top + 60)))
 
         # Divider line
-        div_y = panel_rect.top + 75
+        div_y = panel_rect.top + 100
         pygame.draw.line(surface, (255, 60, 60, text_alpha),
-                         (panel_rect.left + 20, div_y), (panel_rect.right - 20, div_y), 1)
+                         (text_area_left, div_y), (panel_rect.right - 20, div_y), 1)
 
         # Survived time
         minutes = int(self.survival_time // 60)
@@ -415,17 +505,33 @@ class EliminationScreen:
         time_text = f"Survived:  {minutes:02d}:{seconds:02d}"
         time_surf = self.font_medium.render(time_text, True, (180, 200, 255))
         time_surf.set_alpha(text_alpha)
-        surface.blit(time_surf, time_surf.get_rect(center=(cx, panel_rect.top + 115)))
+        surface.blit(time_surf, time_surf.get_rect(center=(text_cx, panel_rect.top + 150)))
 
-        # Restart prompt (blinks after fully faded in)
+        # Bottom prompt (actions only at final match end)
         if self.alpha >= 220:
             blink_alpha = int(120 + 135 * abs(math.sin(self._time * math.pi * 1.5)))
-            restart_surf = self.font_small.render(
-                "Press  R  to Restart    |    Press  ESC  to Quit",
-                True, (180, 180, 180)
-            )
-            restart_surf.set_alpha(blink_alpha)
-            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 220)))
+            if self.allow_actions:
+                restart_surf = self.font_small.render(
+                    "Press  R  to Restart Match",
+                    True, (180, 180, 180)
+                )
+                restart_surf.set_alpha(blink_alpha)
+                surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.bottom - 50)))
+
+                menu_surf = self.font_small.render(
+                    "To go to Main Menu, press Left Ctrl",
+                    True, (150, 150, 180)
+                )
+                menu_surf.set_alpha(blink_alpha)
+                surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.bottom - 20)))
+            else:
+                wait_surf = self.font_small.render(
+                    self.status_message,
+                    True,
+                    (190, 200, 220),
+                )
+                wait_surf.set_alpha(blink_alpha)
+                surface.blit(wait_surf, wait_surf.get_rect(center=(cx, panel_rect.bottom - 30)))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -435,10 +541,31 @@ class EliminationScreen:
 class VictoryScreen:
     """Screen shown when player wins (survives longest in multiplayer)."""
 
-    def __init__(self, message: str, survival_time: float, player_name: str = ""):
-        self.message = message
-        self.survival_time = survival_time
+    def __init__(
+        self,
+        player_name: str,
+        survival_time: float,
+        character_name: str = "Caveman",
+        allow_actions: bool = True,
+        status_message: str | None = None,
+    ):
         self.player_name = player_name
+        self.survival_time = survival_time
+        self.character_name = character_name
+        self.allow_actions = bool(allow_actions)
+        self.status_message = status_message or "Next round starts automatically..."
+
+        self.portrait = None
+        try:
+            portrait_path = os.path.join("Assets", "Characters", "portait", f"{self.character_name}.png")
+            if os.path.exists(portrait_path):
+                raw_portrait = pygame.image.load(portrait_path).convert_alpha()
+                # Scale portrait to 200px tall to fit inside the panel beautifully
+                scale_factor = 200 / raw_portrait.get_height()
+                new_size = (int(raw_portrait.get_width() * scale_factor), 200)
+                self.portrait = pygame.transform.smoothscale(raw_portrait, new_size)
+        except Exception:
+            pass
 
         self.font_title = _load_font(FONT_PATH_HUD, 42, bold=True)
         self.font_large = _load_font(FONT_PATH_HUD, 28, bold=True)
@@ -479,7 +606,7 @@ class VictoryScreen:
         g = int(200 + 55 * pulse)
         title_color = (80, g, 80)
 
-        title_surf = self.font_title.render(self.message, True, title_color)
+        title_surf = self.font_title.render("VICTORY!", True, title_color)
         max_w = int(WINDOW_SIZE[0] * 0.80)
         if title_surf.get_width() > max_w:
             scale = max_w / title_surf.get_width()
@@ -490,7 +617,7 @@ class VictoryScreen:
             )
         title_surf.set_alpha(text_alpha)
 
-        shadow_surf = self.font_title.render(self.message, True, (0, 0, 0))
+        shadow_surf = self.font_title.render("VICTORY!", True, (0, 0, 0))
         if shadow_surf.get_width() > max_w:
             shadow_surf = pygame.transform.smoothscale(shadow_surf, title_surf.get_size())
         shadow_surf.set_alpha(int(text_alpha * 0.5))
@@ -498,34 +625,61 @@ class VictoryScreen:
         surface.blit(title_surf, title_surf.get_rect(center=(cx, 160)))
 
         # ── Panel card ─────────────────────────────────────────────────────
-        panel_w = 520
-        panel_h = 260
+        panel_w = 700 if self.portrait else 560
+        panel_h = 320
         panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
-        panel_rect.center = (cx, WINDOW_SIZE[1] // 2 + 30)
+        panel_rect.center = (cx, WINDOW_SIZE[1] // 2 + 50)
 
         _draw_panel(surface, panel_rect, (15, 25, 15, min(255, text_alpha)),
                     (80, 220, 80), 2, 14, glow=True)
 
+        if self.portrait:
+            portrait_surf = self.portrait.copy()
+            portrait_surf.set_alpha(text_alpha)
+            portrait_rect = portrait_surf.get_rect(midleft=(panel_rect.left + 20, panel_rect.centery - 20))
+            surface.blit(portrait_surf, portrait_rect)
+            text_area_left = portrait_rect.right + 20
+            text_cx = text_area_left + (panel_rect.right - text_area_left) // 2
+        else:
+            text_area_left = panel_rect.left + 20
+            text_cx = cx
+
         name_surf = self.font_large.render(self.player_name, True, (255, 255, 255))
         name_surf.set_alpha(text_alpha)
-        surface.blit(name_surf, name_surf.get_rect(center=(cx, panel_rect.top + 45)))
+        surface.blit(name_surf, name_surf.get_rect(center=(text_cx, panel_rect.top + 60)))
 
-        div_y = panel_rect.top + 75
-        pygame.draw.line(surface, (80, 220, 80),
-                         (panel_rect.left + 20, div_y), (panel_rect.right - 20, div_y), 1)
+        div_y = panel_rect.top + 100
+        pygame.draw.line(surface, (80, 220, 80, text_alpha),
+                         (text_area_left, div_y), (panel_rect.right - 20, div_y), 1)
 
         minutes = int(self.survival_time // 60)
         seconds = int(self.survival_time % 60)
         time_text = f"Survived:  {minutes:02d}:{seconds:02d}"
         time_surf = self.font_medium.render(time_text, True, (180, 200, 255))
         time_surf.set_alpha(text_alpha)
-        surface.blit(time_surf, time_surf.get_rect(center=(cx, panel_rect.top + 115)))
+        surface.blit(time_surf, time_surf.get_rect(center=(text_cx, panel_rect.top + 150)))
 
         if self.alpha >= 220:
             blink_alpha = int(120 + 135 * abs(math.sin(self._time * math.pi * 1.5)))
-            restart_surf = self.font_small.render(
-                "Press  R  to Restart    |    Press  ESC  to Quit",
-                True, (180, 180, 180)
-            )
-            restart_surf.set_alpha(blink_alpha)
-            surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.top + 220)))
+            if self.allow_actions:
+                restart_surf = self.font_small.render(
+                    "Press  R  to Restart Match",
+                    True, (180, 180, 180)
+                )
+                restart_surf.set_alpha(blink_alpha)
+                surface.blit(restart_surf, restart_surf.get_rect(center=(cx, panel_rect.bottom - 50)))
+
+                menu_surf = self.font_small.render(
+                    "To go to Main Menu, press Left Ctrl",
+                    True, (150, 150, 180)
+                )
+                menu_surf.set_alpha(blink_alpha)
+                surface.blit(menu_surf, menu_surf.get_rect(center=(cx, panel_rect.bottom - 20)))
+            else:
+                wait_surf = self.font_small.render(
+                    self.status_message,
+                    True,
+                    (190, 200, 220),
+                )
+                wait_surf.set_alpha(blink_alpha)
+                surface.blit(wait_surf, wait_surf.get_rect(center=(cx, panel_rect.bottom - 30)))

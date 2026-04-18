@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import pygame
 
 from settings import (
@@ -198,17 +199,18 @@ def _blit_scaled(surface: pygame.Surface, window_size, scale_x: float, scale_y: 
     return canvas, (offset_x, offset_y), (scaled_width, scaled_height)
 
 
-def load_tilemap_surface(window_size):
+def load_tilemap_surface(window_size, map_path: str | Path | None = None):
     """Load the TMX tilemap, scale it, and build the walkable mask."""
     if load_pygame is None:
         print("Install pytmx (pip install pytmx) to render Tiled maps.")
         return None, None, None, None, 1.0, 1.0, (0, 0)
 
-    if not MAP_PATH.exists():
-        print(f"Map file not found: {MAP_PATH}")
+    selected_map_path = Path(map_path) if map_path else MAP_PATH
+    if not selected_map_path.exists():
+        print(f"Map file not found: {selected_map_path}")
         return None, None, None, None, 1.0, 1.0, (0, 0)
 
-    tmx_data = load_pygame(MAP_PATH.as_posix())
+    tmx_data = load_pygame(selected_map_path.as_posix())
     destructible_layers = DESTRUCTIBLE_LAYER_NAMES or []
     raw_surface = _render_tmx_to_surface(
         tmx_data,
@@ -253,11 +255,12 @@ def load_tilemap_surface(window_size):
     )
 
 
-def load_background_surface(window_size):
+def load_background_surface(window_size, background_path: str | Path | None = None):
     """Load and scale the background image if it exists."""
-    if not BACKGROUND_PATH.exists():
-        print(f"Background image not found: {BACKGROUND_PATH}")
+    selected_background_path = Path(background_path) if background_path else BACKGROUND_PATH
+    if not selected_background_path.exists():
+        print(f"Background image not found: {selected_background_path}")
         return None
 
-    image = pygame.image.load(BACKGROUND_PATH.as_posix()).convert()
+    image = pygame.image.load(selected_background_path.as_posix()).convert()
     return pygame.transform.smoothscale(image, window_size)

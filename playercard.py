@@ -72,9 +72,10 @@ class PlayerCardRenderer:
         players: List,
         round_wins: Optional[List[int]] = None,
         target_score: int = 1,
-    ) -> None:
+    ) -> List[pygame.Rect]:
+        occupied_rects: List[pygame.Rect] = []
         if not players:
-            return
+            return occupied_rects
         render_players = list(players)
         rounds = round_wins if isinstance(round_wins, list) else []
         card_w, card_h = CARD_WIDTH, CARD_HEIGHT
@@ -86,7 +87,9 @@ class PlayerCardRenderer:
             wins = int(max(0, rounds[idx])) if idx < len(rounds) else 0
             self._draw_player_card(surface, rects[idx], player, idx, border_color)
             eliminated = bool(getattr(player, "_eliminated", False))
-            self._draw_wins_footer(surface, rects[idx], wins, border_color, eliminated)
+            footer_rect = self._draw_wins_footer(surface, rects[idx], wins, border_color, eliminated)
+            occupied_rects.append(rects[idx].union(footer_rect))
+        return occupied_rects
 
     def _player_card_rects(self, count: int, width: int, height: int) -> List[pygame.Rect]:
         rects: List[pygame.Rect] = []
@@ -177,22 +180,6 @@ class PlayerCardRenderer:
         surface.blit(lives_label, (text_x, rect.top + 68))
         lives_rect = pygame.Rect(text_x, rect.top + 86, rect.width - (text_x - rect.left) - 16, 28)
         self._draw_lives_badge(surface, lives_rect, lives, border_color)
-        
-        self._draw_health_bar(surface, rect, player, border_color)
-        
-        ammo = getattr(player, "_projectile_ammo", 5)
-        ammo_label = self._font_small.render("AMMO", True, border_color)
-        surface.blit(ammo_label, (text_x, rect.top + 155))
-        ammo_rect = pygame.Rect(text_x, rect.top + 173, rect.width - (text_x - rect.left) - 16, 20)
-        self._draw_ammo_bar(surface, ammo_rect, ammo, getattr(player, "_max_projectile_ammo", 5), border_color)
-        
-        ult_charges = getattr(player, "_ultimate_charges", 0)
-        ult_label = self._font_small.render("ULT", True, border_color)
-        surface.blit(ult_label, (text_x, rect.top + 200))
-        ult_rect = pygame.Rect(text_x, rect.top + 218, 50, 20)
-        self._draw_badge(surface, ult_rect, (255, 100, 20, 100) if ult_charges > 0 else CARD_STATUS_BG, 
-                        (255, 140, 50) if ult_charges > 0 else CARD_STATUS_BORDER, 
-                        str(ult_charges), (255, 255, 255))
 
         status_text = self._status_summary(player, orb_label, orb_timer, orb_infinite, orb_duration, charges)
         status_label = self._font_small.render("STATUS", True, border_color)
@@ -210,7 +197,7 @@ class PlayerCardRenderer:
         round_wins: int,
         border_color: tuple,
         eliminated: bool,
-    ) -> None:
+    ) -> pygame.Rect:
         """Draw a large wins number under each player card."""
         wins_text = str(max(0, int(round_wins)))
         wins_surf = self._font_wins.render(wins_text, True, (250, 252, 255))
@@ -229,6 +216,7 @@ class PlayerCardRenderer:
 
         wins_rect = wins_surf.get_rect(center=footer_rect.center)
         surface.blit(wins_surf, wins_rect)
+        return footer_rect
 
     def _draw_eliminated_overlay(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
         overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
@@ -383,69 +371,7 @@ class PlayerCardRenderer:
         if getattr(player, "_eliminated", False):
             return 0
         extra_lives = int(getattr(player, "_extra_lives", 0))
-        return extra_lives
-
-    def _draw_ammo_bar(self, surface: pygame.Surface, rect: pygame.Rect, ammo: int, max_ammo: int, border_color: tuple) -> None:
-        """Draw ammo bar for projectiles."""
-        bg_rect = pygame.Rect(rect.left, rect.top, rect.width, rect.height)
-        pygame.draw.rect(surface, (40, 40, 50), bg_rect, border_radius=4)
-        
-        if max_ammo > 0:
-            ammo_ratio = ammo / max_ammo
-            ammo_width = int(rect.width * ammo_ratio)
-            if ammo_width > 0:
-                ammo_rect = pygame.Rect(rect.left, rect.top, ammo_width, rect.height)
-                if ammo_ratio > 0.6:
-                    ammo_color = (100, 150, 200)
-                elif ammo_ratio > 0.2:
-                    ammo_color = (200, 180, 80)
-                else:
-                    ammo_color = (150, 80, 80)
-                pygame.draw.rect(surface, ammo_color, ammo_rect, border_radius=4)
-        
-        pygame.draw.rect(surface, border_color, bg_rect, 1, border_radius=4)
-        
-        ammo_text = f"{ammo}/{max_ammo}"
-        text_surf = self._font_small.render(ammo_text, True, (255, 255, 255))
-        text_rect = text_surf.get_rect(center=(rect.left + rect.width // 2, rect.top + rect.height // 2))
-        surface.blit(text_surf, text_rect)
-
-    def _draw_health_bar(self, surface: pygame.Surface, rect: pygame.Rect, player, border_color: tuple) -> None:
-        """Draw a health bar for the player."""
-        health = int(getattr(player, "_health", 3))
-        max_health = int(getattr(player, "_max_health", 3))
-        
-        if max_health <= 0:
-            return
-        
-        bar_width = rect.width
-        bar_height = 16
-        bar_x = rect.left
-        bar_y = rect.top + 115
-        
-        bg_rect = pygame.Rect(bar_x, bar_y, bar_width, bar_height)
-        pygame.draw.rect(surface, (40, 40, 50), bg_rect, border_radius=4)
-        
-        health_ratio = health / max_health
-        health_width = int(bar_width * health_ratio)
-        if health_width > 0:
-            health_rect = pygame.Rect(bar_x, bar_y, health_width, bar_height)
-            
-            if health_ratio > 0.6:
-                health_color = (60, 200, 80)
-            elif health_ratio > 0.3:
-                health_color = (220, 200, 50)
-            else:
-                health_color = (200, 60, 60)
-            
-            pygame.draw.rect(surface, health_color, health_rect, border_radius=4)
-        
-        pygame.draw.rect(surface, border_color, bg_rect, 2, border_radius=4)
-        
-        hp_text = f"{health}/{max_health}"
-        text_surf = self._font_small.render(hp_text, True, (255, 255, 255))
-        text_rect = text_surf.get_rect(center=(bar_x + bar_width // 2, bar_y + bar_height // 2))
-        surface.blit(text_surf, text_rect)
+        return max(1, 1 + extra_lives)
 
     def _orb_key_from_label(self, label: Optional[str]) -> Optional[str]:
         if not label:

@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "Grid Survival"
-#define MyAppVersion "1.02"
+#define MyAppVersion "1.2"
 #define MyAppPublisher "GridSurvival, Inc."
 #define MyAppURL "https://pickmydish.duckdns.org:6060"
 #define MyAppExeName "Grid Survival.exe"
@@ -77,8 +77,17 @@ Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\kynm\Desktop\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Users\kynm\Desktop\Grid_Survival\dist\main\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Users\kynm\Desktop\Grid_Survival\dist\main\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
+
+[InstallDelete]
+Type: files; Name: "{userappdata}\Grid_Survival\player_accounts.db"; Check: not IsUpgrade
+Type: files; Name: "{userappdata}\Grid_Survival\player_accounts.db-wal"; Check: not IsUpgrade
+Type: files; Name: "{userappdata}\Grid_Survival\player_accounts.db-shm"; Check: not IsUpgrade
+Type: files; Name: "{localappdata}\Grid_Survival\player_accounts.db"; Check: not IsUpgrade
+Type: files; Name: "{localappdata}\Grid_Survival\player_accounts.db-wal"; Check: not IsUpgrade
+Type: files; Name: "{localappdata}\Grid_Survival\player_accounts.db-shm"; Check: not IsUpgrade
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\{#MyAppAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppAssocKey}"; ValueData: ""; Flags: uninsdeletevalue
@@ -92,4 +101,13 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function IsUpgrade: Boolean;
+var
+	UninstallKey: string;
+begin
+	UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#emit SetupSetting("AppId")}_is1';
+	Result := RegKeyExists(HKLM, UninstallKey) or RegKeyExists(HKCU, UninstallKey);
+end;
 

@@ -48,8 +48,6 @@ class OrbType(Enum):
     POWER  = "power"
     LIFE   = "life"
     PHASE  = "phase"
-    ULTIMATE = "ultimate"
-    CAVEMAN_ULTIMATE = "caveman_ultimate"
 
 
 # Visual config per type  (color, label, glow_color)
@@ -60,8 +58,6 @@ _ORB_VISUALS: dict[OrbType, tuple] = {
     OrbType.POWER:  ((200, 80,  255), (230, 140, 255)),
     OrbType.LIFE:   ((255, 105, 180), (255, 182, 193)),  # Pink heart
     OrbType.PHASE:  ((120, 255, 190), (190, 255, 230)),
-    OrbType.ULTIMATE: ((255, 80, 0), (255, 150, 50)),  # Fiery red - for ninja ultimate
-    OrbType.CAVEMAN_ULTIMATE: ((120, 120, 120), (180, 180, 180)),  # Grey - for caveman ultimate
 }
 
 _ORB_IMAGES: dict[OrbType, pygame.Surface | None] = {}
@@ -218,14 +214,13 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
         return "POWER CHARGE"
 
     elif orb_type == OrbType.LIFE:
-        # Grant extra life - revives at full health when HP reaches 0
+        # Grant a revive or extra life
         is_eliminated = getattr(collector, '_eliminated', False)
         if is_eliminated:
             # Revive immediately if eliminated
             if collector in game.eliminated_players:
                 game.eliminated_players.remove(collector)
             collector._eliminated = False
-            collector._health = collector._max_health
             game._rescue_player_to_safe_tile(collector)
             if hasattr(collector, "set_active_orb"):
                 collector.set_active_orb("Revived", None)
@@ -233,10 +228,10 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
             return "LIFE  Revived!"
         else:
             # Grant extra life for future use
-            if hasattr(collector, "add_extra_life"):
-                collector.add_extra_life()
+            if hasattr(collector, "add_life"):
+                collector.add_life()
                 if hasattr(collector, "set_active_orb"):
-                    collector.set_active_orb("EXTRA LIFE", None)
+                    collector.set_active_orb("Extra Life", None)
                 return "LIFE  Extra life granted!"
         return "LIFE  Extra life granted!"
 
@@ -246,14 +241,6 @@ def apply_orb_effect(orb_type: OrbType, collector, game) -> str:
         if hasattr(collector, "set_active_orb"):
             collector.set_active_orb("Void Walk", ORB_VOID_WALK_DURATION)
         return f"VOID WALK {int(ORB_VOID_WALK_DURATION)}s"
-
-    elif orb_type == OrbType.ULTIMATE or orb_type == OrbType.CAVEMAN_ULTIMATE:
-        if hasattr(collector, "add_ultimate_charge"):
-            collector.add_ultimate_charge()
-            if hasattr(collector, "set_active_orb"):
-                collector.set_active_orb("ULTIMATE READY", None)
-            return "ULTIMATE CHARGE +1!"
-        return "ULTIMATE CHARGE +1!"
 
     return ""
 
@@ -284,9 +271,7 @@ class OrbManager:
         [OrbType.FREEZE] * 2 +
         [OrbType.POWER]  * 2 +
         [OrbType.LIFE]   * 2 +  # Life orb - heart-shaped pink heart
-        [OrbType.PHASE]  * 4 +
-        [OrbType.ULTIMATE] * 3 +  # Ultimate orb for ninja special attacks
-        [OrbType.CAVEMAN_ULTIMATE] * 3  # Ultimate orb for caveman special attacks
+        [OrbType.PHASE]  * 4
     )
 
     def __init__(self, level_number: int = 1):

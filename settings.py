@@ -1,4 +1,6 @@
 import sys
+import os
+import shutil
 from pathlib import Path
 import pygame
 
@@ -78,17 +80,6 @@ PLAYER_JUMP_GRAVITY = 2000         # Gravity acceleration on Z axis
 PLAYER_MAX_FALL_SPEED = 1000       # Max fall speed for Z axis
 PLAYER_JUMP_KEY = pygame.K_SPACE   # Default jump key
 
-COMBAT_MAX_HEALTH = 5
-COMBAT_DEFAULT_HEALTH = 3
-ATTACK_RANGE = 60
-ATTACK_COOLDOWN = 0.5
-ATTACK_DAMAGE = 1
-ULTIMATE_COOLDOWN = 10.0
-ULTIMATE_DAMAGE = 2
-ULTIMATE_DAMAGE_PERCENT = 0.60
-KNOCKBACK_FORCE = 300
-PROJECTILE_SPEED = 400
-
 DEFAULT_CONTROLS = {
     "player1": {
         "up": pygame.K_w,
@@ -97,8 +88,6 @@ DEFAULT_CONTROLS = {
         "right": pygame.K_d,
         "jump": pygame.K_SPACE,
         "power": pygame.K_q,
-        "attack": pygame.K_f,
-        "ultimate": pygame.K_g,
     },
     "player2": {
         "up": pygame.K_UP,
@@ -107,12 +96,49 @@ DEFAULT_CONTROLS = {
         "right": pygame.K_RIGHT,
         "jump": pygame.K_RSHIFT,
         "power": pygame.K_SLASH,
-        "attack": pygame.K_RCTRL,
-        "ultimate": pygame.K_END,
     },
 }
 
-CUSTOM_CONTROLS_FILE = BASE_DIR / "custom_controls.json"
+def _resolve_controls_file() -> Path:
+    """Return the controls file path.
+
+    Source runs keep using the repo file.
+    Frozen one-file builds use a persistent user directory so controls survive restarts.
+    """
+    if getattr(sys, "frozen", False):
+        appdata = os.getenv("APPDATA") or os.getenv("LOCALAPPDATA")
+        if appdata:
+            return Path(appdata) / "Grid_Survival" / "custom_controls.json"
+        return Path.home() / ".grid_survival" / "custom_controls.json"
+    return BASE_DIR / "custom_controls.json"
+
+
+CUSTOM_CONTROLS_FILE = _resolve_controls_file()
+_LEGACY_CUSTOM_CONTROLS_FILE = BASE_DIR / "custom_controls.json"
+
+
+def _migrate_legacy_controls_if_needed() -> None:
+    """Copy a legacy controls file into the persistent location once."""
+    if CUSTOM_CONTROLS_FILE.exists() or not getattr(sys, "frozen", False):
+        return
+
+    candidates = [
+        Path(sys.executable).resolve().parent / "custom_controls.json",
+        Path.cwd() / "custom_controls.json",
+        _LEGACY_CUSTOM_CONTROLS_FILE,
+    ]
+
+    for source in candidates:
+        try:
+            if not source.exists():
+                continue
+            if source.resolve() == CUSTOM_CONTROLS_FILE.resolve():
+                continue
+            CUSTOM_CONTROLS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, CUSTOM_CONTROLS_FILE)
+            return
+        except Exception:
+            continue
 
 _KEY_TO_NAME = {
     pygame.K_SPACE: "SPACE",
@@ -209,29 +235,25 @@ def _default_controls():
 def load_custom_controls():
     import json
 
+    _migrate_legacy_controls_if_needed()
+
     if not CUSTOM_CONTROLS_FILE.exists():
         return None
     try:
         with open(CUSTOM_CONTROLS_FILE, "r") as f:
             data = json.load(f)
         converted = {}
-        for player_key in DEFAULT_CONTROLS:
-            controls = data.get(player_key, {})
+        for player_key, controls in data.items():
             converted_controls = {}
-            # Load in the order defined in DEFAULT_CONTROLS
-            for action in DEFAULT_CONTROLS[player_key]:
-                key_name = controls.get(action)
-                if key_name:
-                    if key_name.startswith("K_"):
-                        key_str = key_name[2:]
-                        if key_str in _NAME_TO_KEY:
-                            converted_controls[action] = _NAME_TO_KEY[key_str]
-                        else:
-                            converted_controls[action] = getattr(pygame, f"K_{key_str.lower()}", pygame.K_UNKNOWN)
+            for action, key_name in controls.items():
+                if key_name.startswith("K_"):
+                    key_str = key_name[2:]
+                    if key_str in _NAME_TO_KEY:
+                        converted_controls[action] = _NAME_TO_KEY[key_str]
                     else:
-                        converted_controls[action] = getattr(pygame, key_name, pygame.K_UNKNOWN)
+                        converted_controls[action] = getattr(pygame, f"K_{key_str.lower()}", pygame.K_UNKNOWN)
                 else:
-                    converted_controls[action] = DEFAULT_CONTROLS[player_key][action]
+                    converted_controls[action] = getattr(pygame, key_name, pygame.K_UNKNOWN)
             converted[player_key] = converted_controls
         return converted
     except Exception:
@@ -242,6 +264,7 @@ def save_custom_controls(controls):
     import json
 
     try:
+        CUSTOM_CONTROLS_FILE.parent.mkdir(parents=True, exist_ok=True)
         serializable = {}
         for player_key, player_controls in controls.items():
             serializable_controls = {}

@@ -42,6 +42,7 @@ python -m venv .venv
 .venv\Scripts\activate  # PowerShell / Command Prompt
 pip install --upgrade pip
 pip install pygame pytmx
+pip install miniupnpc
 ```
 
 ### Run the game
@@ -49,6 +50,49 @@ pip install pygame pytmx
 ```bash
 python main.py
 ```
+
+## Account System and Sync
+
+The game now supports local account creation and optional VPS sync:
+
+- Local account data is stored in SQLite (`player_accounts.db` in source runs, AppData in frozen builds).
+- Each account tracks username, RR (ranked rating), wins, losses, MVP count, eliminations, deaths, and damage stats.
+- At startup, the Account Portal allows login, account creation, profile view, and leaderboard view.
+- Leaderboard is online-only (requires configured VPS API).
+- During gameplay, stats and RR deltas are written locally first and queued for sync.
+- When online, queued sync events are pushed to the VPS API automatically.
+
+### Configure VPS endpoint
+
+Set this environment variable before launching the game client:
+
+```powershell
+$env:GRID_SURVIVAL_API_URL = "http://<your-vps-host>:8000"
+python main.py
+```
+
+If `GRID_SURVIVAL_API_URL` is not set, the game still works fully with local accounts only.
+
+### Run the sample VPS sync API
+
+This repository includes a lightweight server for external account sync:
+
+```bash
+python -m backend.vps_sync_server
+```
+
+Optional server environment variables:
+
+- Preferred:
+	- `GRID_SURVIVAL_VPS_HOST` (default `0.0.0.0`)
+	- `GRID_SURVIVAL_VPS_PORT` (default `8000`)
+	- `GRID_SURVIVAL_VPS_DB` (default `vps_accounts.db`)
+- Backward-compatible aliases:
+	- `DB_HOST`
+	- `DB_PORT`
+	- `DB_NAME`
+
+If both styles are set, `GRID_SURVIVAL_VPS_*` takes precedence.
 
 > Keep the asset folder structure intact. `settings.py` points directly to the bundled art, TMX map, fonts, and audio files.
 

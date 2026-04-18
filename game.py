@@ -3,11 +3,13 @@ from pathlib import Path
 
 import pygame
 
+from backend.account_service import AccountService
 from ai_player import AIPlayer
 from assets import load_background_surface, load_tilemap_surface
 from audio import get_audio
 from collision_manager import CollisionManager
 from player import Player
+from post_match_ui import MatchSummaryScreen, RRGainScreen
 from orbs import OrbManager
 from pacman_enemies import PacmanEnemyManager
 from powers import (
@@ -18,9 +20,9 @@ from powers import (
 )
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
-from hazards import HazardManager, Bullet
-from obstacles import ObstacleManager
+from hazards import HazardManager
 from ui import GameHUD, EliminationScreen, VictoryScreen
+from scenes.common import draw_online_status_badge, update_online_status
 from settings import (
     BACKGROUND_COLOR,
     BACKGROUND_MUSIC_TRACKS,
@@ -58,6 +60,10 @@ class GameManager:
         level_map_path: str | Path | None = None,
         level_background_path: str | Path | None = None,
         target_score: int = 3,
+        account_service: AccountService | None = None,
+        account_username: str | None = None,
+        network_player_names: list[str] | None = None,
+        ranked_override: bool | None = None,
     ):
         if screen is None or clock is None:
             pygame.init()
@@ -69,6 +75,19 @@ class GameManager:
         self.game_mode = game_mode
         self.paused = False
         self.selected_characters = selected_characters or []
+        self.account_service = account_service
+        self.account_username = (account_username or "").strip() or None
+        self.network_player_names = [str(name) for name in (network_player_names or [])]
+        self._ranked_override = None if ranked_override is None else bool(ranked_override)
+        self._guest_rr = 1000
+        self._account_sync_timer = 0.0
+        self._account_sync_interval = 20.0
+        if self.account_service and self.account_username:
+            self._sync_account_now()
+            profile = self.account_service.get_profile(self.account_username)
+            if profile is not None:
+                self._guest_rr = int(profile.rr)
+        self._match_rr_start = int(self._guest_rr)
         self.network = network
         self.is_network_game = (
             self.game_mode == MODE_ONLINE_MULTIPLAYER and self.network is not None
@@ -83,8 +102,15 @@ class GameManager:
         self._snapshot_interval = 1 / 30
         self._world_snapshot_send_timer = 0.0
         self._world_snapshot_interval = 1 / 6
+        self._last_client_snapshot_time = -1.0
+        self._last_client_world_snapshot_time = -1.0
         self._client_position_blend = 0.35
         self._client_snap_distance = 180.0
+        # Rate-limiting for client input messages: only send when the state
+        # changes or when the minimum interval has elapsed (30 Hz cap).
+        self._input_send_timer: float = 0.0
+        self._input_send_interval: float = 1 / 30
+        self._last_sent_input: dict | None = None
         self.level_map_path = Path(level_map_path) if level_map_path else None
         self.level_background_path = Path(level_background_path) if level_background_path else None
         self.target_score = max(1, int(target_score))
@@ -92,6 +118,9 @@ class GameManager:
         self._round_restart_delay = 2.0
         self._round_restart_timer = 0.0
         self._match_complete = False
+        self._round_transition_seen = False
+        self._match_player_labels: list[str] = []
+        self._match_player_stats: list[dict] = []
         
         # Load assets
         self.background_surface = load_background_surface(
@@ -127,12 +156,10 @@ class GameManager:
         )
         self.collision_manager = CollisionManager()
         self.hazard_manager = HazardManager(self.collision_manager)
-        self.obstacle_manager = ObstacleManager()
         self.hud = GameHUD()
         self.water = AnimatedWater()
         self.orb_manager = OrbManager()
         self.pacman_enemy_manager = None
-        self.projectiles: list[Bullet] = []
 
         # Initialize players based on game mode
         self.players = []
@@ -223,6 +250,8 @@ class GameManager:
             self.pacman_enemy_manager = PacmanEnemyManager(enemy_spawns)
 
         self.round_wins = [0 for _ in self.players]
+        self._match_player_labels = [self._resolve_player_label(idx) for idx in range(len(self.players))]
+        self._match_player_stats = [self._new_match_stat_row(idx) for idx in range(len(self.players))]
         self.hud.set_player_info(player_name, len(self.players), len(self.players))
         self.hud.set_round_scoreboard(self.round_wins, self.target_score)
 
@@ -284,38 +313,26 @@ class GameManager:
                             self._pending_power_press = True
                     else:
                         self._handle_power_key(event.key)
-                        self._handle_attack_key(event.key)
-            
-            if not self.is_network_game:
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_r and self.game_over:
-                        pass  # Already handled above
-                    else:
-                        self._handle_ultimate_key(event.key)
 
     def update(self, dt: float, keys):
         self.audio.update()
+
+        if self.account_service and self.account_username:
+            self._account_sync_timer += dt
+            if self._account_sync_timer >= self._account_sync_interval:
+                self._account_sync_timer = 0.0
+                self._sync_account_now()
 
         if getattr(self, "paused", False):
             if self.is_network_game and self.network and self.network.connected:
                 self._process_network_messages()
                 if not self.running or not self.network.connected:
                     return
-            if keys[pygame.K_ESCAPE]:
-                if self.is_network_game and self.network and self.network.connected:
-                    self.network.send_message("disconnect")
-                self.running = False
-            elif keys[pygame.K_LCTRL]:
+            if keys[pygame.K_LCTRL]:
                 if self.is_network_game and self.network and self.network.connected:
                     self.network.send_message("disconnect")
                 self.return_to_main_menu = True
                 self.running = False
-            return
-
-        if keys[pygame.K_ESCAPE] and (not self.game_over or self._can_use_end_of_match_actions()):
-            if self.is_network_game and self.network and self.network.connected:
-                self.network.send_message("disconnect")
-            self.running = False
             return
 
         if self.is_network_game:
@@ -335,7 +352,15 @@ class GameManager:
                     self.remote_player_index: self._remote_input_state,
                 }
             else:
-                self.network.send_message("input_state", input=local_input)
+                # Rate-limit input messages to 30 Hz and skip identical states.
+                # Previously sent every frame (up to 60 Hz), flooding the host
+                # with redundant messages it mostly discarded.
+                self._input_send_timer += dt
+                input_changed = local_input != self._last_sent_input
+                if input_changed or self._input_send_timer >= self._input_send_interval:
+                    self.network.send_message("input_state", input=local_input)
+                    self._last_sent_input = dict(local_input)
+                    self._input_send_timer = 0.0
                 self._update_client_network_game(dt)
                 self._pending_power_press = False
                 return
@@ -385,7 +410,6 @@ class GameManager:
         self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
 
         self.hazard_manager.update(dt)
-        self.obstacle_manager.update(dt, self._time_since_start)
         self.hud.update(dt)
         for player in self.players:
             player._immune_to_hazards = False
@@ -452,11 +476,6 @@ class GameManager:
                 # Check for LIFE orb collection before elimination
                 self._check_life_orb_collection(player)
                 self._eliminate_player(player, "hit by hazard")
-            
-            # Check obstacle collisions
-            if self.obstacle_manager.check_player_collision(player):
-                self._check_life_orb_collection(player)
-                self._eliminate_player(player, "hit by obstacle")
 
             # Check if player fell off screen
             if player.position.y > WINDOW_SIZE[1] + 100:
@@ -487,11 +506,17 @@ class GameManager:
 
         self.orb_manager.update(dt, self.walkable_bounds, self.players, self)
 
-        # Update projectiles
-        self._update_projectiles(dt)
+        for idx, player in enumerate(self.players):
+            if idx >= len(self._match_player_stats):
+                continue
+            if player in self.eliminated_players:
+                continue
+            self._match_player_stats[idx]["survival_time"] += float(dt)
 
         # Update player count in HUD
         alive_count = len(self.players) - len(self.eliminated_players)
+        if alive_count > 1:
+            self._round_transition_seen = False
         self.hud.set_player_info(self.player_name, alive_count, len(self.players))
 
         # Check completion only after elimination animations finish so death sequences play out.
@@ -500,6 +525,9 @@ class GameManager:
         # Victory for the last remaining participant.
         if len(self.players) > 1 and alive_count == 1:
             if completion_ready:
+                if self._round_transition_seen:
+                    return
+                self._round_transition_seen = True
                 winner_index = next(
                     (idx for idx, player in enumerate(self.players) if player not in self.eliminated_players),
                     0,
@@ -509,8 +537,14 @@ class GameManager:
                 self._handle_round_victory(winner_index, winner_label)
             return
 
-        # Elimination when everyone is gone.
+        # Round draw when everyone is gone in multi-player.
         if alive_count == 0 and completion_ready:
+            if len(self.players) > 1:
+                if self._round_transition_seen:
+                    return
+                self._round_transition_seen = True
+                self._handle_round_draw()
+                return
             self._trigger_game_over()
 
         for player in self.players:
@@ -525,13 +559,22 @@ class GameManager:
                     self._world_snapshot_send_timer = 0.0
                 self.network.send_message(
                     "snapshot",
-                    state=self._build_network_snapshot(include_world=include_world),
+                    state=self._build_network_snapshot(),
                 )
+                if include_world:
+                    self.network.send_message(
+                        "world_snapshot",
+                        state=self._build_network_world_snapshot(),
+                    )
             self._pending_power_press = False
             self._authoritative_network_inputs = None
 
     def _update_client_network_game(self, dt: float):
         self.water.update(dt)
+        # Advance tile crumbling/warning animations locally so they are smooth
+        # between host snapshots.  Previously missing, making tiles appear frozen
+        # on the client side.
+        self.tile_manager.update(dt)
         self.orb_manager.advance_visuals(dt)
         if self.pacman_enemy_manager:
             self.pacman_enemy_manager.advance_visuals(dt)
@@ -543,6 +586,7 @@ class GameManager:
 
     def _process_network_messages(self):
         latest_snapshot = None
+        latest_world_snapshot = None
         for message in self.network.get_messages():
             message_type = message.get("type")
             if message_type == "disconnect":
@@ -558,9 +602,13 @@ class GameManager:
                 self._remote_input_state = self._sanitize_network_input(message.get("input"))
             elif (not self.is_network_host) and message_type == "snapshot":
                 latest_snapshot = message.get("state")
+            elif (not self.is_network_host) and message_type == "world_snapshot":
+                latest_world_snapshot = message.get("state")
 
         if latest_snapshot is not None:
             self._apply_network_snapshot(latest_snapshot)
+        if latest_world_snapshot is not None:
+            self._apply_network_world_snapshot(latest_world_snapshot)
 
     def _build_local_input_state(self, keys) -> dict:
         player = self._local_network_player()
@@ -649,7 +697,7 @@ class GameManager:
         blended["y"] = current.y + (target.y - current.y) * blend
         return blended
 
-    def _build_network_snapshot(self, include_world: bool = True) -> dict:
+    def _build_network_snapshot(self) -> dict:
         end_state = None
         if self.game_over_state == "victory" and self.victory_screen:
             end_state = {
@@ -684,26 +732,30 @@ class GameManager:
             ],
             "hud": self.hud.snapshot_state(),
         }
-
-        if include_world:
-            snapshot["tiles"] = self.tile_manager.snapshot_state()
-            snapshot["hazards"] = self.hazard_manager.snapshot_state()
-            snapshot["obstacles"] = self.obstacle_manager.snapshot_state()
-            snapshot["orbs"] = self.orb_manager.snapshot_state()
-
-        snapshot["pacman_enemies"] = (
-            self.pacman_enemy_manager.snapshot_state()
-            if self.pacman_enemy_manager
-            else None
-        )
-
         return snapshot
+
+    def _build_network_world_snapshot(self) -> dict:
+        return {
+            "time_since_start": float(self._time_since_start),
+            "tiles": self.tile_manager.snapshot_state(),
+            "hazards": self.hazard_manager.snapshot_state(),
+            "orbs": self.orb_manager.snapshot_state(),
+            "pacman_enemies": (
+                self.pacman_enemy_manager.snapshot_state()
+                if self.pacman_enemy_manager
+                else None
+            ),
+        }
 
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
             return
 
-        self._time_since_start = float(snapshot.get("time_since_start", self._time_since_start))
+        incoming_time = float(snapshot.get("time_since_start", self._time_since_start))
+        if incoming_time + 1e-6 < self._last_client_snapshot_time:
+            return
+        self._last_client_snapshot_time = incoming_time
+        self._time_since_start = incoming_time
         self.paused = bool(snapshot.get("paused", self.paused))
         self.target_score = max(1, int(snapshot.get("target_score", self.target_score)))
         incoming_round_wins = snapshot.get("round_wins", self.round_wins)
@@ -714,15 +766,12 @@ class GameManager:
         elif len(self.round_wins) > len(self.players):
             self.round_wins = self.round_wins[: len(self.players)]
         self._match_complete = bool(snapshot.get("match_complete", self._match_complete))
-        self.tile_manager.apply_snapshot(snapshot.get("tiles"))
-        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
-        self.hazard_manager.apply_snapshot(snapshot.get("hazards"))
-        self.obstacle_manager.apply_snapshot(snapshot.get("obstacles"))
-        self.orb_manager.apply_snapshot(snapshot.get("orbs"))
-        if self.pacman_enemy_manager:
-            self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
         self.hud.apply_snapshot(snapshot.get("hud"))
         self.hud.set_round_scoreboard(self.round_wins, self.target_score)
+
+        # Backward compatibility path if an older host still sends full snapshots.
+        if any(key in snapshot for key in ("tiles", "hazards", "orbs", "pacman_enemies")):
+            self._apply_network_world_snapshot(snapshot)
 
         self.eliminated_players.clear()
         self.victory_screen = None
@@ -753,6 +802,25 @@ class GameManager:
             self.elimination_screen = None
             self.victory_screen = None
             self.game_over_state = None
+
+    def _apply_network_world_snapshot(self, snapshot):
+        if not isinstance(snapshot, dict):
+            return
+
+        incoming_time = float(snapshot.get("time_since_start", self._time_since_start))
+        if incoming_time + 1e-6 < self._last_client_world_snapshot_time:
+            return
+        self._last_client_world_snapshot_time = incoming_time
+
+        if "tiles" in snapshot:
+            self.tile_manager.apply_snapshot(snapshot.get("tiles"))
+            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        if "hazards" in snapshot:
+            self.hazard_manager.apply_snapshot(snapshot.get("hazards"))
+        if "orbs" in snapshot:
+            self.orb_manager.apply_snapshot(snapshot.get("orbs"))
+        if "pacman_enemies" in snapshot and self.pacman_enemy_manager:
+            self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
@@ -794,14 +862,6 @@ class GameManager:
 
         # Draw hazards
         self.hazard_manager.draw(self.screen)
-        
-        # Draw obstacles
-        self.obstacle_manager.draw(self.screen)
-
-        # Draw projectiles
-        for projectile in self.projectiles:
-            if projectile.active:
-                projectile.draw(self.screen)
 
         # Draw active power visuals
         for player in self.players:
@@ -845,6 +905,26 @@ class GameManager:
             self.screen.blit(text, text_rect)
             self.screen.blit(sub_text, sub_rect)
             self.screen.blit(menu_text, menu_rect)
+
+        reserved: list[pygame.Rect] = []
+        for rect in (
+            self.hud.pause_rect,
+            self.hud.mute_rect,
+            self.hud.volume_rect,
+            self.hud.timer_rect,
+            self.hud.alive_rect,
+        ):
+            if isinstance(rect, pygame.Rect):
+                reserved.append(rect)
+        for rect in self.hud.player_card_rects:
+            if isinstance(rect, pygame.Rect):
+                reserved.append(rect)
+
+        draw_online_status_badge(
+            self.screen,
+            reserved_rects=reserved,
+            preferred_corners=("bottom-right", "top-right", "bottom-left", "top-left"),
+        )
 
         pygame.display.flip()
 
@@ -1009,6 +1089,13 @@ class GameManager:
             self.eliminated_players.append(player)
             player._eliminated = True
             print(f"Player eliminated: {reason}")
+            try:
+                eliminated_index = self.players.index(player)
+            except ValueError:
+                eliminated_index = -1
+            if 0 <= eliminated_index < len(self._match_player_stats):
+                self._match_player_stats[eliminated_index]["deaths"] += 1
+                self._match_player_stats[eliminated_index]["damage_taken"] += 100
             # Trigger death state if available
             if hasattr(player, 'die'):
                 player.die()
@@ -1067,7 +1154,7 @@ class GameManager:
         return False
 
     def _can_use_end_of_match_actions(self) -> bool:
-        """Allow restart/quit/menu shortcuts only on final match end screens."""
+        """Allow restart/menu shortcuts only on final match end screens."""
         return bool(self._match_complete or len(self.players) <= 1)
 
     def _trigger_game_over(self):
@@ -1120,7 +1207,7 @@ class GameManager:
                 self.network.send_message("snapshot", state=self._build_network_snapshot())
 
     def _handle_round_victory(self, winner_index: int, winner_label: str):
-        """Count the round winner and decide whether the match is complete."""
+        """Count round results and show RR/summary only at full match completion."""
         if not self.players:
             return
 
@@ -1129,12 +1216,319 @@ class GameManager:
             self.round_wins = [0 for _ in self.players]
 
         self.round_wins[winner_index] += 1
+        self._register_round_stats(winner_index, is_draw=False)
         self.hud.set_round_scoreboard(self.round_wins, self.target_score)
         self._round_restart_timer = 0.0
         self._match_complete = self.round_wins[winner_index] >= self.target_score
 
-        result_suffix = "WINS MATCH" if self._match_complete else "WINS ROUND"
-        self._trigger_victory(f"P{winner_index + 1} - {winner_label} {result_suffix}", winner_label)
+        if not self._match_complete:
+            if self.is_network_game:
+                if self.is_network_host:
+                    self._restart_network_round(reset_match=False)
+            else:
+                self._restart_game(reset_match=False)
+            return
+
+        action = self._run_round_transition(winner_index, winner_label, is_draw=False)
+        if action == "quit":
+            self.running = False
+            return
+        if action == "menu":
+            if self.is_network_game and self.network and self.network.connected:
+                self.network.send_message("disconnect")
+            self.return_to_main_menu = True
+            self.running = False
+            return
+
+        self.return_to_main_menu = True
+        self.running = False
+
+    def _handle_round_draw(self) -> None:
+        """Handle a round where all players are eliminated with no winner."""
+        if not self.players:
+            return
+
+        self._register_round_stats(None, is_draw=True)
+        self.hud.set_round_scoreboard(self.round_wins, self.target_score)
+        self._round_restart_timer = 0.0
+        self._match_complete = False
+
+        if self.is_network_game:
+            if self.is_network_host:
+                self._restart_network_round(reset_match=False)
+        else:
+            self._restart_game(reset_match=False)
+
+    def _resolve_player_label(self, index: int) -> str:
+        if 0 <= index < len(self.network_player_names):
+            label = self.network_player_names[index].strip()
+            if label:
+                return label
+
+        if self.account_username and index == (self.local_player_index if self.is_network_game else 0):
+            return self.account_username
+
+        player = self.players[index] if 0 <= index < len(self.players) else None
+        if player is not None and getattr(player, "is_ai", False):
+            return f"AI {index + 1}"
+
+        return f"Player {index + 1}"
+
+    def _new_match_stat_row(self, index: int) -> dict:
+        player = self.players[index] if 0 <= index < len(self.players) else None
+        return {
+            "username": self._resolve_player_label(index),
+            "character": str(getattr(player, "character_name", f"Player {index + 1}")),
+            "rounds_played": 0,
+            "rounds_won": 0,
+            "eliminations": 0,
+            "deaths": 0,
+            "damage_dealt": 0,
+            "damage_taken": 0,
+            "survival_time": 0.0,
+        }
+
+    def _register_round_stats(self, winner_index: int | None, is_draw: bool = False) -> None:
+        for idx, row in enumerate(self._match_player_stats):
+            row["character"] = str(getattr(self.players[idx], "character_name", row.get("character", "")))
+            row["rounds_played"] += 1
+
+            if not is_draw and winner_index is not None and idx == winner_index:
+                row["rounds_won"] += 1
+                row["eliminations"] += max(0, len(self.players) - 1)
+                row["damage_dealt"] += 180
+            elif is_draw:
+                row["damage_dealt"] += 60
+            else:
+                # Non-winners still tend to deal some incidental damage during the round.
+                row["damage_dealt"] += 40
+
+            if self.players[idx] in self.eliminated_players:
+                row["damage_taken"] += 30
+
+    def _compute_mvp_index(self) -> int:
+        if not self._match_player_stats:
+            return 0
+
+        best_index = 0
+        best_score = -10**9
+        for idx, row in enumerate(self._match_player_stats):
+            score = (
+                int(row.get("rounds_won", 0)) * 120
+                + int(row.get("eliminations", 0)) * 36
+                + int(row.get("damage_dealt", 0)) * 0.12
+                + float(row.get("survival_time", 0.0)) * 0.45
+                - int(row.get("deaths", 0)) * 28
+            )
+            if score > best_score:
+                best_score = score
+                best_index = idx
+        return best_index
+
+    def _local_account_index(self) -> int | None:
+        if self.is_network_game:
+            if 0 <= self.local_player_index < len(self.players):
+                return self.local_player_index
+            return None
+        if self.players:
+            return 0
+        return None
+
+    def _is_ranked_mode(self) -> bool:
+        if self._ranked_override is not None:
+            return bool(self._ranked_override)
+        # Default behavior: LAN/online matches are ranked, campaign/local multiplayer are unranked.
+        return self.game_mode == MODE_ONLINE_MULTIPLAYER
+
+    def _sync_account_now(self) -> None:
+        if self.account_service and self.account_username:
+            self.account_service.sync_pending(self.account_username)
+
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, float(value)))
+
+    def _share(self, value: float, total: float, neutral: float = 0.5) -> float:
+        if total <= 0:
+            return float(neutral)
+        return self._clamp01(float(value) / float(total))
+
+    def _match_performance_score(
+        self,
+        local_index: int,
+        winner_index: int | None,
+        mvp_index: int,
+        is_draw: bool = False,
+    ) -> float:
+        if local_index < 0 or local_index >= len(self._match_player_stats):
+            return 0.5
+
+        row = self._match_player_stats[local_index]
+        total_rounds_won = sum(max(0, int(r.get("rounds_won", 0))) for r in self._match_player_stats)
+        total_eliminations = sum(max(0, int(r.get("eliminations", 0))) for r in self._match_player_stats)
+        total_damage_dealt = sum(max(0, int(r.get("damage_dealt", 0))) for r in self._match_player_stats)
+        total_damage_taken = sum(max(0, int(r.get("damage_taken", 0))) for r in self._match_player_stats)
+        total_survival = sum(max(0.0, float(r.get("survival_time", 0.0))) for r in self._match_player_stats)
+        total_deaths = sum(max(0, int(r.get("deaths", 0))) for r in self._match_player_stats)
+
+        rounds_share = self._share(max(0, int(row.get("rounds_won", 0))), total_rounds_won)
+        elimination_share = self._share(max(0, int(row.get("eliminations", 0))), total_eliminations)
+        dealt_share = self._share(max(0, int(row.get("damage_dealt", 0))), total_damage_dealt)
+        taken_efficiency = 1.0 - self._share(max(0, int(row.get("damage_taken", 0))), total_damage_taken)
+        survival_share = self._share(max(0.0, float(row.get("survival_time", 0.0))), total_survival)
+        death_efficiency = 1.0 - self._share(max(0, int(row.get("deaths", 0))), total_deaths)
+
+        base_score = (
+            0.24 * rounds_share
+            + 0.17 * elimination_share
+            + 0.17 * dealt_share
+            + 0.14 * taken_efficiency
+            + 0.14 * survival_share
+            + 0.14 * death_efficiency
+        )
+        win_bonus = 0.12 if (winner_index is not None and local_index == winner_index) else 0.0
+        mvp_bonus = 0.08 if local_index == mvp_index else 0.0
+        draw_bonus = 0.03 if is_draw else 0.0
+        return self._clamp01(base_score + win_bonus + mvp_bonus + draw_bonus)
+
+    def _compute_rr_delta(
+        self,
+        local_index: int,
+        winner_index: int | None,
+        mvp_index: int,
+        is_draw: bool = False,
+        ranked_mode: bool = True,
+    ) -> int:
+        if not ranked_mode:
+            return 0
+        if is_draw:
+            return 0
+
+        score = self._match_performance_score(local_index, winner_index, mvp_index, is_draw=is_draw)
+        won_match = winner_index is not None and local_index == winner_index
+        if won_match:
+            gain = int(round(score * 45.0))
+            return max(0, min(45, gain))
+
+        loss = int(round((1.0 - score) * 30.0))
+        return -max(0, min(30, loss))
+
+    def _apply_local_account_round_result(
+        self,
+        winner_index: int | None,
+        mvp_index: int,
+        is_draw: bool = False,
+    ) -> tuple[str, int, int, int]:
+        local_index = self._local_account_index()
+        local_label = self.account_username or self.player_name
+        rr_before = int(self._guest_rr)
+        rr_after = rr_before
+        rr_delta = 0
+
+        if local_index is None:
+            return local_label, rr_before, rr_after, rr_delta
+
+        ranked_mode = self._is_ranked_mode()
+        rr_delta = self._compute_rr_delta(
+            local_index,
+            winner_index,
+            mvp_index,
+            is_draw=is_draw,
+            ranked_mode=ranked_mode,
+        )
+
+        local_row = self._match_player_stats[local_index] if local_index < len(self._match_player_stats) else {}
+        damage_dealt_delta = int(max(0, local_row.get("damage_dealt", 0)))
+        damage_taken_delta = int(max(0, local_row.get("damage_taken", 0)))
+        eliminations_delta = int(max(0, local_row.get("eliminations", 0)))
+        deaths_delta = int(max(0, local_row.get("deaths", 0)))
+        rounds_played_delta = int(max(0, local_row.get("rounds_played", 0)))
+        rounds_won_delta = int(max(0, local_row.get("rounds_won", 0)))
+
+        did_win_match = bool(self._match_complete and not is_draw and winner_index is not None and local_index == winner_index)
+        matches_played_delta = 1 if self._match_complete else 0
+        matches_won_delta = 1 if did_win_match else 0
+        mvp_delta = 1 if self._match_complete and local_index == mvp_index else 0
+
+        if self.account_service and self.account_username:
+            profile_before = self.account_service.get_profile(self.account_username)
+            if profile_before is not None:
+                rr_before = int(profile_before.rr)
+
+            updated = self.account_service.apply_stat_delta(
+                self.account_username,
+                rr_delta=rr_delta,
+                damage_dealt=damage_dealt_delta,
+                damage_taken=damage_taken_delta,
+                eliminations=eliminations_delta,
+                deaths=deaths_delta,
+                rounds_played=rounds_played_delta,
+                rounds_won=rounds_won_delta,
+                matches_played=matches_played_delta,
+                matches_won=matches_won_delta,
+                mvp_count=mvp_delta,
+                ranked=ranked_mode,
+                sync_now=False,
+            )
+            if updated is not None:
+                rr_after = int(updated.rr)
+                self._guest_rr = rr_after
+            else:
+                rr_after = max(0, rr_before + rr_delta) if ranked_mode else rr_before
+                self._guest_rr = rr_after
+        else:
+            rr_before = int(self._guest_rr)
+            rr_after = max(0, rr_before + rr_delta) if ranked_mode else rr_before
+            self._guest_rr = rr_after
+
+        return local_label, rr_before, rr_after, rr_delta
+
+    def _build_summary_rows(self) -> list[dict]:
+        rows: list[dict] = []
+        for idx, row in enumerate(self._match_player_stats):
+            rows.append(
+                {
+                    "username": str(row.get("username", self._resolve_player_label(idx))),
+                    "character": str(row.get("character", getattr(self.players[idx], "character_name", "Caveman"))),
+                    "rounds_won": int(row.get("rounds_won", 0)),
+                    "eliminations": int(row.get("eliminations", 0)),
+                    "deaths": int(row.get("deaths", 0)),
+                    "damage_dealt": int(row.get("damage_dealt", 0)),
+                    "damage_taken": int(row.get("damage_taken", 0)),
+                }
+            )
+        return rows
+
+    def _run_round_transition(self, winner_index: int | None, winner_label: str, is_draw: bool = False) -> str:
+        mvp_index = self._compute_mvp_index()
+        mvp_name = self._match_player_stats[mvp_index]["username"] if self._match_player_stats else winner_label
+
+        rr_user, _rr_before, rr_after, _rr_delta = self._apply_local_account_round_result(
+            winner_index,
+            mvp_index,
+            is_draw=is_draw,
+        )
+        self._sync_account_now()
+        ranked_mode = self._is_ranked_mode()
+        if ranked_mode:
+            rr_start = int(self._match_rr_start)
+            rr_screen = RRGainScreen(rr_user, rr_start, rr_after, "RANKED MATCH COMPLETE")
+            rr_action = rr_screen.run(self.screen, self.clock)
+            if rr_action in {"quit", "menu"}:
+                return rr_action
+
+        summary_prefix = "Ranked" if ranked_mode else "Unranked"
+        if is_draw:
+            summary_title = f"{summary_prefix} Match Draw"
+        else:
+            summary_title = f"{summary_prefix} Match Winner: {winner_label}"
+        summary_screen = MatchSummaryScreen(
+            self._build_summary_rows(),
+            mvp_name,
+            summary_title,
+            allow_continue=False,
+        )
+        return summary_screen.run(self.screen, self.clock)
 
     def _restart_game(self, reset_match: bool = False):
         """Restart the game."""
@@ -1144,20 +1538,34 @@ class GameManager:
         self.victory_screen = None
         self.game_over_state = None
         self._match_complete = False
+        self._round_transition_seen = False
         self._round_restart_timer = 0.0
         if reset_match or len(self.round_wins) != len(self.players):
             self.round_wins = [0 for _ in self.players]
+        if reset_match or len(self._match_player_stats) != len(self.players):
+            self._match_player_labels = [self._resolve_player_label(idx) for idx in range(len(self.players))]
+            self._match_player_stats = [self._new_match_stat_row(idx) for idx in range(len(self.players))]
         self.eliminated_players.clear()
         self._pending_power_press = False
         self._remote_input_state = self._empty_network_input_state()
         self._authoritative_network_inputs = None
+        self._last_client_snapshot_time = -1.0
+        self._last_client_world_snapshot_time = -1.0
+        if self.account_service and self.account_username:
+            profile = self.account_service.get_profile(self.account_username)
+            if profile is not None:
+                self._guest_rr = int(profile.rr)
+        if reset_match:
+            self._match_rr_start = int(self._guest_rr)
+        # Reset input rate-limiter so stale state from the previous round does
+        # not suppress the first input message of the new round.
+        self._last_sent_input = None
+        self._input_send_timer = 0.0
 
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
-        self.obstacle_manager.reset()
         self.orb_manager.reset()
-        self.projectiles.clear()
         self.hud.reset()
         self._spawn_adjusted = False
         self._time_since_start = 0.0
@@ -1176,49 +1584,14 @@ class GameManager:
         self.hud.set_player_info(self.player_name, len(self.players), len(self.players))
         self.hud.set_round_scoreboard(self.round_wins, self.target_score)
 
-    def _update_projectiles(self, dt: float):
-        """Update all projectiles and check for collisions with players."""
-        if not self.projectiles:
-            return
-        
-        for projectile in self.projectiles[:]:
-            if not projectile.active:
-                self.projectiles.remove(projectile)
-                continue
-            
-            projectile.update(dt)
-            
-            # Check collision with players
-            for player in self.players:
-                if player in self.eliminated_players:
-                    continue
-                if player is projectile.owner:
-                    continue
-                
-                if projectile.check_collision(player):
-                    if getattr(projectile, 'is_fireball', False):
-                        from settings import ULTIMATE_DAMAGE_PERCENT
-                        damage = max(1, math.ceil(player.get_max_health() * ULTIMATE_DAMAGE_PERCENT))
-                    else:
-                        damage = getattr(projectile, 'damage', 1)
-
-                    if player.take_damage(damage):
-                        self._eliminate_player(player, "combat")
-                    else:
-                        direction = projectile.direction
-                        player.velocity += direction * 300
-                    
-                    projectile.active = False
-                    self.projectiles.remove(projectile)
-                    break
-
     def _restart_network_round(self, reset_match: bool = False):
         """Host-authoritative restart path for LAN games."""
         self._restart_game(reset_match=reset_match)
         if self.is_network_game and self.is_network_host and self.network and self.network.connected:
             self._snapshot_send_timer = 0.0
             self._world_snapshot_send_timer = 0.0
-            self.network.send_message("snapshot", state=self._build_network_snapshot(include_world=True))
+            self.network.send_message("snapshot", state=self._build_network_snapshot())
+            self.network.send_message("world_snapshot", state=self._build_network_world_snapshot())
 
     def _force_safe_spawns(self):
         """Clamp every player to a valid walkable tile and clear fall/drown flags."""
@@ -1301,49 +1674,6 @@ class GameManager:
                     break
                 if player.try_use_power(self):
                     break
-
-    def _handle_attack_key(self, key: int):
-        """Handle attack key press - basic attack (melee or projectile)."""
-        for player in self.players:
-            if player in self.eliminated_players:
-                continue
-            controls = getattr(player, "controls", {})
-            if controls.get("attack") == key:
-                character = getattr(player, "character_name", "").lower()
-                
-                # Ranged characters spawn projectiles
-                if character == "ninja":
-                    player.spawn_projectile(self, "shuriken")
-                elif character == "caveman":
-                    player.spawn_projectile(self, "stone")
-                else:
-                    # Melee characters
-                    target_players = [p for p in self.players if p is not player]
-                    player.try_attack(self, target_players)
-                break
-
-    def _handle_ultimate_key(self, key: int):
-        """Handle ultimate key press - character special attack."""
-        for player in self.players:
-            if player in self.eliminated_players:
-                continue
-            controls = getattr(player, "controls", {})
-            if controls.get("ultimate") == key:
-                # Check if player has ultimate charge
-                if not player.has_ultimate():
-                    print(f"DEBUG: No ultimate charge! Collect ULTIMATE orbs to use.")
-                    break
-                
-                character = getattr(player, "character_name", "").lower()
-                
-                if character == "ninja":
-                    player.spawn_projectile(self, "fireball")
-                elif character == "caveman":
-                    player.activate_big_stick(self)
-                
-                # Use the ultimate charge
-                player.use_ultimate()
-                break
 
     def _adjust_audio_volume(self, delta: float):
         self.audio.adjust_volume(delta)
@@ -1528,6 +1858,7 @@ class GameManager:
     def run(self):
         while self.running:
             dt = self.clock.tick(TARGET_FPS) / 1000.0
+            update_online_status(dt)
             self.handle_events()
             keys = pygame.key.get_pressed()
             self.update(dt, keys)

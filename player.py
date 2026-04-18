@@ -29,10 +29,6 @@ from settings import (
     ORB_SHIELD_WARNING,
     SHIELD_EFFECT_PATH,
     VOID_WALK_WING_PATH,
-    ATTACK_COOLDOWN,
-    ATTACK_RANGE,
-    ATTACK_DAMAGE,
-    KNOCKBACK_FORCE,
 )
 
 
@@ -172,16 +168,7 @@ class Player:
         self._active_orb_timer = 0.0
         self._active_orb_indefinite = False
         self._active_orb_duration = 0.0
-        self._max_health = 3
-        self._health = self._max_health  # Current health
         self._extra_lives = 0  # Extra lives from LIFE orbs
-        self._projectile_ammo = 5  # Ammo for projectiles (shuriken/stone)
-        self._max_projectile_ammo = 5
-        self._projectile_cooldown = 0.0  # Cooldown to reload ammo
-        self._projectile_reload_time = 5.0  # Time to reload 5 ammo
-        self._ultimate_charges = 0  # Ultimate charges from ULTIMATE orbs
-        self._attack_cooldown = 0.0
-        self._is_attacking = False
 
     def _load_animations(self):
         animations = {}
@@ -255,189 +242,21 @@ class Player:
     def has_active_shield(self) -> bool:
         return self._shield_timer > 0
 
-    def add_extra_life(self):
-        """Add an extra life from LIFE orb."""
+    def add_life(self):
+        """Add an extra life from a LIFE orb."""
         self._extra_lives += 1
         print(f"DEBUG: Player now has {self._extra_lives} extra lives")
 
-    def has_extra_life_available(self) -> bool:
+    def has_extra_life(self) -> bool:
         """Check if player has an extra life available."""
         return self._extra_lives > 0
 
-    def use_extra_life(self) -> bool:
-        """Use an extra life to get full health. Returns True if life was used."""
+    def use_life(self) -> bool:
+        """Use an extra life to revive. Returns True if life was used."""
         if self._extra_lives > 0:
             self._extra_lives -= 1
-            self._health = self._max_health
-            print(f"DEBUG: Used extra life! Health restored to {self._health}/{self._max_health}")
             return True
         return False
-
-    def add_ultimate_charge(self):
-        """Add an ultimate charge from ULTIMATE orb."""
-        self._ultimate_charges += 1
-        print(f"DEBUG: Player now has {self._ultimate_charges} ultimate charges")
-
-    def use_ultimate(self) -> bool:
-        """Use an ultimate charge. Returns True if used."""
-        if self._ultimate_charges > 0:
-            self._ultimate_charges -= 1
-            return True
-        return False
-
-    def has_ultimate(self) -> bool:
-        """Check if player has an ultimate charge."""
-        return self._ultimate_charges > 0
-
-    def get_health(self) -> int:
-        return self._health
-
-    def get_max_health(self) -> int:
-        return self._max_health
-
-    def take_damage(self, damage: int = 1) -> bool:
-        """Take damage. Returns True if player died."""
-        if self.has_active_shield():
-            return False
-        self._health -= damage
-        print(f"DEBUG: Player took {damage} damage, health now {self._health}/{self._max_health}")
-        if self._health <= 0:
-            # Check for extra life
-            if self.has_extra_life_available():
-                if self.use_extra_life():
-                    print(f"DEBUG: Extra life used! Health restored to {self._health}/{self._max_health}")
-                    return False
-            return True
-        return False
-
-    def is_alive(self) -> bool:
-        return self._health > 0
-
-    def can_attack(self) -> bool:
-        return self._attack_cooldown <= 0 and self._health > 0
-
-    def try_attack(self, game, target_players: list) -> bool:
-        """Attempt to attack nearby players. Returns True if attack was performed."""
-        if not self.can_attack():
-            return False
-        
-        hit_any = False
-        for target in target_players:
-            if target in game.eliminated_players:
-                continue
-            if target is self:
-                continue
-            distance = self.position.distance_to(target.position)
-            if distance < ATTACK_RANGE:
-                if target.take_damage(ATTACK_DAMAGE):
-                    game._eliminate_player(target, "combat")
-                else:
-                    self._apply_knockback(target)
-                hit_any = True
-        
-        if hit_any:
-            self._attack_cooldown = ATTACK_COOLDOWN
-            self._is_attacking = True
-            return True
-        return False
-
-    def _apply_knockback(self, target):
-        """Apply knockback to target player."""
-        direction = target.position - self.position
-        if direction.length() > 0:
-            direction = direction.normalize()
-        else:
-            direction = pygame.Vector2(1, 0) if self.facing == "right" else pygame.Vector2(-1, 0)
-        target.velocity += direction * KNOCKBACK_FORCE
-
-    def get_facing_vector(self) -> pygame.Vector2:
-        """Get direction vector based on facing direction."""
-        direction_map = {
-            "right": pygame.Vector2(1, 0),
-            "left": pygame.Vector2(-1, 0),
-            "down": pygame.Vector2(0, 1),
-            "up": pygame.Vector2(0, -1),
-        }
-        return direction_map.get(self.facing, pygame.Vector2(1, 0))
-
-    def spawn_projectile(self, game, projectile_type: str):
-        """Spawn a projectile based on character and type. Returns True if spawned."""
-        from settings import PROJECTILE_SPEED, ULTIMATE_DAMAGE
-        from hazards import Bullet
-        
-        # Check ammo
-        if self._projectile_ammo <= 0:
-            print(f"DEBUG: No ammo left! Waiting for reload...")
-            return False
-        
-        self._projectile_ammo -= 1
-        print(f"DEBUG: Projectile fired! Ammo: {self._projectile_ammo}/{self._max_projectile_ammo}")
-        
-        start_pos = (self.position.x, self.position.y)
-        direction = self.get_facing_vector()
-        
-        if self.character_name.lower() == "ninja":
-            if projectile_type == "shuriken":
-                bullet = Bullet(start_pos, direction, speed=PROJECTILE_SPEED)
-                bullet.radius = 6
-                bullet.color = (100, 100, 120)
-                bullet.damage = ATTACK_DAMAGE
-                bullet.owner = self
-                game.projectiles.append(bullet)
-            elif projectile_type == "fireball":
-                bullet = Bullet(start_pos, direction, speed=PROJECTILE_SPEED * 0.7)
-                bullet.radius = 15
-                bullet.color = (255, 80, 20)
-                bullet.damage = ULTIMATE_DAMAGE
-                bullet.owner = self
-                bullet.is_fireball = True
-                game.projectiles.append(bullet)
-        
-        elif self.character_name.lower() == "caveman":
-            if projectile_type == "stone":
-                bullet = Bullet(start_pos, direction, speed=PROJECTILE_SPEED * 0.8)
-                bullet.radius = 8
-                bullet.color = (160, 140, 100)
-                bullet.damage = ATTACK_DAMAGE
-                bullet.owner = self
-                game.projectiles.append(bullet)
-        
-        return True
-
-    def activate_big_stick(self, game):
-        """Caveman ultimate - big stick melee attack that hits all nearby enemies."""
-        from settings import ULTIMATE_COOLDOWN, ATTACK_RANGE, ULTIMATE_DAMAGE_PERCENT
-        
-        if not self.can_attack():
-            return
-        
-        # Bigger attack range for ultimate
-        big_range = ATTACK_RANGE * 2
-        hit_any = False
-        
-        for target in game.players:
-            if target in game.eliminated_players:
-                continue
-            if target is self:
-                continue
-            
-            distance = self.position.distance_to(target.position)
-            if distance < big_range:
-                damage = max(1, math.ceil(target.get_max_health() * ULTIMATE_DAMAGE_PERCENT))
-                if target.take_damage(damage):
-                    game._eliminate_player(target, "combat")
-                else:
-                    self._apply_knockback(target)
-                    # Extra knockback for ultimate
-                    direction = target.position - self.position
-                    if direction.length() > 0:
-                        direction = direction.normalize()
-                    target.velocity += direction * (KNOCKBACK_FORCE * 1.5)
-                hit_any = True
-        
-        if hit_any:
-            self._attack_cooldown = ULTIMATE_COOLDOWN
-            self._is_attacking = True
 
     def apply_freeze(self, duration: float):
         self._freeze_timer = duration
@@ -458,17 +277,6 @@ class Player:
             self._freeze_timer = max(0.0, self._freeze_timer - dt)
         if self._void_walk_timer > 0:
             self._void_walk_timer = max(0.0, self._void_walk_timer - dt)
-        if self._attack_cooldown > 0:
-            self._attack_cooldown = max(0.0, self._attack_cooldown - dt)
-            if self._attack_cooldown == 0:
-                self._is_attacking = False
-        # Projectile ammo reload
-        if self._projectile_ammo < self._max_projectile_ammo:
-            self._projectile_cooldown += dt
-            if self._projectile_cooldown >= self._projectile_reload_time:
-                self._projectile_ammo = self._max_projectile_ammo
-                self._projectile_cooldown = 0.0
-                print(f"DEBUG: Projectile ammo reloaded!")
         if self._active_orb_label and not self._active_orb_indefinite:
             if self._active_orb_timer > 0:
                 self._active_orb_timer = max(0.0, self._active_orb_timer - dt)
@@ -811,7 +619,7 @@ class Player:
         self._void_walk_timer = 0.0
         self._orb_speed_boost = 1.0
         if hasattr(self, "_orb_speed_timer"):
-            object.__delattr__(self, "_orb_speed_timer")
+            del self._orb_speed_timer
         self._power_speed_boost = 1.0
         self._power_jump_boost = 1.0
         self._status_flash_timer = 0.0
@@ -819,13 +627,7 @@ class Player:
         self._power_alpha = 255
         self._death_fade_alpha = 255
         self.clear_active_orb()
-        self._health = self._max_health
         self._extra_lives = 0
-        self._projectile_ammo = 5
-        self._projectile_cooldown = 0.0
-        self._ultimate_charges = 0
-        self._attack_cooldown = 0.0
-        self._is_attacking = False
         self._refresh_collision_shape(force=True)
 
     def snapshot_state(self) -> dict[str, Any]:
@@ -857,11 +659,7 @@ class Player:
             "active_orb_indefinite": bool(orb_indefinite),
             "active_orb_duration": float(orb_duration),
             "eliminated": bool(self._eliminated),
-            "health": int(self._health),
-            "max_health": int(self._max_health),
             "extra_lives": int(self._extra_lives),
-            "projectile_ammo": int(self._projectile_ammo),
-            "ultimate_charges": int(self._ultimate_charges),
         }
 
     def apply_snapshot_state(self, snapshot: dict[str, Any]):
@@ -892,11 +690,7 @@ class Player:
         self._orb_speed_boost = float(snapshot.get("orb_speed_boost", self._orb_speed_boost))
         self._eliminated = bool(snapshot.get("eliminated", self._eliminated))
         self._active_orb_label = snapshot.get("active_orb_label")
-        self._health = int(snapshot.get("health", self._health))
-        self._max_health = int(snapshot.get("max_health", self._max_health))
         self._extra_lives = int(snapshot.get("extra_lives", self._extra_lives))
-        self._projectile_ammo = int(snapshot.get("projectile_ammo", self._projectile_ammo))
-        self._ultimate_charges = int(snapshot.get("ultimate_charges", self._ultimate_charges))
         self._active_orb_timer = float(snapshot.get("active_orb_timer", self._active_orb_timer))
         self._active_orb_indefinite = bool(
             snapshot.get("active_orb_indefinite", self._active_orb_indefinite)
