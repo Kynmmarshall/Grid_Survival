@@ -27,7 +27,9 @@ from scenes.level_selection import resolve_level_option
 from settings import (
     FONT_PATH_BODY,
     FONT_PATH_HEADING,
+    FONT_PATH_SMALL,
     MUSIC_PATH,
+    MODE_CAMPAIGN,
     MODE_LOCAL_MULTIPLAYER,
     MODE_ONLINE_MULTIPLAYER,
     WINDOW_FLAGS,
@@ -80,6 +82,150 @@ def _draw_lobby_panel(
         audio_overlay.draw(screen)
 
     pygame.display.flip()
+
+
+def _prompt_campaign_ranked_choice(screen, clock) -> bool | None:
+    width, height = WINDOW_SIZE
+    font_title = _load_font(FONT_PATH_HEADING, 38, bold=True)
+    font_sub = _load_font(FONT_PATH_BODY, 24)
+    font_label = _load_font(FONT_PATH_BODY, 26, bold=True)
+    font_desc = _load_font(FONT_PATH_SMALL, 18)
+    font_hint = _load_font(FONT_PATH_SMALL, 17)
+    audio_overlay = SceneAudioOverlay()
+
+    selected = 0
+    anim_time = 0.0
+
+    panel = pygame.Rect(0, 0, min(1080, width - 100), min(520, height - 120))
+    panel.center = (width // 2, height // 2)
+
+    card_w = (panel.width - 92) // 2
+    card_h = 250
+    card_y = panel.top + 166
+    left_card = pygame.Rect(panel.left + 30, card_y, card_w, card_h)
+    right_card = pygame.Rect(panel.left + 62 + card_w, card_y, card_w, card_h)
+
+    cards = [
+        {
+            "rect": left_card,
+            "label": "RANKED",
+            "desc": "RR can increase or decrease based on match performance.",
+            "accent": (245, 204, 105),
+            "value": True,
+            "icon": "RR",
+        },
+        {
+            "rect": right_card,
+            "label": "UNRANKED",
+            "desc": "Practice freely. No RR change, but unranked stats are tracked.",
+            "accent": (132, 214, 255),
+            "value": False,
+            "icon": "UR",
+        },
+    ]
+
+    def _wrap_desc(text: str, max_width: int) -> list[str]:
+        words = str(text).split()
+        if not words:
+            return [""]
+
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if font_desc.size(candidate)[0] <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return lines
+
+    while True:
+        dt = clock.tick(60) / 1000.0
+        anim_time += dt
+
+        for event in pygame.event.get():
+            if audio_overlay.handle_event(event):
+                continue
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                    return None
+                if event.key in (pygame.K_LEFT, pygame.K_a):
+                    selected = 0
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    selected = 1
+                elif event.key in (pygame.K_1, pygame.K_r):
+                    return True
+                elif event.key in (pygame.K_2, pygame.K_u):
+                    return False
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    return bool(cards[selected]["value"])
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for idx, card in enumerate(cards):
+                    if card["rect"].collidepoint(event.pos):
+                        selected = idx
+                        return bool(card["value"])
+
+        mouse_pos = pygame.mouse.get_pos()
+        for idx, card in enumerate(cards):
+            if card["rect"].collidepoint(mouse_pos):
+                selected = idx
+
+        draw_lan_backdrop(screen, anim_time)
+        pulse = 0.5 + 0.5 * math.sin(anim_time * 2.2)
+        glow = pygame.Surface((panel.width + 30, panel.height + 30), pygame.SRCALPHA)
+        pygame.draw.rect(
+            glow,
+            (120, 180, 255, int(28 + 18 * pulse)),
+            glow.get_rect(),
+            border_radius=26,
+        )
+        screen.blit(glow, (panel.left - 15, panel.top - 15), special_flags=pygame.BLEND_ADD)
+        _draw_rounded_rect(screen, panel, (14, 18, 34, 236), (122, 168, 224), 3, 20)
+
+        title = font_title.render("CAMPAIGN MATCH TYPE", True, (245, 248, 255))
+        subtitle = font_sub.render("Choose how this campaign match should be tracked.", True, (200, 216, 238))
+        screen.blit(title, title.get_rect(center=(panel.centerx, panel.top + 56)))
+        screen.blit(subtitle, subtitle.get_rect(center=(panel.centerx, panel.top + 94)))
+
+        for idx, card in enumerate(cards):
+            is_selected = idx == selected
+            hover = card["rect"].collidepoint(mouse_pos)
+            active = is_selected or hover
+            bg = (36, 54, 88, 230) if active else (24, 36, 62, 224)
+            border = card["accent"] if active else (92, 122, 170)
+            border_w = 3 if active else 2
+            _draw_rounded_rect(screen, card["rect"], bg, border, border_w, 14)
+
+            icon_rect = pygame.Rect(card["rect"].left + 20, card["rect"].top + 20, 50, 38)
+            _draw_rounded_rect(screen, icon_rect, (24, 34, 55, 235), border, 2, 8)
+            icon_text = font_hint.render(str(card["icon"]), True, (242, 247, 255))
+            screen.blit(icon_text, icon_text.get_rect(center=icon_rect.center))
+
+            label = font_label.render(str(card["label"]), True, (245, 248, 255))
+            screen.blit(label, label.get_rect(midleft=(icon_rect.right + 12, icon_rect.centery)))
+
+            desc_lines = _wrap_desc(str(card["desc"]), card["rect"].width - 44)
+            y = card["rect"].top + 84
+            for line in desc_lines[:2]:
+                if not line:
+                    continue
+                desc_surf = font_desc.render(line, True, (198, 214, 238))
+                screen.blit(desc_surf, desc_surf.get_rect(midleft=(card["rect"].left + 22, y)))
+                y += 26
+
+            key_hint = "[1] Ranked" if idx == 0 else "[2] Unranked"
+            hint_surf = font_hint.render(key_hint, True, border)
+            screen.blit(hint_surf, hint_surf.get_rect(bottomright=(card["rect"].right - 14, card["rect"].bottom - 12)))
+
+        footer = font_hint.render("LEFT/RIGHT or click to pick * ENTER confirms * ESC back", True, (170, 190, 220))
+        screen.blit(footer, footer.get_rect(center=(panel.centerx, panel.bottom - 28)))
+        audio_overlay.draw(screen)
+        pygame.display.flip()
 
 
 def _wait_for_online_match_start(
@@ -212,6 +358,12 @@ def main():
             selected_level = None
             selected_target_score = 3
             network_player_names = None
+            ranked_override = None
+
+            if game_mode == MODE_CAMPAIGN:
+                ranked_override = _prompt_campaign_ranked_choice(screen, clock)
+                if ranked_override is None:
+                    continue
 
             if game_mode == MODE_ONLINE_MULTIPLAYER:
                 choice = prompt_host_or_join(screen, clock)
@@ -412,6 +564,7 @@ def main():
                     account_service=account_service,
                     account_username=active_account_username,
                     network_player_names=network_player_names,
+                    ranked_override=ranked_override,
                 ).run()
                 
                 if result == "main_menu":

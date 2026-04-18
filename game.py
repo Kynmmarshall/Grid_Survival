@@ -62,6 +62,7 @@ class GameManager:
         account_service: AccountService | None = None,
         account_username: str | None = None,
         network_player_names: list[str] | None = None,
+        ranked_override: bool | None = None,
     ):
         if screen is None or clock is None:
             pygame.init()
@@ -76,6 +77,7 @@ class GameManager:
         self.account_service = account_service
         self.account_username = (account_username or "").strip() or None
         self.network_player_names = [str(name) for name in (network_player_names or [])]
+        self._ranked_override = None if ranked_override is None else bool(ranked_override)
         self._guest_rr = 1000
         self._account_sync_timer = 0.0
         self._account_sync_interval = 20.0
@@ -325,21 +327,11 @@ class GameManager:
                 self._process_network_messages()
                 if not self.running or not self.network.connected:
                     return
-            if keys[pygame.K_ESCAPE]:
-                if self.is_network_game and self.network and self.network.connected:
-                    self.network.send_message("disconnect")
-                self.running = False
-            elif keys[pygame.K_LCTRL]:
+            if keys[pygame.K_LCTRL]:
                 if self.is_network_game and self.network and self.network.connected:
                     self.network.send_message("disconnect")
                 self.return_to_main_menu = True
                 self.running = False
-            return
-
-        if keys[pygame.K_ESCAPE] and (not self.game_over or self._can_use_end_of_match_actions()):
-            if self.is_network_game and self.network and self.network.connected:
-                self.network.send_message("disconnect")
-            self.running = False
             return
 
         if self.is_network_game:
@@ -1141,7 +1133,7 @@ class GameManager:
         return False
 
     def _can_use_end_of_match_actions(self) -> bool:
-        """Allow restart/quit/menu shortcuts only on final match end screens."""
+        """Allow restart/menu shortcuts only on final match end screens."""
         return bool(self._match_complete or len(self.players) <= 1)
 
     def _trigger_game_over(self):
@@ -1322,7 +1314,9 @@ class GameManager:
         return None
 
     def _is_ranked_mode(self) -> bool:
-        # LAN/online matches are ranked, campaign/local multiplayer are unranked.
+        if self._ranked_override is not None:
+            return bool(self._ranked_override)
+        # Default behavior: LAN/online matches are ranked, campaign/local multiplayer are unranked.
         return self.game_mode == MODE_ONLINE_MULTIPLAYER
 
     def _sync_account_now(self) -> None:

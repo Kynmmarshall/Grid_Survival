@@ -151,7 +151,38 @@ class AccountService:
             ).fetchone()
 
         if row is None:
-            return False, "Account not found."
+            if not self.is_remote_online():
+                return (
+                    False,
+                    "Account not found locally. Connect to internet and try login again to check your online account.",
+                )
+
+            remote_status, remote_profile = self._fetch_remote_profile_status(clean_username)
+            if remote_status == "found" and isinstance(remote_profile, dict):
+                created = self._create_local_account_from_remote(
+                    clean_username,
+                    password,
+                    remote_profile,
+                )
+                if created:
+                    self.sync_pending(clean_username)
+                    return True, "Online account found. Local profile restored and login successful."
+
+                # If another process created it at the same time, retry local auth once.
+                with self._connect() as conn:
+                    row = conn.execute(
+                        "SELECT password_hash, password_salt FROM accounts WHERE username = ?",
+                        (clean_username,),
+                    ).fetchone()
+                if row is None:
+                    return False, "Could not restore local profile. Please try again."
+            elif remote_status == "missing":
+                return False, "Account not found on local or online server. Please register a new account."
+            else:
+                return (
+                    False,
+                    "Account not found locally, and online check failed. Connect to internet and try again.",
+                )
 
         check_hash = self._hash_password(password, row["password_salt"])
         if not secrets.compare_digest(check_hash, row["password_hash"]):
@@ -627,6 +658,101 @@ class AccountService:
         # Fallback path for APIs using /events instead.
         response = self._request_json("POST", "/events", event)
         return response is not None
+
+    def _fetch_remote_profile_status(self, username: str) -> tuple[str, dict[str, Any] | None]:
+        if not self._has_remote():
+            return "unreachable", None
+
+        encoded = urllib.parse.quote(username)
+        url = self.api_base_url.rstrip("/") + f"/profiles/{encoded}"
+        request = urllib.request.Request(url=url, headers={"Accept": "application/json"}, method="GET")
+
+        try:
+            with urllib.request.urlopen(request, timeout=self.api_timeout) as response:
+                body = response.read().decode("utf-8", errors="replace").strip()
+        except urllib.error.HTTPError as exc:
+            if int(getattr(exc, "code", 0)) == 404:
+                return "missing", None
+            return "unreachable", None
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return "unreachable", None
+
+        if not body:
+            return "unreachable", None
+
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return "unreachable", None
+
+        if isinstance(payload, dict):
+            return "found", payload
+        return "unreachable", None
+
+    def _create_local_account_from_remote(
+        self,
+        username: str,
+        password: str,
+        remote_profile: dict[str, Any],
+    ) -> bool:
+        salt = secrets.token_hex(16)
+        password_hash = self._hash_password(password, salt)
+        now = time.time()
+        rr_value = max(0, int(remote_profile.get("rr", remote_profile.get("ranked_rating", DEFAULT_RR))))
+        created_at = float(remote_profile.get("created_at", now))
+        updated_at = float(remote_profile.get("updated_at", now))
+
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT username FROM accounts WHERE username = ?",
+                (username,),
+            ).fetchone()
+            if existing is not None:
+                return False
+
+            conn.execute(
+                """
+                INSERT INTO accounts (
+                    username, password_hash, password_salt, rr, ranked_rating,
+                    damage_dealt, damage_taken, eliminations, deaths,
+                    rounds_played, rounds_won, matches_played, matches_won,
+                    mvp_count,
+                    unranked_matches_played, unranked_matches_won,
+                    unranked_rounds_played, unranked_rounds_won,
+                    unranked_eliminations, unranked_deaths,
+                    unranked_damage_dealt, unranked_damage_taken, unranked_mvp_count,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    username,
+                    password_hash,
+                    salt,
+                    rr_value,
+                    rr_value,
+                    int(max(0, remote_profile.get("damage_dealt", 0))),
+                    int(max(0, remote_profile.get("damage_taken", 0))),
+                    int(max(0, remote_profile.get("eliminations", 0))),
+                    int(max(0, remote_profile.get("deaths", 0))),
+                    int(max(0, remote_profile.get("rounds_played", 0))),
+                    int(max(0, remote_profile.get("rounds_won", 0))),
+                    int(max(0, remote_profile.get("matches_played", 0))),
+                    int(max(0, remote_profile.get("matches_won", 0))),
+                    int(max(0, remote_profile.get("mvp_count", 0))),
+                    int(max(0, remote_profile.get("unranked_matches_played", 0))),
+                    int(max(0, remote_profile.get("unranked_matches_won", 0))),
+                    int(max(0, remote_profile.get("unranked_rounds_played", 0))),
+                    int(max(0, remote_profile.get("unranked_rounds_won", 0))),
+                    int(max(0, remote_profile.get("unranked_eliminations", 0))),
+                    int(max(0, remote_profile.get("unranked_deaths", 0))),
+                    int(max(0, remote_profile.get("unranked_damage_dealt", 0))),
+                    int(max(0, remote_profile.get("unranked_damage_taken", 0))),
+                    int(max(0, remote_profile.get("unranked_mvp_count", 0))),
+                    created_at,
+                    updated_at,
+                ),
+            )
+        return True
 
     def _pull_remote_profile(self, username: str) -> None:
         if not self._has_remote():

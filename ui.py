@@ -506,7 +506,7 @@ class EliminationScreen:
             blink_alpha = int(120 + 135 * abs(math.sin(self._time * math.pi * 1.5)))
             if self.allow_actions:
                 restart_surf = self.font_small.render(
-                    "Press  R  to Restart    |    Press  ESC  to Quit",
+                    "Press  R  to Restart Match",
                     True, (180, 180, 180)
                 )
                 restart_surf.set_alpha(blink_alpha)
@@ -657,7 +657,7 @@ class VictoryScreen:
             blink_alpha = int(120 + 135 * abs(math.sin(self._time * math.pi * 1.5)))
             if self.allow_actions:
                 restart_surf = self.font_small.render(
-                    "Press  R  to Restart    |    Press  ESC  to Quit",
+                    "Press  R  to Restart Match",
                     True, (180, 180, 180)
                 )
                 restart_surf.set_alpha(blink_alpha)
