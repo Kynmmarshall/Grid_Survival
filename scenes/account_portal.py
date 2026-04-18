@@ -52,6 +52,8 @@ class AccountPortalScreen:
         self._leaderboard_online = False
         self._profile_view_mode = "ranked"
         self._leaderboard_view_mode = "ranked"
+        self._leaderboard_selected_username: str | None = self.current_username
+        self._leaderboard_row_hitboxes: list[tuple[pygame.Rect, str]] = []
 
         self._font_title = _load_font(FONT_PATH_HEADING, max(34, FONT_SIZE_HEADING + 8), bold=True)
         self._font_welcome = _load_font(FONT_PATH_HEADING, max(36, FONT_SIZE_HEADING + 6), bold=True)
@@ -65,6 +67,10 @@ class AccountPortalScreen:
         self._font_lb_header = _load_font(FONT_PATH_BODY, max(20, FONT_SIZE_BODY))
         self._font_lb_row = _load_font(FONT_PATH_BODY, max(19, FONT_SIZE_BODY - 1))
         self._font_lb_meta = _load_font(FONT_PATH_SMALL, max(16, FONT_SIZE_SMALL))
+        self._font_lb_detail_title = _load_font(FONT_PATH_HEADING, max(28, FONT_SIZE_HEADING - 1), bold=True)
+        self._font_lb_detail_label = _load_font(FONT_PATH_BODY, max(18, FONT_SIZE_BODY - 1), bold=True)
+        self._font_lb_detail_value = _load_font(FONT_PATH_BODY, max(21, FONT_SIZE_BODY + 1))
+        self._font_lb_detail_icon = _load_font(FONT_PATH_SMALL, max(14, FONT_SIZE_SMALL), bold=True)
         self._audio_overlay = SceneAudioOverlay()
         self._title_shell = TitleScreen(
             screen,
@@ -133,11 +139,18 @@ class AccountPortalScreen:
 
     def _draw(self) -> None:
         self._button_rects.clear()
+        self._leaderboard_row_hitboxes = []
         self._draw_title_backdrop()
 
-        panel_width = min(760, max(560, self.width - 520)) if self._wide_layout else min(960, self.width - 100)
-        panel = pygame.Rect(0, 0, panel_width, min(650, self.height - 80))
-        panel.center = (self.width // 2, 20+self.height // 2 )
+        panel_height = min(650, self.height - 80)
+        if self._state == "leaderboard":
+            panel_width = min(760, max(520, self.width - 420))
+            panel = pygame.Rect(24, 0, panel_width, panel_height)
+            panel.centery = 20 + self.height // 2
+        else:
+            panel_width = min(760, max(560, self.width - 520)) if self._wide_layout else min(960, self.width - 100)
+            panel = pygame.Rect(0, 0, panel_width, panel_height)
+            panel.center = (self.width // 2, 20 + self.height // 2)
 
         border = (120, 170, 255) if self._state in {"leaderboard", "profile"} else (130, 220, 170)
         _draw_rounded_rect(self.screen, panel, (14, 18, 34, 230), border, 3, 18)
@@ -473,24 +486,38 @@ class AccountPortalScreen:
             offline = self._font_lb_meta.render("Connect to internet and set GRID_SURVIVAL_API_URL", True, (255, 190, 170))
             self.screen.blit(offline, offline.get_rect(center=list_rect.center))
         else:
+            if self._leaderboard_cache and not self._leaderboard_selected_username:
+                self._leaderboard_selected_username = str(self._leaderboard_cache[0].get("username", "")) or None
+
             y = header_y + 42
             row_h = 34
             max_rows = 8
             for index, row in enumerate(self._leaderboard_cache[:max_rows]):
-                is_me = bool(self.current_username and row.get("username") == self.current_username)
+                username = str(row.get("username", ""))
+                is_me = bool(self.current_username and username == self.current_username)
+                is_selected = bool(self._leaderboard_selected_username and username == self._leaderboard_selected_username)
                 row_rect = pygame.Rect(list_rect.left + 10, y - 2, list_rect.width - 20, row_h)
-                if is_me:
+                if is_selected and is_me:
                     row_bg = (64, 74, 36, 220)
                     row_border = (255, 220, 120)
+                    text_color = (255, 236, 164)
+                elif is_selected:
+                    row_bg = (44, 62, 98, 220)
+                    row_border = (162, 202, 255)
+                    text_color = (244, 248, 255)
+                elif is_me:
+                    row_bg = (56, 70, 36, 220)
+                    row_border = (240, 204, 116)
                     text_color = (255, 236, 164)
                 else:
                     row_bg = (28, 36, 62, 210) if (index % 2 == 0) else (24, 31, 54, 210)
                     row_border = (88, 112, 158)
                     text_color = (232, 238, 250)
                 _draw_rounded_rect(self.screen, row_rect, row_bg, row_border, 1, 8)
+                self._leaderboard_row_hitboxes.append((row_rect.copy(), username))
 
                 pos_text = str(int(row.get("position", index + 1)))
-                name_text = str(row.get("username", ""))[:18]
+                name_text = username[:18]
                 rr_text = str(int(row.get("rating", row.get("rr", 0))))
                 wl_text = f"{int(row.get('matches_won', 0))}/{int(row.get('matches_played', 0))}"
                 mvp_text = str(int(row.get("mvp_count", 0)))
@@ -501,6 +528,12 @@ class AccountPortalScreen:
                 self.screen.blit(self._font_lb_row.render(wl_text, True, text_color), (x_wl, y + 3))
                 self.screen.blit(self._font_lb_row.render(mvp_text, True, text_color), (x_mvp, y + 3))
                 y += row_h + 6
+
+            selected_row = self._get_selected_leaderboard_row()
+            self._draw_leaderboard_player_box(panel, selected_row)
+
+            hint = self._font_tiny.render("Click a row to open player details panel.", True, (170, 190, 220))
+            self.screen.blit(hint, hint.get_rect(midleft=(list_rect.left + 6, list_rect.bottom + 2)))
 
             if self.current_username:
                 position = self._find_position(self.current_username)
@@ -520,6 +553,82 @@ class AccountPortalScreen:
             if row.get("username") == username:
                 return int(row.get("position", 0))
         return None
+
+    def _get_selected_leaderboard_row(self) -> dict | None:
+        if not self._leaderboard_cache:
+            return None
+
+        target = self._leaderboard_selected_username
+        if target:
+            for row in self._leaderboard_cache:
+                if str(row.get("username", "")) == target:
+                    return row
+
+        return self._leaderboard_cache[0]
+
+    def _draw_leaderboard_player_box(self, panel: pygame.Rect, selected_row: dict | None) -> None:
+        box_left = panel.right + 16
+        box_width = self.width - box_left - 24
+        if box_width < 260:
+            return
+
+        box_rect = pygame.Rect(box_left, panel.top + 94, box_width, panel.height - 130)
+        _draw_rounded_rect(self.screen, box_rect, (18, 26, 46, 230), (116, 150, 204), 3, 14)
+
+        heading = self._font_lb_detail_title.render("PLAYER DETAILS", True, (232, 242, 255))
+        self.screen.blit(heading, heading.get_rect(center=(box_rect.centerx, box_rect.top + 34)))
+
+        if selected_row is None:
+            empty = self._font_lb_detail_label.render("No player selected yet.", True, (200, 214, 238))
+            tip = self._font_tiny.render("Select a row in leaderboard to view full stats.", True, (170, 190, 220))
+            self.screen.blit(empty, empty.get_rect(center=(box_rect.centerx, box_rect.centery - 4)))
+            self.screen.blit(tip, tip.get_rect(center=(box_rect.centerx, box_rect.centery + 24)))
+            return
+
+        mode_short = "RR" if self._leaderboard_view_mode == "ranked" else "UR"
+        username = str(selected_row.get("username", ""))[:22]
+        position = int(selected_row.get("position", 0))
+        rating = int(selected_row.get("rating", selected_row.get("rr", 0)))
+
+        name_surf = self._font_lb_detail_title.render(username, True, (255, 238, 170))
+        meta_surf = self._font_lb_detail_label.render(
+            f"#{position}   {mode_short}: {rating}",
+            True,
+            (212, 226, 248),
+        )
+        self.screen.blit(name_surf, name_surf.get_rect(midtop=(box_rect.centerx, box_rect.top + 58)))
+        self.screen.blit(meta_surf, meta_surf.get_rect(midtop=(box_rect.centerx, box_rect.top + 94)))
+
+        stats = [
+            ("MW", "Matches W/L", f"{int(selected_row.get('matches_won', 0))}/{int(selected_row.get('matches_played', 0))}", (122, 206, 150)),
+            ("RW", "Rounds W/L", f"{int(selected_row.get('rounds_won', 0))}/{int(selected_row.get('rounds_played', 0))}", (118, 192, 242)),
+            ("KD", "K / D", f"{int(selected_row.get('eliminations', 0))}/{int(selected_row.get('deaths', 0))}", (252, 178, 120)),
+            (
+                "DG",
+                "Damage D/T",
+                f"{int(selected_row.get('damage_dealt', 0))}/{int(selected_row.get('damage_taken', 0))}",
+                (255, 148, 148),
+            ),
+            ("MV", "MVP", str(int(selected_row.get('mvp_count', 0))), (255, 210, 120)),
+        ]
+
+        row_y = box_rect.top + 136
+        row_h = 60
+        for icon_text, label, value, accent in stats:
+            row_rect = pygame.Rect(box_rect.left + 12, row_y, box_rect.width - 24, row_h)
+            _draw_rounded_rect(self.screen, row_rect, (23, 34, 58, 226), (96, 122, 170), 1, 10)
+
+            icon_rect = pygame.Rect(row_rect.left + 10, row_rect.top + 11, 40, 38)
+            _draw_rounded_rect(self.screen, icon_rect, (36, 52, 84, 236), accent, 2, 8)
+            icon_surf = self._font_lb_detail_icon.render(icon_text, True, (245, 248, 255))
+            self.screen.blit(icon_surf, icon_surf.get_rect(center=icon_rect.center))
+
+            label_surf = self._font_lb_detail_label.render(label, True, (214, 228, 248))
+            value_surf = self._font_lb_detail_value.render(value, True, (248, 252, 255))
+            self.screen.blit(label_surf, label_surf.get_rect(midleft=(row_rect.left + 62, row_rect.centery - 12)))
+            self.screen.blit(value_surf, value_surf.get_rect(midleft=(row_rect.left + 62, row_rect.centery + 12)))
+
+            row_y += row_h + 8
 
     def _handle_menu_event(self, event: pygame.event.Event) -> dict[str, str | None] | None:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -700,6 +809,12 @@ class AccountPortalScreen:
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pos = event.pos
+            for row_rect, username in self._leaderboard_row_hitboxes:
+                if row_rect.collidepoint(pos):
+                    if username:
+                        self._leaderboard_selected_username = username
+                    return None
+
             if self._button_rects.get("leaderboard_mode_ranked") and self._button_rects["leaderboard_mode_ranked"].collidepoint(pos):
                 if self._leaderboard_view_mode != "ranked":
                     self._leaderboard_view_mode = "ranked"
@@ -729,10 +844,21 @@ class AccountPortalScreen:
                 mode=self._leaderboard_view_mode,
             ) or []
             self._leaderboard_cache = entries
+            if self.current_username and any(str(row.get("username", "")) == self.current_username for row in entries):
+                self._leaderboard_selected_username = self.current_username
+            elif self._leaderboard_selected_username and any(
+                str(row.get("username", "")) == self._leaderboard_selected_username for row in entries
+            ):
+                pass
+            elif entries:
+                self._leaderboard_selected_username = str(entries[0].get("username", "")) or None
+            else:
+                self._leaderboard_selected_username = None
             self.message = f"{mode_label} leaderboard refreshed."
             self.message_color = (180, 215, 255)
         else:
             self._leaderboard_cache = []
+            self._leaderboard_selected_username = None
             self.message = f"Online connection required for {mode_label.lower()} leaderboard."
             self.message_color = (255, 200, 170)
 

@@ -87,7 +87,7 @@ class AccountService:
         api_timeout: float = DEFAULT_API_TIMEOUT,
     ):
         self.db_path = db_path or self._resolve_db_path()
-        self.api_base_url = (api_base_url or os.getenv("GRID_SURVIVAL_API_URL", "")).strip()
+        self.api_base_url = (api_base_url or os.getenv("GRID_SURVIVAL_API_URL", "http://38.242.246.126:8001")).strip()
         self.api_timeout = float(max(1.0, api_timeout))
         self._ensure_schema()
 
@@ -218,6 +218,7 @@ class AccountService:
         matches_won: int = 0,
         mvp_count: int = 0,
         ranked: bool = True,
+        sync_now: bool = True,
     ) -> AccountProfile | None:
         profile = self.get_profile(username)
         if profile is None:
@@ -312,7 +313,8 @@ class AccountService:
             "updated_at": now,
         }
         self._queue_sync_event(profile.username, "stat_delta", sync_payload)
-        self.sync_pending(profile.username)
+        if sync_now:
+            self.sync_pending(profile.username)
         return self.get_profile(profile.username)
 
     def get_local_leaderboard(self, limit: int = 50, mode: str = "ranked") -> list[dict[str, Any]]:

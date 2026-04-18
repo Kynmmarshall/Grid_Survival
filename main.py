@@ -193,6 +193,8 @@ def main():
 
         player_name = str(account_result.get("player_name") or active_account_username or "Player")
         active_account_username = account_result.get("account_username") or None
+        if active_account_username:
+            account_service.sync_pending(active_account_username)
 
         while True:
             break_to_title = False
