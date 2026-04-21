@@ -62,6 +62,8 @@ class AccountPortalScreen:
         self._leaderboard_view_mode = "ranked"
         self._leaderboard_selected_username: str | None = self.current_username
         self._leaderboard_row_hitboxes: list[tuple[pygame.Rect, str]] = []
+        self._leaderboard_scroll_index = 0
+        self._leaderboard_rows_per_page = 8
 
         self._font_title = _load_font(FONT_PATH_HEADING, max(34, FONT_SIZE_HEADING + 8), bold=True)
         self._font_welcome = _load_font(FONT_PATH_HEADING, max(36, FONT_SIZE_HEADING + 6), bold=True)
@@ -745,6 +747,67 @@ class AccountPortalScreen:
         self.screen.blit(label_surf, label_pos)
         self.screen.blit(value_surf, value_rect)
 
+    def _leaderboard_max_scroll_start(self) -> int:
+        rows_per_page = max(1, int(self._leaderboard_rows_per_page))
+        return max(0, len(self._leaderboard_cache) - rows_per_page)
+
+    def _clamp_leaderboard_scroll(self) -> None:
+        max_start = self._leaderboard_max_scroll_start()
+        self._leaderboard_scroll_index = max(0, min(int(self._leaderboard_scroll_index), max_start))
+
+    def _scroll_leaderboard(self, delta: int) -> None:
+        if not self._leaderboard_cache:
+            self._leaderboard_scroll_index = 0
+            return
+        self._leaderboard_scroll_index += int(delta)
+        self._clamp_leaderboard_scroll()
+
+    def _ensure_leaderboard_selection_visible(self) -> None:
+        if not self._leaderboard_cache:
+            self._leaderboard_scroll_index = 0
+            return
+
+        target = self._leaderboard_selected_username
+        if not target:
+            self._clamp_leaderboard_scroll()
+            return
+
+        selected_index = None
+        for idx, row in enumerate(self._leaderboard_cache):
+            if str(row.get("username", "")) == target:
+                selected_index = idx
+                break
+
+        if selected_index is None:
+            self._clamp_leaderboard_scroll()
+            return
+
+        rows_per_page = max(1, int(self._leaderboard_rows_per_page))
+        window_start = int(self._leaderboard_scroll_index)
+        window_end = window_start + rows_per_page - 1
+
+        if selected_index < window_start:
+            self._leaderboard_scroll_index = selected_index
+        elif selected_index > window_end:
+            self._leaderboard_scroll_index = selected_index - rows_per_page + 1
+
+        self._clamp_leaderboard_scroll()
+
+    def _draw_leaderboard_scroll_button(self, key: str, rect: pygame.Rect, label: str, enabled: bool) -> None:
+        if enabled:
+            bg = (54, 90, 142, 236)
+            border = (198, 224, 255)
+            txt_color = (245, 249, 255)
+        else:
+            bg = (36, 45, 68, 214)
+            border = (95, 112, 146)
+            txt_color = (152, 168, 194)
+
+        _draw_rounded_rect(self.screen, rect, bg, border, 2, 10)
+        txt = self._font_tiny.render(label, True, txt_color)
+        self.screen.blit(txt, txt.get_rect(center=rect.center))
+        self._button_rects[key] = rect
+
     def _draw_leaderboard(self, panel: pygame.Rect) -> None:
         mode_label = "Ranked" if self._leaderboard_view_mode == "ranked" else "Unranked"
         title = (
@@ -759,12 +822,20 @@ class AccountPortalScreen:
         list_rect = pygame.Rect(panel.left + 32, panel.top + 184, panel.width - 64, 360)
         _draw_rounded_rect(self.screen, list_rect, (20, 25, 40, 225), (90, 120, 170), 2, 12)
 
+        max_rows = max(1, int(self._leaderboard_rows_per_page))
+        self._clamp_leaderboard_scroll()
+
+        scroll_col_w = 58
+        row_left = list_rect.left + 10
+        row_width = max(120, list_rect.width - 20 - scroll_col_w)
+        row_right = row_left + row_width
+
         header_y = list_rect.top + 14
-        x_pos = list_rect.left + 18
-        x_user = list_rect.left + 76
-        x_rr = list_rect.right - 220
-        x_wl = list_rect.right - 142
-        x_mvp = list_rect.right - 68
+        x_pos = row_left + 8
+        x_user = row_left + 66
+        x_rr = row_right - 210
+        x_wl = row_right - 132
+        x_mvp = row_right - 58
         rating_label = "RR" if self._leaderboard_view_mode == "ranked" else "UR"
 
         hdr_color = (182, 204, 238)
@@ -777,10 +848,31 @@ class AccountPortalScreen:
         pygame.draw.line(
             self.screen,
             (104, 130, 176),
-            (list_rect.left + 14, header_y + 32),
-            (list_rect.right - 14, header_y + 32),
+            (row_left + 4, header_y + 32),
+            (row_right - 4, header_y + 32),
             1,
         )
+
+        total_rows = len(self._leaderboard_cache)
+        max_start = self._leaderboard_max_scroll_start()
+        start = int(self._leaderboard_scroll_index)
+        can_scroll_up = start > 0
+        can_scroll_down = start < max_start
+        scroll_x = row_right + 8
+        up_rect = pygame.Rect(scroll_x, header_y + 40, scroll_col_w - 8, 42)
+        down_rect = pygame.Rect(scroll_x, list_rect.bottom - 58, scroll_col_w - 8, 42)
+        self._draw_leaderboard_scroll_button("leaderboard_scroll_up", up_rect, "UP", can_scroll_up)
+        self._draw_leaderboard_scroll_button("leaderboard_scroll_down", down_rect, "DOWN", can_scroll_down)
+
+        if total_rows > 0:
+            visible_start = start + 1
+            visible_end = min(total_rows, start + max_rows)
+            range_label = f"{visible_start}-{visible_end}"
+        else:
+            range_label = "0-0"
+        range_txt = self._font_tiny.render(f"{range_label} / {total_rows}", True, (172, 194, 228))
+        range_center_y = up_rect.bottom + ((down_rect.top - up_rect.bottom) // 2)
+        self.screen.blit(range_txt, range_txt.get_rect(center=(up_rect.centerx, range_center_y)))
 
         if not self._leaderboard_online:
             offline = self._font_lb_meta.render("Connect to internet and set GRID_SURVIVAL_API_URL", True, (255, 190, 170))
@@ -789,14 +881,17 @@ class AccountPortalScreen:
             if self._leaderboard_cache and not self._leaderboard_selected_username:
                 self._leaderboard_selected_username = str(self._leaderboard_cache[0].get("username", "")) or None
 
+            self._ensure_leaderboard_selection_visible()
+            start = int(self._leaderboard_scroll_index)
+            visible_rows = self._leaderboard_cache[start:start + max_rows]
+
             y = header_y + 42
             row_h = 34
-            max_rows = 8
-            for index, row in enumerate(self._leaderboard_cache[:max_rows]):
+            for absolute_index, row in enumerate(visible_rows, start=start):
                 username = str(row.get("username", ""))
                 is_me = bool(self.current_username and username == self.current_username)
                 is_selected = bool(self._leaderboard_selected_username and username == self._leaderboard_selected_username)
-                row_rect = pygame.Rect(list_rect.left + 10, y - 2, list_rect.width - 20, row_h)
+                row_rect = pygame.Rect(row_left, y - 2, row_width, row_h)
                 if is_selected and is_me:
                     row_bg = (64, 74, 36, 220)
                     row_border = (255, 220, 120)
@@ -810,13 +905,13 @@ class AccountPortalScreen:
                     row_border = (240, 204, 116)
                     text_color = (255, 236, 164)
                 else:
-                    row_bg = (28, 36, 62, 210) if (index % 2 == 0) else (24, 31, 54, 210)
+                    row_bg = (28, 36, 62, 210) if (absolute_index % 2 == 0) else (24, 31, 54, 210)
                     row_border = (88, 112, 158)
                     text_color = (232, 238, 250)
                 _draw_rounded_rect(self.screen, row_rect, row_bg, row_border, 1, 8)
                 self._leaderboard_row_hitboxes.append((row_rect.copy(), username))
 
-                pos_text = str(int(row.get("position", index + 1)))
+                pos_text = str(int(row.get("position", absolute_index + 1)))
                 name_text = username[:18]
                 rr_text = str(int(row.get("rating", row.get("rr", 0))))
                 wl_text = f"{int(row.get('matches_won', 0))}/{int(row.get('matches_played', 0))}"
@@ -832,7 +927,7 @@ class AccountPortalScreen:
             selected_row = self._get_selected_leaderboard_row()
             self._draw_leaderboard_player_box(panel, selected_row)
 
-            hint = self._font_tiny.render("Click a row to open player details panel.", True, (170, 190, 220))
+            hint = self._font_tiny.render("Click row for details. Use UP/DOWN to scroll.", True, (170, 190, 220))
             self.screen.blit(hint, hint.get_rect(midleft=(list_rect.left + 6, list_rect.bottom + 2)))
 
             if self.current_username:
@@ -1126,9 +1221,42 @@ class AccountPortalScreen:
                 self._leaderboard_view_mode = "unranked" if self._leaderboard_view_mode == "ranked" else "ranked"
                 self._refresh_leaderboard()
                 return None
+            if event.key == pygame.K_UP:
+                self._scroll_leaderboard(-1)
+                return None
+            if event.key == pygame.K_DOWN:
+                self._scroll_leaderboard(1)
+                return None
+            if event.key == pygame.K_PAGEUP:
+                self._scroll_leaderboard(-self._leaderboard_rows_per_page)
+                return None
+            if event.key == pygame.K_PAGEDOWN:
+                self._scroll_leaderboard(self._leaderboard_rows_per_page)
+                return None
+
+        if event.type == pygame.MOUSEWHEEL:
+            if event.y > 0:
+                self._scroll_leaderboard(-1)
+            elif event.y < 0:
+                self._scroll_leaderboard(1)
+            return None
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (4, 5):
+            if event.button == 4:
+                self._scroll_leaderboard(-1)
+            else:
+                self._scroll_leaderboard(1)
+            return None
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pos = event.pos
+            if self._button_rects.get("leaderboard_scroll_up") and self._button_rects["leaderboard_scroll_up"].collidepoint(pos):
+                self._scroll_leaderboard(-1)
+                return None
+            if self._button_rects.get("leaderboard_scroll_down") and self._button_rects["leaderboard_scroll_down"].collidepoint(pos):
+                self._scroll_leaderboard(1)
+                return None
+
             for row_rect, username in self._leaderboard_row_hitboxes:
                 if row_rect.collidepoint(pos):
                     if username:
@@ -1176,11 +1304,14 @@ class AccountPortalScreen:
                 self._leaderboard_selected_username = str(entries[0].get("username", "")) or None
             else:
                 self._leaderboard_selected_username = None
+            self._clamp_leaderboard_scroll()
+            self._ensure_leaderboard_selection_visible()
             self.message = f"{mode_label} leaderboard refreshed."
             self.message_color = (180, 215, 255)
         else:
             self._leaderboard_cache = []
             self._leaderboard_selected_username = None
+            self._leaderboard_scroll_index = 0
             self.message = f"Online connection required for {mode_label.lower()} leaderboard."
             self.message_color = (255, 200, 170)
 

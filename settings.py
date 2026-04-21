@@ -393,6 +393,9 @@ BACKGROUND_MUSIC_TRACKS = [
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 2.mp3",
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 3.mp3",
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 4.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 5.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 6.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 7.mp3",
 ]
 TUTORIAL_VIDEO_PATH = ASSETS_DIR / "tutorial" / "1.mp4"
 MUSIC_PATH = BACKGROUND_MUSIC_TRACKS[0]
