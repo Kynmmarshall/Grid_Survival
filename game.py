@@ -102,8 +102,11 @@ class GameManager:
         self._snapshot_interval = 1 / 30
         self._world_snapshot_send_timer = 0.0
         self._world_snapshot_interval = 1 / 6
+        self._network_round_seq = 0
         self._last_client_snapshot_time = -1.0
         self._last_client_world_snapshot_time = -1.0
+        self._last_client_snapshot_round_seq = -1
+        self._last_client_world_snapshot_round_seq = -1
         self._client_position_blend = 0.35
         self._client_local_position_blend = 0.30
         self._client_snap_distance = 180.0
@@ -777,6 +780,7 @@ class GameManager:
 
         snapshot = {
             "time_since_start": float(self._time_since_start),
+            "round_seq": int(self._network_round_seq),
             "paused": bool(self.paused),
             "game_over": bool(self.game_over),
             "target_score": int(self.target_score),
@@ -797,6 +801,7 @@ class GameManager:
     def _build_network_world_snapshot(self) -> dict:
         return {
             "time_since_start": float(self._time_since_start),
+            "round_seq": int(self._network_round_seq),
             "tiles": self.tile_manager.snapshot_state(),
             "hazards": self.hazard_manager.snapshot_state(),
             "orbs": self.orb_manager.snapshot_state(),
@@ -807,9 +812,52 @@ class GameManager:
             ),
         }
 
+    @staticmethod
+    def _parse_round_seq(value: Any, fallback: int) -> int:
+        try:
+            seq = int(value)
+        except (TypeError, ValueError):
+            seq = int(fallback)
+        return max(0, seq)
+
+    def _reset_client_round_world_state(self) -> None:
+        """Reset client-side world objects when host advances to a new round."""
+        self.game_over = False
+        self.elimination_screen = None
+        self.victory_screen = None
+        self.game_over_state = None
+        self._round_transition_seen = False
+        self._round_restart_timer = 0.0
+
+        self.tile_manager.reset()
+        self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
+        self.hazard_manager.reset()
+        self.orb_manager.reset()
+        if self.pacman_enemy_manager:
+            self.pacman_enemy_manager.reset()
+
+        self.eliminated_players.clear()
+        for player in self.players:
+            player._eliminated = False
+
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
             return
+
+        incoming_round_seq = self._parse_round_seq(
+            snapshot.get("round_seq", self._last_client_snapshot_round_seq),
+            self._last_client_snapshot_round_seq if self._last_client_snapshot_round_seq >= 0 else self._network_round_seq,
+        )
+        if self._last_client_snapshot_round_seq >= 0 and incoming_round_seq < self._last_client_snapshot_round_seq:
+            return
+        if incoming_round_seq > self._last_client_snapshot_round_seq:
+            self._network_round_seq = incoming_round_seq
+            self._last_client_snapshot_round_seq = incoming_round_seq
+            self._last_client_world_snapshot_time = -1.0
+            if self._last_client_world_snapshot_round_seq < incoming_round_seq:
+                self._last_client_world_snapshot_round_seq = incoming_round_seq
+            self._last_client_snapshot_time = -1.0
+            self._reset_client_round_world_state()
 
         previous_time = self._last_client_snapshot_time
         incoming_time = float(snapshot.get("time_since_start", self._time_since_start))
@@ -871,6 +919,18 @@ class GameManager:
     def _apply_network_world_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
             return
+
+        incoming_round_seq = self._parse_round_seq(
+            snapshot.get("round_seq", self._last_client_world_snapshot_round_seq),
+            self._last_client_world_snapshot_round_seq if self._last_client_world_snapshot_round_seq >= 0 else self._network_round_seq,
+        )
+        if self._last_client_world_snapshot_round_seq >= 0 and incoming_round_seq < self._last_client_world_snapshot_round_seq:
+            return
+        if incoming_round_seq > self._last_client_world_snapshot_round_seq:
+            self._network_round_seq = incoming_round_seq
+            self._last_client_world_snapshot_round_seq = incoming_round_seq
+            self._last_client_world_snapshot_time = -1.0
+            self._reset_client_round_world_state()
 
         incoming_time = float(snapshot.get("time_since_start", self._time_since_start))
         if incoming_time + 1e-6 < self._last_client_world_snapshot_time:
@@ -1812,8 +1872,11 @@ class GameManager:
         self._pending_power_press = False
         self._remote_input_state = self._empty_network_input_state()
         self._authoritative_network_inputs = None
+        self._network_round_seq = max(0, int(self._network_round_seq) + 1)
         self._last_client_snapshot_time = -1.0
         self._last_client_world_snapshot_time = -1.0
+        self._last_client_snapshot_round_seq = -1
+        self._last_client_world_snapshot_round_seq = -1
         self._client_snapshot_gap = self._snapshot_interval
         if reset_match:
             self._last_applied_match_result_id = None

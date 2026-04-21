@@ -927,7 +927,7 @@ class AccountPortalScreen:
             selected_row = self._get_selected_leaderboard_row()
             self._draw_leaderboard_player_box(panel, selected_row)
 
-            hint = self._font_tiny.render("Click row for details. Use UP/DOWN to scroll.", True, (170, 190, 220))
+            hint = self._font_tiny.render("", True, (170, 190, 220))
             self.screen.blit(hint, hint.get_rect(midleft=(list_rect.left + 6, list_rect.bottom + 2)))
 
             if self.current_username:
@@ -938,7 +938,7 @@ class AccountPortalScreen:
                         True,
                         (255, 225, 130),
                     )
-                    self.screen.blit(pos_line, pos_line.get_rect(center=(panel.centerx, list_rect.bottom + 22)))
+                    self.screen.blit(pos_line, pos_line.get_rect(center=(panel.centerx, list_rect.top)))
 
         self._draw_button(panel, "refresh", "REFRESH", 6, color=(72, 120, 175), width=220)
         self._draw_button(panel, "back", "BACK", 7, color=(96, 96, 118), width=220)
