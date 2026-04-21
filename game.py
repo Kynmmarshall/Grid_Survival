@@ -98,8 +98,8 @@ class GameManager:
         self._pending_power_press = False
         self._remote_input_state = self._empty_network_input_state()
         self._authoritative_network_inputs = None
-        self._snapshot_send_timer = 1 / 30
-        self._snapshot_interval = 1 / 30
+        self._snapshot_send_timer = 1 / 45
+        self._snapshot_interval = 1 / 45
         self._world_snapshot_send_timer = 0.0
         self._world_snapshot_interval = 1 / 6
         self._network_round_seq = 0
@@ -108,15 +108,17 @@ class GameManager:
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
         self._client_position_blend = 0.35
-        self._client_local_position_blend = 0.30
+        self._client_local_position_blend = 0.22
+        self._client_local_reconcile_deadzone = 12.0
+        self._client_last_local_input = self._empty_network_input_state()
         self._client_snap_distance = 180.0
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
-        self._client_remote_extrapolation_cap = 1 / 20
+        self._client_remote_extrapolation_cap = 1 / 16
         # Rate-limiting for client input messages: only send when the state
-        # changes or when the minimum interval has elapsed (30 Hz cap).
+        # changes or when the minimum interval has elapsed (60 Hz cap).
         self._input_send_timer: float = 0.0
-        self._input_send_interval: float = 1 / 45
+        self._input_send_interval: float = 1 / 60
         self._last_sent_input: dict | None = None
         self.level_map_path = Path(level_map_path) if level_map_path else None
         self.level_background_path = Path(level_background_path) if level_background_path else None
@@ -571,6 +573,9 @@ class GameManager:
             self._authoritative_network_inputs = None
 
     def _update_client_network_game(self, dt: float, local_input: dict | None = None):
+        if isinstance(local_input, dict):
+            self._client_last_local_input = dict(local_input)
+
         self.water.update(dt)
         # Advance tile crumbling/warning animations locally so they are smooth
         # between host snapshots.  Previously missing, making tiles appear frozen
@@ -743,17 +748,38 @@ class GameManager:
             return player_state
 
         local_player = self._local_network_player()
+        is_local_player = player is local_player
+        local_input = self._client_last_local_input if is_local_player else None
+        local_move_intent = bool(
+            isinstance(local_input, dict)
+            and (
+                local_input.get("up")
+                or local_input.get("down")
+                or local_input.get("left")
+                or local_input.get("right")
+                or local_input.get("jump")
+            )
+        )
+
+        if is_local_player and local_move_intent and distance <= self._client_local_reconcile_deadzone:
+            blended = dict(player_state)
+            blended["x"] = current.x
+            blended["y"] = current.y
+            return blended
+
         base_blend = (
             self._client_local_position_blend
-            if player is local_player
+            if is_local_player
             else self._client_position_blend
         )
+        if is_local_player and local_move_intent:
+            base_blend *= 0.75
         expected_interval = max(1e-4, float(self._snapshot_interval))
         gap_ratio = max(0.7, min(1.8, float(self._client_snapshot_gap) / expected_interval))
         blend = min(0.9, base_blend * gap_ratio)
         if distance > 72.0:
             blend = min(0.95, blend + 0.12)
-        if distance < 3.0:
+        if distance < 3.0 and not (is_local_player and local_move_intent):
             blend = 1.0
         blended = dict(player_state)
         blended["x"] = current.x + (target.x - current.x) * blend
@@ -1877,6 +1903,7 @@ class GameManager:
         self._last_client_world_snapshot_time = -1.0
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
+        self._client_last_local_input = self._empty_network_input_state()
         self._client_snapshot_gap = self._snapshot_interval
         if reset_match:
             self._last_applied_match_result_id = None

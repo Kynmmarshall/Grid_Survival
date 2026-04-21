@@ -51,6 +51,7 @@ KEEPALIVE_INTERVAL = 0.75
 CONNECTION_TIMEOUT = 8.0
 HELLO_RETRY_INTERVAL = 0.25
 HELLO_TIMEOUT = 10.0
+SEND_LOOP_IDLE_WAIT = 0.01
 
 # Transport packet kinds.
 PKT_HELLO = "h"
@@ -450,7 +451,7 @@ class NetworkManager:
             self._check_connection_timeout(now)
 
             try:
-                msg_type, payload, reliable = self._send_queue.get(timeout=0.02)
+                msg_type, payload, reliable = self._send_queue.get(timeout=SEND_LOOP_IDLE_WAIT)
             except queue.Empty:
                 continue
 
