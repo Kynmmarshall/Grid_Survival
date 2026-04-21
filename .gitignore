@@ -3,7 +3,8 @@ venv/
 .venv/
 env/
 ENV/
-
+output/
+custom_controls.json
 # Python cache
 __pycache__/
 *.py[cod]
@@ -14,7 +15,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
+player_accounts.db
 # IDE / editor
 .vscode/
 .idea/

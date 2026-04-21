@@ -1,0 +1,18 @@
+{
+  "player1": {
+    "up": "K_W",
+    "down": "K_S",
+    "left": "K_A",
+    "right": "K_D",
+    "jump": "K_SPACE",
+    "power": "K_E"
+  },
+  "player2": {
+    "up": "K_UP",
+    "down": "K_DOWN",
+    "left": "K_LEFT",
+    "right": "K_RIGHT",
+    "jump": "K_RSHIFT",
+    "power": "K_RCTRL"
+  }
+}

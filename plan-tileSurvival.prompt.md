@@ -48,6 +48,11 @@ Foundation phase complete, with major UI/UX polish implemented:
    - Alive counter color states: green → orange → red (last player)
 
 3. **TitleScreen & ModeSelectionScreen Overhaul (Category 3)**
+
+4. **Hazard & Physics Refinement (Category 4) - March 20**
+   - **Fairer Hitboxes**: Implemented `get_hitbox()` in `Player` class to shrink collision rect by 40% (x and y), preventing "cheap" deaths.
+   - **Death States**: Fixed a bug where players froze upon elimination. Added `die()` state transition and updated game loop to play death animations fully.
+   - **Explosion Fix**: Optimized `Explosion.draw` in `hazards.py` to fix invisible shockwaves/particles and improve performance.
    - Font hierarchy: Display/Heading/Body/Small fonts with fallback
    - Title animation: letter drop with bounce, color cycling, periodic shake
    - Input box: rounded rect, gold border, blinking cursor
@@ -60,6 +65,12 @@ Foundation phase complete, with major UI/UX polish implemented:
    - Pulsing colored title with drop shadow
    - Centered panel card layout with stats
    - Blinking restart prompt after fade-in
+
+5. **Physics & Effects Overhaul (Category 4)**
+   - **2.5D Jumping**: Implemented Z-axis physics where players jump *up* visually while a shadow remains on the ground.
+   - **Explosions**: Added shockwave rings and particle physics (drag, fading) for impactful hazard collisions.
+   - **Audio Controls**: Mute button added to in-game HUD.
+   - **Color Unification**: All UI/Game colors derived from a central `COLOR_PALETTE`.
 
 **Recent Architectural Shifts:**
 - Pivot from a strict 2D array tile grid to pixel-precise `walkable_mask` collisions based on TMX layers.
