@@ -294,9 +294,6 @@ class GameManager:
                         self.audio.toggle_mute()
                     elif self._handle_ninja_target_click(event.pos):
                         continue
-            elif event.type == pygame.MOUSEWHEEL:
-                if event.y:
-                    self._adjust_audio_volume(event.y * AUDIO_VOLUME_STEP)
             elif event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_PAGEUP, pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_RIGHTBRACKET):
                     self._adjust_audio_volume(AUDIO_VOLUME_STEP)
