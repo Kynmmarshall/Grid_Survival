@@ -1089,7 +1089,11 @@ class GameManager:
         for player in self.players:
             desired = (int(round(player.position.x)), int(round(player.position.y)))
             if desired in occupied or not self._is_spawn_position_valid(player, desired):
-                desired = self._find_valid_fallback(player, occupied, walkable_center)
+                fallback = self._find_valid_fallback(player, occupied, walkable_center)
+                if fallback is not None:
+                    desired = fallback
+            if desired in occupied or not self._is_spawn_position_valid(player, desired):
+                continue
             self._apply_spawn_position(player, desired)
             occupied.add(desired)
         self._align_ai_spawn_with_human()
@@ -1103,7 +1107,12 @@ class GameManager:
         player,
         occupied: set[tuple[int, int]],
         origin: pygame.Vector2,
-    ) -> tuple[int, int]:
+        *,
+        ignore_occupied: bool = False,
+    ) -> tuple[int, int] | None:
+        if not self.walkable_mask:
+            return None
+
         step_radius = 20
         max_radius = 400
         angle_step = 15
@@ -1112,11 +1121,44 @@ class GameManager:
                 angle_rad = math.radians(angle_deg)
                 offset = pygame.Vector2(math.cos(angle_rad), math.sin(angle_rad)) * radius
                 candidate = (int(round(origin.x + offset.x)), int(round(origin.y + offset.y)))
-                if candidate in occupied:
+                if (not ignore_occupied) and candidate in occupied:
                     continue
                 if self._is_spawn_position_valid(player, candidate):
                     return candidate
-        return (int(round(origin.x)), int(round(origin.y)))
+
+        origin_candidate = (int(round(origin.x)), int(round(origin.y)))
+        if ((ignore_occupied or origin_candidate not in occupied)
+                and self._is_spawn_position_valid(player, origin_candidate)):
+            return origin_candidate
+        return None
+
+    def _restore_nearest_platform_tile(self, origin: pygame.Vector2) -> bool:
+        """Emergency fallback: restore a nearby missing tile so respawn has ground."""
+        tiles = getattr(self.tile_manager, "tiles", None)
+        if not isinstance(tiles, dict) or not tiles:
+            return False
+
+        best_tile = None
+        best_dist_sq = float("inf")
+        origin_x = float(origin.x)
+        origin_y = float(origin.y)
+        for tile in tiles.values():
+            if getattr(tile, "state", TileState.NORMAL) == TileState.NORMAL:
+                continue
+
+            center_x = float(tile.pixel_x + tile.tile_width / 2)
+            center_y = float(tile.pixel_y + tile.tile_height / 2)
+            dist_sq = (center_x - origin_x) ** 2 + (center_y - origin_y) ** 2
+            if dist_sq < best_dist_sq:
+                best_dist_sq = dist_sq
+                best_tile = tile
+
+        if best_tile is None:
+            return False
+
+        best_tile.reset()
+        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        return bool(self.walkable_mask)
 
     def _apply_spawn_position(self, player, position: tuple[int, int]):
         player.position = pygame.Vector2(position)
@@ -1158,17 +1200,36 @@ class GameManager:
         return
 
     def _rescue_player_to_safe_tile(self, player) -> bool:
+        if not self.walkable_mask and self.original_walkable_mask:
+            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
         if not self.walkable_mask:
             return False
+
         occupied = {
             (int(round(p.position.x)), int(round(p.position.y)))
             for p in self.players
             if p is not player and p not in self.eliminated_players
         }
+
         walkable_center = self._walkable_center()
         safe_position = self._find_valid_fallback(player, occupied, walkable_center)
+        if safe_position is None:
+            safe_position = self._find_valid_fallback(
+                player,
+                occupied,
+                walkable_center,
+                ignore_occupied=True,
+            )
+        if safe_position is None and self._restore_nearest_platform_tile(walkable_center):
+            safe_position = self._find_valid_fallback(
+                player,
+                occupied,
+                walkable_center,
+                ignore_occupied=True,
+            )
         if not safe_position:
             return False
+
         self._apply_spawn_position(player, safe_position)
         player.falling = False
         player.fall_velocity = 0.0
@@ -1184,6 +1245,10 @@ class GameManager:
             player._death_fade_alpha = 255
         if hasattr(player, "_set_state"):
             player._set_state("idle", player.facing)
+
+        if self.is_network_game and self.is_network_host and self.network and self.network.connected:
+            self.network.send_message("snapshot", state=self._build_network_snapshot())
+            self.network.send_message("world_snapshot", state=self._build_network_world_snapshot())
         return True
 
     def _check_water_contact(self, player):
@@ -1233,9 +1298,10 @@ class GameManager:
                 # Reset eliminated flag
                 player._eliminated = False
                 # Revive the player at a safe position
-                self._rescue_player_to_safe_tile(player)
-                print(f"Player revived with extra life! (Reason: {reason})")
-                return
+                if self._rescue_player_to_safe_tile(player):
+                    print(f"Player revived with extra life! (Reason: {reason})")
+                    return
+                print("Extra life consumed but no safe platform tile was found; eliminating player.")
         if player not in self.eliminated_players:
             self.eliminated_players.append(player)
             player._eliminated = True
@@ -2200,6 +2266,15 @@ class GameManager:
             spread = (index // len(offsets)) * 48
             candidate = center + offset + pygame.Vector2(spread, 0)
             spawn = self._find_valid_fallback(prototype, occupied, candidate)
+            if spawn is None:
+                spawn = self._find_valid_fallback(
+                    prototype,
+                    occupied,
+                    center,
+                    ignore_occupied=True,
+                )
+            if spawn is None:
+                spawn = (int(round(center.x)), int(round(center.y)))
             spawns.append(spawn)
             occupied.add(spawn)
         return spawns
