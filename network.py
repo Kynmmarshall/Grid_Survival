@@ -132,10 +132,14 @@ class NetworkManager:
     )
 
     # High-frequency stream messages should never backlog.
-    _LATEST_ONLY_MESSAGES = frozenset({"input_state", "snapshot", "world_snapshot"})
+    _LATEST_ONLY_MESSAGES = frozenset(
+        {"input_state", "snapshot", "world_snapshot", "world_dynamic_snapshot"}
+    )
 
     # Messages that are allowed to be sent unreliably.
-    _UNRELIABLE_MESSAGES = frozenset({"input_state", "snapshot", "world_snapshot"})
+    _UNRELIABLE_MESSAGES = frozenset(
+        {"input_state", "snapshot", "world_snapshot", "world_dynamic_snapshot"}
+    )
 
     def __init__(self, *, is_host: bool):
         self.is_host = is_host
@@ -222,6 +226,7 @@ class NetworkManager:
             latest_input = self._latest_messages.pop("input_state", None)
             latest_snapshot = self._latest_messages.pop("snapshot", None)
             latest_world = self._latest_messages.pop("world_snapshot", None)
+            latest_world_dynamic = self._latest_messages.pop("world_dynamic_snapshot", None)
 
         if latest_input is not None:
             messages.append(latest_input)
@@ -229,6 +234,8 @@ class NetworkManager:
             messages.append(latest_snapshot)
         if latest_world is not None:
             messages.append(latest_world)
+        if latest_world_dynamic is not None:
+            messages.append(latest_world_dynamic)
 
         return messages
 
