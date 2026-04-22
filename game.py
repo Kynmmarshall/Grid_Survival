@@ -96,6 +96,7 @@ class GameManager:
         self.local_player_index = 0 if not self.is_network_game else max(0, min(1, local_player_index))
         self.remote_player_index = 1 - self.local_player_index if self.is_network_game else None
         self._pending_power_press = False
+        self._pending_remote_power_uses = 0
         self._remote_input_state = self._empty_network_input_state()
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = 1 / 60
@@ -103,7 +104,7 @@ class GameManager:
         self._world_dynamic_snapshot_send_timer = 0.0
         self._world_dynamic_snapshot_interval = 1 / 30
         self._world_snapshot_send_timer = 0.0
-        self._world_snapshot_interval = 1 / 12
+        self._world_snapshot_interval = 1 / 20
         self._network_round_seq = 0
         self._last_client_snapshot_time = -1.0
         self._last_client_world_snapshot_time = -1.0
@@ -326,7 +327,15 @@ class GameManager:
                         local_player = self._local_network_player()
                         local_power_key = getattr(local_player, "power_key", None)
                         if local_power_key is not None and event.key == local_power_key:
+                            first_press = not self._pending_power_press
                             self._pending_power_press = True
+                            if (
+                                first_press
+                                and not self.is_network_host
+                                and self.network
+                                and self.network.connected
+                            ):
+                                self.network.send_message("power_use_request")
                     else:
                         self._handle_power_key(event.key)
 
@@ -453,8 +462,17 @@ class GameManager:
                 )
             elif network_inputs is not None and idx in network_inputs:
                 player_input = self._sanitize_network_input(network_inputs[idx])
-                if player_input.get("power_pressed"):
-                    player.try_use_power()
+                power_requested = bool(player_input.get("power_pressed"))
+                if (
+                    self.is_network_game
+                    and self.is_network_host
+                    and idx == self.remote_player_index
+                    and self._pending_remote_power_uses > 0
+                ):
+                    power_requested = True
+                    self._pending_remote_power_uses = max(0, self._pending_remote_power_uses - 1)
+                if power_requested:
+                    player.try_use_power(self)
                 player.update_from_input_state(
                     dt,
                     player_input,
@@ -596,9 +614,8 @@ class GameManager:
 
         self.water.update(dt)
         # Advance tile crumbling/warning animations locally so they are smooth
-        # between host snapshots.  Previously missing, making tiles appear frozen
-        # on the client side.
-        self.tile_manager.update(dt)
+        # between host snapshots without running host-only random tile selection.
+        self.tile_manager.advance_visuals(dt)
         self.hazard_manager.advance_visuals(dt)
         self.orb_manager.advance_visuals(dt)
         if self.pacman_enemy_manager:
@@ -670,6 +687,8 @@ class GameManager:
                 self._restart_network_round(reset_match=bool(message.get("reset_match", False)))
             elif self.is_network_host and message_type == "input_state":
                 self._remote_input_state = self._sanitize_network_input(message.get("input"))
+            elif self.is_network_host and message_type == "power_use_request":
+                self._pending_remote_power_uses = min(8, self._pending_remote_power_uses + 1)
             elif (not self.is_network_host) and message_type == "snapshot":
                 latest_snapshot = message.get("state")
             elif (not self.is_network_host) and message_type == "world_snapshot":
@@ -853,13 +872,6 @@ class GameManager:
             "time_since_start": float(self._time_since_start),
             "round_seq": int(self._network_round_seq),
             "tiles": self.tile_manager.snapshot_state(),
-            "hazards": self.hazard_manager.snapshot_state(),
-            "orbs": self.orb_manager.snapshot_state(),
-            "pacman_enemies": (
-                self.pacman_enemy_manager.snapshot_state()
-                if self.pacman_enemy_manager
-                else None
-            ),
         }
 
     def _build_network_dynamic_world_snapshot(self) -> dict:
@@ -1165,6 +1177,25 @@ class GameManager:
     def _is_spawn_position_valid(self, player, position: tuple[int, int]) -> bool:
         return player._is_over_platform(pygame.Vector2(position), self.walkable_mask)
 
+    def _is_respawn_zone_safe(
+        self,
+        position: tuple[int, int],
+        *,
+        hazard_radius: float = 48.0,
+        enemy_distance: float = 150.0,
+    ) -> bool:
+        if self.hazard_manager and not self.hazard_manager.is_position_safe(position, radius=hazard_radius):
+            return False
+
+        if self.pacman_enemy_manager:
+            pos = pygame.Vector2(position)
+            for enemy in self.pacman_enemy_manager.enemies:
+                enemy_pos = pygame.Vector2(getattr(enemy, "position", enemy.rect.center))
+                if pos.distance_to(enemy_pos) < enemy_distance:
+                    return False
+
+        return True
+
     def _find_valid_fallback(
         self,
         player,
@@ -1172,6 +1203,9 @@ class GameManager:
         origin: pygame.Vector2,
         *,
         ignore_occupied: bool = False,
+        require_safe_zone: bool = False,
+        hazard_radius: float = 48.0,
+        enemy_distance: float = 150.0,
     ) -> tuple[int, int] | None:
         if not self.walkable_mask:
             return None
@@ -1187,11 +1221,23 @@ class GameManager:
                 if (not ignore_occupied) and candidate in occupied:
                     continue
                 if self._is_spawn_position_valid(player, candidate):
+                    if require_safe_zone and not self._is_respawn_zone_safe(
+                        candidate,
+                        hazard_radius=hazard_radius,
+                        enemy_distance=enemy_distance,
+                    ):
+                        continue
                     return candidate
 
         origin_candidate = (int(round(origin.x)), int(round(origin.y)))
         if ((ignore_occupied or origin_candidate not in occupied)
                 and self._is_spawn_position_valid(player, origin_candidate)):
+            if require_safe_zone and not self._is_respawn_zone_safe(
+                origin_candidate,
+                hazard_radius=hazard_radius,
+                enemy_distance=enemy_distance,
+            ):
+                return None
             return origin_candidate
         return None
 
@@ -1275,13 +1321,23 @@ class GameManager:
         }
 
         walkable_center = self._walkable_center()
-        safe_position = self._find_valid_fallback(player, occupied, walkable_center)
+        safe_position = self._find_valid_fallback(
+            player,
+            occupied,
+            walkable_center,
+            require_safe_zone=True,
+            hazard_radius=52.0,
+            enemy_distance=170.0,
+        )
         if safe_position is None:
             safe_position = self._find_valid_fallback(
                 player,
                 occupied,
                 walkable_center,
                 ignore_occupied=True,
+                require_safe_zone=True,
+                hazard_radius=44.0,
+                enemy_distance=130.0,
             )
         if safe_position is None and self._restore_nearest_platform_tile(walkable_center):
             safe_position = self._find_valid_fallback(
@@ -1289,6 +1345,9 @@ class GameManager:
                 occupied,
                 walkable_center,
                 ignore_occupied=True,
+                require_safe_zone=True,
+                hazard_radius=40.0,
+                enemy_distance=120.0,
             )
         if not safe_position:
             return False
@@ -1739,14 +1798,35 @@ class GameManager:
         if is_draw:
             return 0
 
+        max_gain, max_loss = self._rr_caps_for_target_score(self.target_score)
         score = self._match_performance_score(local_index, winner_index, mvp_index, is_draw=is_draw)
         won_match = winner_index is not None and local_index == winner_index
         if won_match:
-            gain = int(round(score * 45.0))
-            return max(0, min(45, gain))
+            gain = int(round(score * float(max_gain)))
+            return max(0, min(max_gain, gain))
 
-        loss = int(round((1.0 - score) * 30.0))
-        return -max(0, min(30, loss))
+        loss = int(round((1.0 - score) * float(max_loss)))
+        return -max(0, min(max_loss, loss))
+
+    def _rr_caps_for_target_score(self, target_score: int | None = None) -> tuple[int, int]:
+        """Scale RR caps by match length so short matches swing less than long matches."""
+        score_to_win = int(self.target_score if target_score is None else target_score)
+
+        min_target = 3
+        max_target = 20
+        min_win_cap = 12
+        max_win_cap = 45
+        min_lose_cap = 8
+        max_lose_cap = 40
+
+        if max_target <= min_target:
+            return max_win_cap, max_lose_cap
+
+        t = (score_to_win - min_target) / float(max_target - min_target)
+        t = max(0.0, min(1.0, t))
+        win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
+        lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+        return win_cap, lose_cap
 
     def _build_network_match_result(
         self,
@@ -1781,6 +1861,7 @@ class GameManager:
             "is_draw": bool(is_draw),
             "match_complete": bool(self._match_complete),
             "ranked_mode": bool(self._is_ranked_mode()),
+            "target_score": int(self.target_score),
             "round_wins": [int(value) for value in self.round_wins],
             "match_stats": match_stats,
         }
@@ -1797,6 +1878,11 @@ class GameManager:
         ranked_mode_override = state.get("ranked_mode") if isinstance(state.get("ranked_mode"), bool) else None
         is_draw = bool(state.get("is_draw", False))
         self._match_complete = bool(state.get("match_complete", self._match_complete))
+        if "target_score" in state:
+            try:
+                self.target_score = max(1, int(state.get("target_score", self.target_score)))
+            except (TypeError, ValueError):
+                pass
 
         incoming_round_wins = state.get("round_wins")
         if isinstance(incoming_round_wins, list):
@@ -2029,6 +2115,7 @@ class GameManager:
             self._match_player_stats = [self._new_match_stat_row(idx) for idx in range(len(self.players))]
         self.eliminated_players.clear()
         self._pending_power_press = False
+        self._pending_remote_power_uses = 0
         self._remote_input_state = self._empty_network_input_state()
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = self._snapshot_interval
@@ -2100,11 +2187,35 @@ class GameManager:
         if not self.walkable_mask:
             return
         center = self._walkable_center()
-        safe = (int(round(center.x)), int(round(center.y)))
+        occupied: set[tuple[int, int]] = set()
         for player in self.players:
             pos_tuple = (int(round(player.position.x)), int(round(player.position.y)))
-            if not self._is_spawn_position_valid(player, pos_tuple):
-                self._apply_spawn_position(player, safe)
+            if (
+                pos_tuple in occupied
+                or not self._is_spawn_position_valid(player, pos_tuple)
+                or not self._is_respawn_zone_safe(pos_tuple, hazard_radius=44.0, enemy_distance=120.0)
+            ):
+                safe = self._find_valid_fallback(
+                    player,
+                    occupied,
+                    center,
+                    ignore_occupied=True,
+                    require_safe_zone=True,
+                    hazard_radius=40.0,
+                    enemy_distance=120.0,
+                )
+                if safe is None:
+                    safe = self._find_valid_fallback(
+                        player,
+                        occupied,
+                        center,
+                        ignore_occupied=True,
+                    )
+                if safe is not None:
+                    self._apply_spawn_position(player, safe)
+                    pos_tuple = safe
+
+            occupied.add(pos_tuple)
             player.falling = False
             player.fall_velocity = 0.0
             player.drowning = False

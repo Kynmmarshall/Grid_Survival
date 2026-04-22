@@ -126,6 +126,7 @@ class NetworkManager:
             "match_result",
             "pause_state",
             "pause_toggle_request",
+            "power_use_request",
             "restart_request",
             "player_setup",
         }
