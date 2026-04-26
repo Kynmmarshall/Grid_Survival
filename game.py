@@ -211,27 +211,26 @@ class GameManager:
             custom_controls = load_custom_controls()
             if custom_controls is None:
                 custom_controls = {
-                    "player1": dict(DEFAULT_CONTROLS["player1"]),
-                    "player2": dict(DEFAULT_CONTROLS["player2"]),
+                    key: dict(value)
+                    for key, value in DEFAULT_CONTROLS.items()
                 }
-            player1_controls = custom_controls["player1"]
-            player2_controls = custom_controls["player2"]
-            player1_pos = next(spawn_positions, PLAYER_START_POS)
-            player2_pos = next(spawn_positions, PLAYER_START_POS)
-            self.players.append(
-                Player(
-                    position=player1_pos,
-                    controls=player1_controls,
-                    character_name=self._character_choice(0),
+
+            slot_count = max(2, min(4, len(self.selected_characters) or 2))
+            for idx in range(slot_count):
+                control_key = f"player{idx + 1}"
+                controls = dict(
+                    custom_controls.get(
+                        control_key,
+                        DEFAULT_CONTROLS.get(control_key, DEFAULT_CONTROLS["player1"]),
+                    )
                 )
-            )
-            self.players.append(
-                Player(
-                    position=player2_pos,
-                    controls=player2_controls,
-                    character_name=self._character_choice(1),
+                self.players.append(
+                    Player(
+                        position=next(spawn_positions, PLAYER_START_POS),
+                        controls=controls,
+                        character_name=self._character_choice(idx),
+                    )
                 )
-            )
         elif self.is_network_game:
             custom_controls = load_custom_controls()
             if custom_controls is None:
