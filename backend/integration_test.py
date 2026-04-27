@@ -91,6 +91,8 @@ def parse_endpoint(endpoint: str):
             port = int(p)
         except Exception:
             port = 5555
+    if host in {"0.0.0.0", "::", ""}:
+        host = "127.0.0.1"
     return host, port
 
 
