@@ -19,6 +19,7 @@ from scenes import (
     AccountPortalScreen,
     LevelSelectionScreen,
     ModeSelectionScreen,
+    PlayerCountSelectionScreen,
     PlayerSelectionScreen,
     TargetScoreSelectionScreen,
 )
@@ -237,6 +238,7 @@ def _wait_for_online_match_start(
     character_name: str,
     selected_level_id: int,
     selected_target_score: int,
+    selected_player_count: int,
 ):
     local_setup = {"name": player_name, "character": character_name}
     audio_overlay = SceneAudioOverlay()
@@ -274,12 +276,14 @@ def _wait_for_online_match_start(
                     local_player_index=1,
                     level_id=int(selected_level_id),
                     target_score=int(selected_target_score),
+                    player_count=max(2, min(4, int(selected_player_count))),
                 )
                 return {
                     "players": players,
                     "local_player_index": 0,
                     "level_id": int(selected_level_id),
                     "target_score": int(selected_target_score),
+                    "player_count": max(2, min(4, int(selected_player_count))),
                 }
 
             if (not network.is_host) and message_type == "game_start":
@@ -291,6 +295,7 @@ def _wait_for_online_match_start(
                     "local_player_index": int(message.get("local_player_index", 1)),
                     "level_id": int(message.get("level_id", selected_level_id)),
                     "target_score": int(message.get("target_score", selected_target_score)),
+                    "player_count": max(2, min(4, int(message.get("player_count", selected_player_count)))),
                 }
 
         title = "PLAY OVER LAN" if network.is_host else "JOINING OVER LAN"
@@ -372,6 +377,7 @@ def main():
             num_players = 2 if game_mode == MODE_LOCAL_MULTIPLAYER else 1
             selected_level = None
             selected_target_score = 3
+            selected_player_count = 2
             network_player_names = None
             ranked_override = None
 
@@ -463,6 +469,18 @@ def main():
 
                 if choice == "host":
                     while True:
+                        player_count_screen = PlayerCountSelectionScreen(screen, clock)
+                        selected_player_count = player_count_screen.run()
+                        if selected_player_count is None:
+                            if getattr(player_count_screen, "quit_requested", False):
+                                pygame.quit()
+                                return
+                            if network:
+                                network.disconnect()
+                            break
+
+                        selected_player_count = max(2, min(4, int(selected_player_count)))
+
                         level_screen = LevelSelectionScreen(screen, clock, game_mode)
                         selected_level = level_screen.run()
                         if selected_level is None:
@@ -542,6 +560,7 @@ def main():
                         selected_characters[0],
                         selected_level.level_id,
                         selected_target_score,
+                        selected_player_count,
                     )
                     if not match_setup:
                         network.disconnect()
@@ -561,6 +580,10 @@ def main():
                     selected_target_score = max(
                         1,
                         int(match_setup.get("target_score", selected_target_score)),
+                    )
+                    selected_player_count = max(
+                        2,
+                        min(4, int(match_setup.get("player_count", selected_player_count))),
                     )
 
                 get_audio().stop_music(fade_ms=500)

@@ -1,11 +1,11 @@
 {
   "player1": {
-    "up": "K_R",
-    "down": "K_F",
-    "left": "K_D",
-    "right": "K_G",
+    "up": "K_W",
+    "down": "K_S",
+    "left": "K_A",
+    "right": "K_D",
     "jump": "K_SPACE",
-    "power": "K_E"
+    "power": "K_Q"
   },
   "player2": {
     "up": "K_UP",
