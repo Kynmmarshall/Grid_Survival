@@ -25,8 +25,9 @@ class MatchServerManager:
     in-memory registry for reconnect/resync handoff data.
     """
 
-    def __init__(self, endpoint: str, assignment_ttl_seconds: float = 1800.0):
+    def __init__(self, endpoint: str, assignment_ttl_seconds: float = 1800.0, bind_endpoint: str | None = None):
         self.endpoint = str(endpoint).strip() or "udp://127.0.0.1:5555"
+        self.bind_endpoint = str(bind_endpoint).strip() or self.endpoint
         self.assignment_ttl_seconds = max(60.0, float(assignment_ttl_seconds))
         self._lock = threading.Lock()
         self._assignments: dict[str, MatchAssignment] = {}
@@ -34,12 +35,13 @@ class MatchServerManager:
     @classmethod
     def from_env(cls) -> "MatchServerManager":
         endpoint = os.getenv("GRID_SURVIVAL_MATCH_ENDPOINT", "udp://127.0.0.1:5555")
+        bind_endpoint = os.getenv("GRID_SURVIVAL_MATCH_BIND_ENDPOINT", endpoint)
         ttl = os.getenv("GRID_SURVIVAL_MATCH_ASSIGNMENT_TTL", "1800")
         try:
             ttl_s = float(ttl)
         except (TypeError, ValueError):
             ttl_s = 1800.0
-        return cls(endpoint=endpoint, assignment_ttl_seconds=ttl_s)
+        return cls(endpoint=endpoint, assignment_ttl_seconds=ttl_s, bind_endpoint=bind_endpoint)
 
     @staticmethod
     def _new_token(length: int = 24) -> str:

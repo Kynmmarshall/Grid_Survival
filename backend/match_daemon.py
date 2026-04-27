@@ -224,8 +224,8 @@ class MatchDaemon:
 
 
 def run_daemon_from_manager(manager: MatchServerManager) -> None:
-    # parse manager.endpoint like 'udp://host:port' or 'host:port'
-    endpoint = str(manager.endpoint or "udp://127.0.0.1:5555")
+    # parse manager.bind_endpoint for local bind and manager.endpoint for public advertisement
+    endpoint = str(getattr(manager, "bind_endpoint", None) or manager.endpoint or "udp://127.0.0.1:5555")
     host = "0.0.0.0"
     port = 5555
     if "://" in endpoint:
