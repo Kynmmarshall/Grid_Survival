@@ -13,8 +13,10 @@ from settings import (
     FONT_PATH_HEADING,
     FONT_PATH_SMALL,
     WINDOW_SIZE,
+    SOUND_POWER_READY,
 )
 from .common import SceneAudioOverlay, _draw_rounded_rect, _load_font
+from audio import get_audio
 
 
 @dataclass
@@ -273,6 +275,86 @@ class InternetPartyLobbyScreen:
 
         self._audio_overlay.draw(self.screen)
 
+    def _show_match_found(self, match: dict) -> bool:
+        """Show a short 'MATCH FOUND' overlay with countdown. Returns True if accepted."""
+        countdown = 3.0
+        # play SFX once on match found
+        try:
+            get_audio().play_sfx(SOUND_POWER_READY, volume=0.85, max_instances=1)
+        except Exception:
+            pass
+        start = pygame.time.get_ticks() / 1000.0
+        while True:
+            dt = self.clock.tick(60) / 1000.0
+            for event in pygame.event.get():
+                if self._audio_overlay.handle_event(event):
+                    continue
+                if event.type == pygame.QUIT:
+                    self.quit_requested = True
+                    return False
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                        # decline the match and leave queue
+                        if self._lobby_code:
+                            try:
+                                self.online_service.dequeue(player_name=self.setup.player_name, lobby_code=self._lobby_code)
+                            except Exception:
+                                pass
+                        self._set_status("Match declined", ttl=1.6)
+                        return False
+
+            elapsed = (pygame.time.get_ticks() / 1000.0) - start
+            remaining = max(0, int(math.ceil(countdown - elapsed)))
+
+            # draw base lobby behind overlay so players see context
+            self._draw()
+
+            # overlay
+            overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            overlay.fill((6, 10, 18, 160))
+            self.screen.blit(overlay, (0, 0))
+
+            panel_w = min(640, self.width - 120)
+            panel_h = 260
+            panel = pygame.Rect(0, 0, panel_w, panel_h)
+            panel.center = (self.width // 2, self.height // 2)
+            _draw_rounded_rect(self.screen, panel, (18, 22, 36, 240), (190, 110, 255), 3, 12)
+
+            title_font = _load_font(FONT_PATH_HEADING, 36, bold=True)
+            title_surf = title_font.render("MATCH FOUND", True, (255, 255, 255))
+            self.screen.blit(title_surf, title_surf.get_rect(center=(panel.centerx, panel.top + 42)))
+
+            # show players (from match payload) and map
+            players = match.get("players") or []
+            map_id = match.get("map_id") or match.get("map") or self.setup.level_id
+            y = panel.top + 92
+            info_font = _load_font(FONT_PATH_BODY, 20)
+            try:
+                for idx, p in enumerate(players[:4]):
+                    name = str(p.get("name", f"Player {idx + 1}")) if isinstance(p, dict) else str(p)
+                    line = info_font.render(name, True, (230, 238, 255))
+                    self.screen.blit(line, (panel.left + 36, y))
+                    y += 26
+            except Exception:
+                pass
+
+            map_s = info_font.render(f"Map: {map_id}", True, (200, 216, 238))
+            self.screen.blit(map_s, (panel.right - 180, panel.top + 92))
+
+            # countdown number
+            count_font = _load_font(FONT_PATH_HEADING, 72, bold=True)
+            count_s = count_font.render(str(remaining), True, (255, 220, 110))
+            self.screen.blit(count_s, count_s.get_rect(center=(panel.centerx, panel.bottom - 58)))
+
+            hint = self._font_small.render("Press ESC to decline", True, (190, 200, 220))
+            self.screen.blit(hint, hint.get_rect(center=(panel.centerx, panel.bottom - 22)))
+
+            self._audio_overlay.draw(self.screen)
+            pygame.display.flip()
+
+            if elapsed >= countdown:
+                return True
+
     def _run_action(self, idx: int) -> None:
         if idx == 0:
             self._action_create_lobby()
@@ -341,7 +423,10 @@ class InternetPartyLobbyScreen:
                 poll_timer = 0.0
                 match = self._refresh_updates()
                 if isinstance(match, dict):
-                    return match
+                    accepted = self._show_match_found(match)
+                    if accepted:
+                        return match
+                    # canceled: continue polling
 
             self._draw()
             pygame.display.flip()
