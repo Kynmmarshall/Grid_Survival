@@ -11,40 +11,49 @@ import sys
 import time
 from urllib.parse import urljoin
 
-try:
-    import requests
-except Exception:
-    requests = None
-
 
 CONTROL_HOST = os.getenv("GRID_SURVIVAL_CONTROL_HOST", "127.0.0.1")
 CONTROL_PORT = int(os.getenv("GRID_SURVIVAL_CONTROL_PORT", "8010"))
+API_KEY = (os.getenv("GRID_SURVIVAL_ONLINE_API_KEY") or os.getenv("GRID_SURVIVAL_CONTROL_API_KEY") or "").strip()
 BASE = f"http://{CONTROL_HOST}:{CONTROL_PORT}"
+
+
+def _auth_headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    return headers
 
 
 def http_post(path: str, payload: dict):
     url = urljoin(BASE + "/", path.lstrip("/"))
-    if requests:
-        r = requests.post(url, json=payload, timeout=5.0)
-        return r.status_code, r.json()
     import urllib.request
+    import urllib.error
 
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=5.0) as r:
-        raw = r.read()
-        return r.getcode(), json.loads(raw.decode("utf-8"))
+    req = urllib.request.Request(url, data=data, method="POST", headers=_auth_headers())
+    try:
+        with urllib.request.urlopen(req, timeout=5.0) as r:
+            raw = r.read()
+            return r.getcode(), json.loads(raw.decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        return e.code, json.loads(raw.decode("utf-8")) if raw else {"ok": False, "error": str(e)}
 
 
 def http_get(path: str):
     url = urljoin(BASE + "/", path.lstrip("/"))
-    if requests:
-        r = requests.get(url, timeout=5.0)
-        return r.status_code, r.json()
     import urllib.request
-    with urllib.request.urlopen(url, timeout=5.0) as r:
-        raw = r.read()
-        return r.getcode(), json.loads(raw.decode("utf-8"))
+    import urllib.error
+
+    req = urllib.request.Request(url, headers=_auth_headers())
+    try:
+        with urllib.request.urlopen(req, timeout=5.0) as r:
+            raw = r.read()
+            return r.getcode(), json.loads(raw.decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        return e.code, json.loads(raw.decode("utf-8")) if raw else {"ok": False, "error": str(e)}
 
 
 def parse_endpoint(endpoint: str):
