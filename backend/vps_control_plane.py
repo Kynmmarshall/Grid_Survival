@@ -18,6 +18,7 @@ from backend.match_daemon import run_daemon_from_manager
 HOST = os.getenv("GRID_SURVIVAL_CONTROL_HOST", "0.0.0.0")
 PORT = int(os.getenv("GRID_SURVIVAL_CONTROL_PORT", "8010"))
 API_KEY = (os.getenv("GRID_SURVIVAL_ONLINE_API_KEY") or "").strip() or None
+MATCH_BOT_FILL_SECONDS = max(1.0, float(os.getenv("GRID_SURVIVAL_MATCH_BOT_FILL_SECONDS", "10")))
 MATCH_SERVER_MANAGER = MatchServerManager.from_env()
 
 
@@ -255,7 +256,7 @@ class ControlPlaneState:
                             humans += next_humans
                         j += 1
 
-                    if humans < target_players and wait_secs < 60.0:
+                    if humans < target_players and wait_secs < MATCH_BOT_FILL_SECONDS:
                         i += 1
                         continue
 
