@@ -9,8 +9,28 @@ import os
 import socket
 import sys
 import time
+from pathlib import Path
 from urllib.parse import urljoin
 
+
+def _load_env_file(path: Path) -> None:
+    if not path.is_file():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+for candidate in (SCRIPT_DIR / ".env", SCRIPT_DIR.parent / "backend" / ".env", SCRIPT_DIR.parent / ".env"):
+    _load_env_file(candidate)
 
 CONTROL_HOST = os.getenv("GRID_SURVIVAL_CONTROL_HOST", "127.0.0.1")
 CONTROL_PORT = int(os.getenv("GRID_SURVIVAL_CONTROL_PORT", "8010"))
