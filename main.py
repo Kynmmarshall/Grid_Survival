@@ -4,6 +4,7 @@ import sys
 import pygame
 
 from backend.account_service import AccountService
+from backend.online_service import OnlineService
 from audio import get_audio
 from game import GameManager
 from host_waiting_screen import host_waiting_screen
@@ -315,6 +316,172 @@ def _wait_for_online_match_start(
         clock.tick(30)
 
 
+def _prompt_online_route(screen, clock) -> str | None:
+    """Choose between existing direct (LAN/IP) play and VPS internet control-plane."""
+    audio_overlay = SceneAudioOverlay()
+    selected = 0
+    options = [
+        ("direct", "LAN CONNECT", "Use host/discover/join IP."),
+        ("internet", "INTERNET LOBBY", "Create lobbies + queue + match assignment."),
+    ]
+
+    while True:
+        for event in pygame.event.get():
+            if audio_overlay.handle_event(event):
+                continue
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                    return None
+                if event.key in (pygame.K_UP, pygame.K_w):
+                    selected = (selected - 1) % len(options)
+                elif event.key in (pygame.K_DOWN, pygame.K_s):
+                    selected = (selected + 1) % len(options)
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    return options[selected][0]
+                elif event.key == pygame.K_1:
+                    return options[0][0]
+                elif event.key == pygame.K_2:
+                    return options[1][0]
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                width, height = WINDOW_SIZE
+                panel = pygame.Rect(0, 0, min(980, width - 120), 360)
+                panel.center = (width // 2, height // 2)
+                card_h = 110
+                card_gap = 20
+                for idx in range(len(options)):
+                    rect = pygame.Rect(panel.left + 34, panel.top + 92 + idx * (card_h + card_gap), panel.width - 68, card_h)
+                    if rect.collidepoint(event.pos):
+                        selected = idx
+                        return options[selected][0]
+
+        width, height = WINDOW_SIZE
+        font_title = _load_font(FONT_PATH_HEADING, 34, bold=True)
+        font_body = _load_font(FONT_PATH_BODY, 22)
+        font_small = _load_font(FONT_PATH_SMALL, 18)
+
+        anim_time = pygame.time.get_ticks() / 1000.0
+        draw_lan_backdrop(screen, anim_time)
+
+        panel = pygame.Rect(0, 0, min(980, width - 120), 360)
+        panel.center = (width // 2, height // 2)
+        _draw_rounded_rect(screen, panel, (18, 24, 42, 236), (140, 168, 222), 3, 20)
+
+        title = font_title.render("ONLINE ROUTE", True, (248, 250, 255))
+        subtitle = font_body.render("Choose how this online session should connect.", True, (198, 212, 236))
+        screen.blit(title, title.get_rect(center=(panel.centerx, panel.top + 46)))
+        screen.blit(subtitle, subtitle.get_rect(center=(panel.centerx, panel.top + 78)))
+
+        card_h = 110
+        card_gap = 20
+        mouse_pos = pygame.mouse.get_pos()
+        for idx, (_, label, desc) in enumerate(options):
+            rect = pygame.Rect(panel.left + 34, panel.top + 92 + idx * (card_h + card_gap), panel.width - 68, card_h)
+            active = idx == selected or rect.collidepoint(mouse_pos)
+            border = (186, 122, 255) if active else (106, 128, 170)
+            bg = (38, 52, 86, 232) if active else (28, 38, 62, 224)
+            _draw_rounded_rect(screen, rect, bg, border, 3 if active else 2, 14)
+
+            label_s = font_body.render(label, True, (245, 248, 255))
+            desc_s = font_small.render(desc, True, (188, 204, 232))
+            screen.blit(label_s, label_s.get_rect(midleft=(rect.left + 18, rect.top + 34)))
+            screen.blit(desc_s, desc_s.get_rect(midleft=(rect.left + 18, rect.top + 68)))
+
+            key = font_small.render(f"[{idx + 1}]", True, border)
+            screen.blit(key, key.get_rect(topright=(rect.right - 14, rect.top + 12)))
+
+        footer = font_small.render("ENTER to confirm * ESC to back", True, (168, 186, 220))
+        screen.blit(footer, footer.get_rect(center=(panel.centerx, panel.bottom - 20)))
+        audio_overlay.draw(screen)
+        pygame.display.flip()
+        clock.tick(60)
+
+
+def _wait_for_internet_match_assignment(
+    screen,
+    clock,
+    online_service: OnlineService,
+    *,
+    player_name: str,
+    character_name: str,
+    level_id: int,
+    target_score: int,
+    player_count: int,
+    rating: int,
+) -> dict | None:
+    create_res = online_service.create_lobby(
+        player_name=player_name,
+        mode="ranked",
+        target_score=int(target_score),
+        map_pool=[int(level_id)],
+        region="global",
+        max_players=max(2, min(4, int(player_count))),
+        rating=int(rating),
+    )
+    if not create_res.get("ok"):
+        return None
+
+    lobby = create_res.get("lobby") or {}
+    lobby_code = str(lobby.get("code", "")).upper()
+    if not lobby_code:
+        return None
+
+    ready_res = online_service.set_ready(player_name=player_name, lobby_code=lobby_code, ready=True)
+    if not ready_res.get("ok"):
+        return None
+    queue_res = online_service.queue(player_name=player_name, lobby_code=lobby_code, region="global", rating=int(rating))
+    if not queue_res.get("ok"):
+        return None
+
+    queued_at = pygame.time.get_ticks() / 1000.0
+    audio_overlay = SceneAudioOverlay()
+    poll_timer = 0.0
+
+    while True:
+        dt = clock.tick(30) / 1000.0
+        poll_timer += dt
+
+        for event in pygame.event.get():
+            if audio_overlay.handle_event(event):
+                continue
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                online_service.dequeue(player_name=player_name, lobby_code=lobby_code)
+                return None
+
+        if poll_timer >= 0.9:
+            poll_timer = 0.0
+            updates = online_service.poll_or_ws_updates(player_name=player_name)
+            if not updates.get("ok"):
+                continue
+            events = updates.get("events") or []
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                if str(event.get("type", "")) == "match_found":
+                    match = event.get("match") or {}
+                    if isinstance(match, dict):
+                        match["character"] = character_name
+                        return match
+
+        elapsed = max(0, int((pygame.time.get_ticks() / 1000.0) - queued_at))
+        _draw_lobby_panel(
+            screen,
+            "INTERNET QUEUE",
+            [
+                f"Lobby {lobby_code} * {player_name} ({character_name})",
+                f"Queued {elapsed}s * target={target_score} * players={player_count}",
+                "Waiting for match assignment... ESC to cancel.",
+            ],
+            accent=(160, 120, 255),
+            audio_overlay=audio_overlay,
+        )
+
+
 def _sync_account_in_menu(account_service: AccountService, username: str | None) -> None:
     """Run account sync only from menu flow (never during gameplay)."""
     if not username:
@@ -387,6 +554,91 @@ def main():
                     continue
 
             if game_mode == MODE_ONLINE_MULTIPLAYER:
+                online_route = _prompt_online_route(screen, clock)
+                if online_route is None:
+                    continue
+
+                if online_route == "internet":
+                    online_service = OnlineService.from_env()
+                    health = online_service.health()
+                    if not health.get("ok"):
+                        toast_message(
+                            screen,
+                            clock,
+                            f"Internet control-plane unavailable: {health.get('error', 'offline')}",
+                        )
+                        continue
+
+                    while True:
+                        player_count_screen = PlayerCountSelectionScreen(screen, clock)
+                        selected_player_count = player_count_screen.run()
+                        if selected_player_count is None:
+                            if getattr(player_count_screen, "quit_requested", False):
+                                pygame.quit()
+                                return
+                            break
+                        selected_player_count = max(2, min(4, int(selected_player_count)))
+
+                        level_screen = LevelSelectionScreen(screen, clock, game_mode)
+                        selected_level = level_screen.run()
+                        if selected_level is None:
+                            if getattr(level_screen, "quit_requested", False):
+                                pygame.quit()
+                                return
+                            break
+
+                        target_score_screen = TargetScoreSelectionScreen(screen, clock)
+                        selected_target_score = target_score_screen.run()
+                        if selected_target_score is None:
+                            if getattr(target_score_screen, "quit_requested", False):
+                                pygame.quit()
+                                return
+                            continue
+                        selected_target_score = max(1, int(selected_target_score))
+
+                        char_select = PlayerSelectionScreen(
+                            screen,
+                            clock,
+                            game_mode,
+                            num_players=1,
+                        )
+                        selected_characters = char_select.run()
+                        if not selected_characters:
+                            if getattr(char_select, "quit_requested", False):
+                                pygame.quit()
+                                return
+                            break
+
+                        internet_match = _wait_for_internet_match_assignment(
+                            screen,
+                            clock,
+                            online_service,
+                            player_name=player_name,
+                            character_name=str(selected_characters[0]),
+                            level_id=int(selected_level.level_id),
+                            target_score=int(selected_target_score),
+                            player_count=int(selected_player_count),
+                            rating=int(account_service.get_profile(active_account_username).rr) if active_account_username and account_service.get_profile(active_account_username) else 1000,
+                        )
+                        if not internet_match:
+                            toast_message(screen, clock, "Queue cancelled or no assignment yet.", color=(220, 170, 110))
+                            break
+
+                        match_id = str(internet_match.get("match_id", "match"))
+                        bot_count = int(internet_match.get("bot_count", 0))
+                        join_info = internet_match.get("join") if isinstance(internet_match.get("join"), dict) else {}
+                        endpoint = str(join_info.get("endpoint", "n/a"))
+                        toast_message(
+                            screen,
+                            clock,
+                            f"Match found ({match_id}) endpoint={endpoint} bots={bot_count}",
+                            color=(140, 240, 170),
+                            duration=2.2,
+                        )
+                        break
+
+                    continue
+
                 choice = prompt_host_or_join(screen, clock)
                 if choice is None:
                     continue

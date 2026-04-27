@@ -132,8 +132,8 @@ def prompt_host_or_join(screen, clock):
         {
             "value": "host",
             "title": "HOST GAME",
-            "desc": "Open a match for players on your LAN or anywhere on the internet.",
-            "hint": "Your LAN IP and public IP will both be displayed.",
+            "desc": "Open a match for players on your LAN to connect.",
+            "hint": "Your LAN IP would be Displayed.",
         },
         {
             "value": "discover",
@@ -190,9 +190,9 @@ def prompt_host_or_join(screen, clock):
         eased = 1.0 - (1.0 - progress) ** 3
         header_offset = 80.0 * (1.0 - eased)
 
-        title = font_header.render("PLAY ONLINE", True, (255, 255, 255))
+        title = font_header.render("PLAY OVER LAN", True, (255, 255, 255))
         subtitle = font_body.render(
-            "Host on your LAN or invite anyone over the internet.",
+            "Host on your LAN or connect to any visible game or IP address.",
             True,
             (205, 210, 225),
         )
