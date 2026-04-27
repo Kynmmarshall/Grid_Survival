@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from backend.vps_match_server import MatchServerManager
+from backend.match_daemon import run_daemon_from_manager
 
 
 HOST = os.getenv("GRID_SURVIVAL_CONTROL_HOST", "0.0.0.0")
@@ -451,6 +452,12 @@ def _matchmaking_loop() -> None:
 
 def run_server() -> None:
     threading.Thread(target=_matchmaking_loop, daemon=True).start()
+    # start match daemon co-located so issued assignments are consumable in-process
+    try:
+        t = threading.Thread(target=run_daemon_from_manager, args=(MATCH_SERVER_MANAGER,), daemon=True)
+        t.start()
+    except Exception:
+        pass
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Control-plane listening on http://{HOST}:{PORT}")
     server.serve_forever()
