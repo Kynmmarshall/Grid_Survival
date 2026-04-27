@@ -16,8 +16,11 @@ from lan_prompts import (
     toast_message,
 )
 from network import NetworkClient, NetworkHost, get_local_ip, get_public_ip
+from network import InternetSessionClient
 from scenes import (
     AccountPortalScreen,
+    InternetLobbySetup,
+    InternetPartyLobbyScreen,
     LevelSelectionScreen,
     ModeSelectionScreen,
     PlayerCountSelectionScreen,
@@ -495,6 +498,21 @@ def _sync_account_in_menu(account_service: AccountService, username: str | None)
     set_menu_sync_indicator_result(synced)
 
 
+def _resolve_account_rating(account_service: AccountService, username: str | None) -> int:
+    if not username:
+        return 1000
+    try:
+        profile = account_service.get_profile(username)
+    except Exception:
+        return 1000
+    if profile is None:
+        return 1000
+    try:
+        return max(0, int(profile.rr))
+    except Exception:
+        return 1000
+
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode(WINDOW_SIZE, WINDOW_FLAGS)
@@ -569,6 +587,8 @@ def main():
                         )
                         continue
 
+                    internet_handled = False
+
                     while True:
                         player_count_screen = PlayerCountSelectionScreen(screen, clock)
                         selected_player_count = player_count_screen.run()
@@ -609,34 +629,102 @@ def main():
                                 return
                             break
 
-                        internet_match = _wait_for_internet_match_assignment(
-                            screen,
-                            clock,
-                            online_service,
+                        rating = _resolve_account_rating(account_service, active_account_username)
+                        lobby_setup = InternetLobbySetup(
                             player_name=player_name,
                             character_name=str(selected_characters[0]),
                             level_id=int(selected_level.level_id),
                             target_score=int(selected_target_score),
                             player_count=int(selected_player_count),
-                            rating=int(account_service.get_profile(active_account_username).rr) if active_account_username and account_service.get_profile(active_account_username) else 1000,
+                            rating=int(rating),
                         )
-                        if not internet_match:
-                            toast_message(screen, clock, "Queue cancelled or no assignment yet.", color=(220, 170, 110))
-                            break
-
-                        match_id = str(internet_match.get("match_id", "match"))
-                        bot_count = int(internet_match.get("bot_count", 0))
-                        join_info = internet_match.get("join") if isinstance(internet_match.get("join"), dict) else {}
-                        endpoint = str(join_info.get("endpoint", "n/a"))
-                        toast_message(
+                        party_lobby = InternetPartyLobbyScreen(
                             screen,
                             clock,
-                            f"Match found ({match_id}) endpoint={endpoint} bots={bot_count}",
-                            color=(140, 240, 170),
-                            duration=2.2,
+                            online_service,
+                            lobby_setup,
                         )
+                        internet_match = party_lobby.run()
+                        if not internet_match:
+                            if getattr(party_lobby, "quit_requested", False):
+                                pygame.quit()
+                                return
+                            break
+
+                        join_info = internet_match.get("join") if isinstance(internet_match.get("join"), dict) else {}
+                        endpoint = str(join_info.get("endpoint", "")).strip()
+                        token = str(join_info.get("token", "")).strip()
+                        if not endpoint or not token:
+                            toast_message(screen, clock, "Match assignment missing endpoint/token.")
+                            continue
+
+                        internet_network = InternetSessionClient()
+                        connected = internet_network.connect_to_match(
+                            endpoint=endpoint,
+                            token=token,
+                            player_name=player_name,
+                        )
+                        if not connected:
+                            toast_message(
+                                screen,
+                                clock,
+                                f"Match connect failed: {internet_network.last_error or 'unknown error'}",
+                            )
+                            continue
+
+                        assigned_players = internet_match.get("players") if isinstance(internet_match.get("players"), list) else []
+                        network_player_names = []
+                        selected_chars_for_match = []
+                        local_player_index = 0
+                        for idx, payload in enumerate(assigned_players[:2]):
+                            if not isinstance(payload, dict):
+                                payload = {}
+                            name = str(payload.get("name", f"Player {idx + 1}"))
+                            network_player_names.append(name)
+                            selected_chars_for_match.append(str(payload.get("character", selected_characters[0])))
+                            if name == player_name:
+                                local_player_index = idx
+
+                        while len(selected_chars_for_match) < 2:
+                            selected_chars_for_match.append(str(selected_characters[0]))
+                        while len(network_player_names) < 2:
+                            network_player_names.append(f"Player {len(network_player_names) + 1}")
+
+                        selected_characters = selected_chars_for_match[:2]
+                        selected_level = resolve_level_option(int(internet_match.get("map_id", selected_level.level_id))) or selected_level
+                        selected_target_score = max(1, int(internet_match.get("target_score", selected_target_score)))
+                        network = internet_network
+
+                        get_audio().stop_music(fade_ms=500)
+
+                        result = GameManager(
+                            screen=screen,
+                            clock=clock,
+                            player_name=player_name,
+                            game_mode=game_mode,
+                            selected_characters=selected_characters,
+                            network=network,
+                            local_player_index=local_player_index,
+                            level_map_path=selected_level.map_path,
+                            level_background_path=selected_level.background_path,
+                            target_score=selected_target_score,
+                            account_service=account_service,
+                            account_username=active_account_username,
+                            network_player_names=network_player_names,
+                            ranked_override=ranked_override,
+                        ).run()
+
+                        internet_handled = True
+                        if result == "main_menu":
+                            _sync_account_in_menu(account_service, active_account_username)
+                            break_to_title = True
+                        else:
+                            pygame.quit()
+                            return
                         break
 
+                    if internet_handled and break_to_title:
+                        break
                     continue
 
                 choice = prompt_host_or_join(screen, clock)

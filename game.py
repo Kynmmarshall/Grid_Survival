@@ -215,8 +215,7 @@ class GameManager:
                     for key, value in DEFAULT_CONTROLS.items()
                 }
 
-            slot_count = max(2, min(4, len(self.selected_characters) or 2))
-            for idx in range(slot_count):
+            for idx in range(2):
                 control_key = f"player{idx + 1}"
                 controls = dict(
                     custom_controls.get(

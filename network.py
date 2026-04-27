@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import queue
 import socket
 import threading
@@ -969,6 +970,139 @@ class NetworkClient(NetworkManager):
                 self.socket = None
                 self.udp_socket = None
             return False
+
+
+class InternetSessionClient(NetworkClient):
+    """Internet match session client with reconnect + resync helpers."""
+
+    def __init__(self):
+        super().__init__()
+        self.match_endpoint: str | None = None
+        self.match_token: str | None = None
+        self.player_name: str | None = None
+        self.session_id: str | None = None
+        self._last_host: str | None = None
+        self._last_port: int = DEFAULT_PORT
+        self._last_auth_ok = False
+        self._last_resync_request_at = 0.0
+
+    @staticmethod
+    def _parse_endpoint(endpoint: str) -> tuple[str, int] | None:
+        clean = str(endpoint or "").strip()
+        if not clean:
+            return None
+
+        if "://" in clean:
+            scheme, rest = clean.split("://", 1)
+            scheme = scheme.lower().strip()
+            if scheme not in {"udp", "ws", "wss"}:
+                return None
+            clean = rest
+
+        # Accept host:port, with optional path suffix after '/'.
+        if "/" in clean:
+            clean = clean.split("/", 1)[0]
+
+        # IPv6 bracket form is intentionally unsupported for this MVP.
+        if clean.startswith("["):
+            return None
+
+        match = re.match(r"^(?P<host>[^:]+)(:(?P<port>\d+))?$", clean)
+        if not match:
+            return None
+        host = str(match.group("host") or "").strip()
+        port_text = match.group("port")
+        if not host:
+            return None
+        port = DEFAULT_PORT
+        if port_text:
+            try:
+                port = int(port_text)
+            except (TypeError, ValueError):
+                return None
+            if not (1 <= port <= 65535):
+                return None
+        return host, port
+
+    def connect_to_match(self, *, endpoint: str, token: str, player_name: str) -> bool:
+        parsed = self._parse_endpoint(endpoint)
+        if parsed is None:
+            self.last_error = f"Invalid match endpoint: {endpoint}"
+            return False
+
+        host, port = parsed
+        if not self.connect_to_host(host, port):
+            return False
+
+        self.match_endpoint = str(endpoint)
+        self.match_token = str(token)
+        self.player_name = str(player_name)
+        self._last_host = host
+        self._last_port = int(port)
+        self._last_auth_ok = False
+
+        # Authenticate session join with server-issued token.
+        if not self.send_message(
+            "internet_auth",
+            token=self.match_token,
+            player=self.player_name,
+            resume=False,
+        ):
+            self.last_error = "Failed to send internet_auth"
+            self.disconnect()
+            return False
+
+        started = time.time()
+        while time.time() - started < 2.5:
+            for message in self.get_messages():
+                if message.get("type") == "internet_auth_ok":
+                    self.session_id = str(message.get("session_id", "")) or None
+                    self._last_auth_ok = True
+                    return True
+                if message.get("type") == "internet_auth_error":
+                    self.last_error = str(message.get("error", "auth rejected"))
+                    self.disconnect()
+                    return False
+            time.sleep(0.02)
+
+        # Non-blocking handshake fallback: allow gameplay loop to proceed; server may ack later.
+        self.request_resync("initial_join")
+        return True
+
+    def request_resync(self, reason: str = "manual") -> bool:
+        now = time.time()
+        # Avoid flooding repetitive resync requests.
+        if now - self._last_resync_request_at < 0.35:
+            return False
+        self._last_resync_request_at = now
+        return self.send_message(
+            "resync_request",
+            reason=str(reason),
+            session_id=self.session_id,
+            player=self.player_name,
+        )
+
+    def reconnect(self, attempts: int = 4) -> bool:
+        if not self._last_host or not self.match_token or not self.player_name:
+            self.last_error = "Missing session data for reconnect"
+            return False
+
+        for _ in range(max(1, int(attempts))):
+            if self.connect_to_host(self._last_host, self._last_port):
+                auth_sent = self.send_message(
+                    "internet_auth",
+                    token=self.match_token,
+                    player=self.player_name,
+                    resume=True,
+                    session_id=self.session_id,
+                )
+                if auth_sent:
+                    self.request_resync("reconnect")
+                    self._last_auth_ok = True
+                    return True
+            time.sleep(0.35)
+        self.last_error = self.last_error or "Reconnect failed"
+        return False
 
 
 class LanGameFinder:

@@ -11,10 +11,13 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from backend.vps_match_server import MatchServerManager
+
 
 HOST = os.getenv("GRID_SURVIVAL_CONTROL_HOST", "0.0.0.0")
 PORT = int(os.getenv("GRID_SURVIVAL_CONTROL_PORT", "8010"))
 API_KEY = (os.getenv("GRID_SURVIVAL_ONLINE_API_KEY") or "").strip() or None
+MATCH_SERVER_MANAGER = MatchServerManager.from_env()
 
 
 def _rand_code(length: int = 6) -> str:
@@ -309,10 +312,17 @@ class ControlPlaneState:
                 "players": players,
                 "bot_filled": bot_count > 0,
                 "bot_count": bot_count,
-                "join": {
-                    "endpoint": os.getenv("GRID_SURVIVAL_MATCH_ENDPOINT", "ws://127.0.0.1:9010"),
-                    "token": _rand_code(18),
-                },
+                "join": MATCH_SERVER_MANAGER.issue_assignment(
+                    match_id=match_id,
+                    payload={
+                        "mode": base_lobby.mode,
+                        "region": base_lobby.region,
+                        "target_score": base_lobby.target_score,
+                        "map_id": int(base_lobby.map_pool[0] if base_lobby.map_pool else 1),
+                        "players": players,
+                        "bot_count": int(bot_count),
+                    },
+                ),
             },
         }
 
