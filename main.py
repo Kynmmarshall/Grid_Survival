@@ -14,7 +14,19 @@ from lan_prompts import (
     prompt_ip_entry,
     toast_message,
 )
-from network import NetworkClient, NetworkHost, get_local_ip, get_public_ip
+from online_play import (
+    MatchSettings,
+    MatchStartPayload,
+    NetworkClient,
+    NetworkHost,
+    NetworkPlayerSetup,
+    build_game_start_payload,
+    build_player_setup_payload,
+    get_local_ip,
+    get_public_ip,
+    parse_game_start_message,
+    parse_player_setup_message,
+)
 from scenes import (
     AccountPortalScreen,
     LevelSelectionScreen,
@@ -238,9 +250,9 @@ def _wait_for_online_match_start(
     selected_level_id: int,
     selected_target_score: int,
 ):
-    local_setup = {"name": player_name, "character": character_name}
+    local_setup = NetworkPlayerSetup(name=player_name, character=character_name)
     audio_overlay = SceneAudioOverlay()
-    if not network.send_message("player_setup", **local_setup):
+    if not network.send_message("player_setup", **build_player_setup_payload(local_setup)):
         return None
 
     while True:
@@ -263,34 +275,47 @@ def _wait_for_online_match_start(
                 return None
 
             if network.is_host and message_type == "player_setup":
-                peer_setup = {
-                    "name": str(message.get("name", "Player 2")),
-                    "character": str(message.get("character", character_name)),
-                }
-                players = [local_setup, peer_setup]
+                peer_setup = parse_player_setup_message(
+                    message,
+                    default_name="Player 2",
+                    default_character=character_name,
+                )
+                if peer_setup is None:
+                    continue
+                start_payload = MatchStartPayload(
+                    players=[local_setup, peer_setup],
+                    local_player_index=1,
+                    settings=MatchSettings(
+                        level_id=int(selected_level_id),
+                        target_score=int(selected_target_score),
+                    ),
+                )
                 network.send_message(
                     "game_start",
-                    players=players,
-                    local_player_index=1,
-                    level_id=int(selected_level_id),
-                    target_score=int(selected_target_score),
+                    **build_game_start_payload(start_payload),
                 )
                 return {
-                    "players": players,
+                    "players": [
+                        build_player_setup_payload(player)
+                        for player in start_payload.players
+                    ],
                     "local_player_index": 0,
                     "level_id": int(selected_level_id),
                     "target_score": int(selected_target_score),
                 }
 
             if (not network.is_host) and message_type == "game_start":
-                players = message.get("players") or []
-                if not isinstance(players, list) or len(players) < 2:
+                game_start = parse_game_start_message(message)
+                if game_start is None:
                     continue
                 return {
-                    "players": players[:2],
-                    "local_player_index": int(message.get("local_player_index", 1)),
-                    "level_id": int(message.get("level_id", selected_level_id)),
-                    "target_score": int(message.get("target_score", selected_target_score)),
+                    "players": [
+                        build_player_setup_payload(player)
+                        for player in game_start.players
+                    ],
+                    "local_player_index": int(game_start.local_player_index),
+                    "level_id": int(game_start.settings.level_id),
+                    "target_score": int(game_start.settings.target_score),
                 }
 
         title = "PLAY OVER LAN" if network.is_host else "JOINING OVER LAN"
@@ -301,7 +326,7 @@ def _wait_for_online_match_start(
             screen,
             title,
             [
-                f"{player_name} selected {character_name}",
+                f"{local_setup.name} selected {local_setup.character}",
                 peer_line,
                 "Press ESC to cancel and go back.",
             ],
