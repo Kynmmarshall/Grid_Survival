@@ -65,11 +65,12 @@ class OnlineService:
             timeout = float(timeout_text)
         except (TypeError, ValueError):
             timeout = 6.0
-        # DEBUG: report resolved control-plane URL (do not print API key)
-        try:
-            print(f"[DEBUG] OnlineService.from_env -> base_url={base_url} api_key_set={bool(api_key)}")
-        except Exception:
-            pass
+        debug_value = str(os.getenv("GRID_SURVIVAL_DEBUG_ONLINE", "")).strip().lower()
+        if debug_value in {"1", "true", "yes", "on"}:
+            try:
+                print(f"[DEBUG] OnlineService.from_env -> base_url={base_url} api_key_set={bool(api_key)}")
+            except Exception:
+                pass
         return cls(OnlineServiceConfig(base_url=base_url, timeout_seconds=timeout, api_key=api_key))
 
     @property
