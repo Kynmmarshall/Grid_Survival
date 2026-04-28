@@ -183,7 +183,10 @@ class MatchDaemon:
                         dy += speed * dt
                     entry["x"] = float(entry.get("x", 0.0) + dx)
                     entry["y"] = float(entry.get("y", 0.0) + dy)
-                session["round_seq"] = int(session.get("round_seq", 0) + 1)
+                # Keep round_seq stable during a running match.
+                # The client uses round_seq as a round-transition marker, so
+                # changing it every tick makes the client reset its world state
+                # continuously.
 
     def run(self) -> None:
         self.running = True
