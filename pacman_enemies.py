@@ -6,7 +6,8 @@ from typing import Sequence
 
 import pygame
 
-from settings import PLAYER_SPEED
+from settings import ASSETS_DIR, PLAYER_SPEED
+from animation import SpriteAnimation, load_frames_from_directory
 
 
 PACMAN_GHOST_SPEED = PLAYER_SPEED * 0.3
@@ -340,6 +341,110 @@ class PacmanEnemy:
         return True
 
 
+MONSTER_DIR = ASSETS_DIR / "Monsters"
+_monster_frames = {}
+
+def get_monster_frames(monster_type: int) -> dict[str, list[pygame.Surface]]:
+    if monster_type in _monster_frames:
+        return _monster_frames[monster_type]
+    frames_dict = {}
+    base_path = MONSTER_DIR / f"Monster{monster_type}"
+    for state in ["Idle", "Fly", "Attack", "Dying"]:
+        path = base_path / state
+        if path.exists():
+            # Apply a 0.5 scale assuming monsters are too big? We can use the scale kwarg in load_frames_from_directory
+            # Let's pass scale=0.15 to match the size of players.
+            frames = load_frames_from_directory(path, scale=0.15)
+            if frames:
+                frames_dict[state.lower()] = frames
+    _monster_frames[monster_type] = frames_dict
+    return frames_dict
+
+class MonsterEnemy(PacmanEnemy):
+    """Sprite-based enemy using Monster assets."""
+    def __init__(self, position, monster_type: int, speed: float = PACMAN_GHOST_SPEED):
+        super().__init__(position, (255, 255, 255), speed)
+        self.monster_type = monster_type
+        
+        frames_dict = get_monster_frames(monster_type)
+        self.animations = {}
+        for state, frames in frames_dict.items():
+            loop = (state != "dying")
+            self.animations[state] = SpriteAnimation(frames, frame_duration=0.08, loop=loop)
+        
+        self.current_state = "idle"
+        self.facing_left = False
+        self.is_dying = False
+
+        if "idle" in self.animations and self.animations["idle"].frames:
+            # We explicitly do NOT override self.rect.size here.
+            # Instead, we rely on the default PACMAN_GHOST_BODY_SIZE.
+            # This ensures collision logic uses the correct logical size, 
+            # so players aren't killed from a mile away!
+            self.rect.center = (round(self.position.x), round(self.position.y))
+
+    def reset(self):
+        super().reset()
+        self.is_dying = False
+        self.current_state = "idle"
+        for anim in self.animations.values():
+            anim.current_index = 0
+            anim.time_accumulator = 0.0
+            anim.finished = False
+
+    def update(self, dt: float, players: Sequence[object], walkable_mask, walkable_bounds) -> list[object]:
+        if self.is_dying:
+            if "dying" in self.animations:
+                self.animations["dying"].update(dt)
+            return []
+
+        victims = super().update(dt, players, walkable_mask, walkable_bounds)
+        
+        target = self._find_target(players)
+        if target:
+            target_pos = self._target_point(target)
+            if target_pos:
+                dist = self.position.distance_to(target_pos)
+                if dist < PACMAN_GHOST_KILL_RADIUS * 2.0:
+                    self.current_state = "attack"
+                else:
+                    self.current_state = "fly"
+        else:
+            self.current_state = "idle"
+
+        if self._direction.x < -0.1:
+            self.facing_left = True
+        elif self._direction.x > 0.1:
+            self.facing_left = False
+
+        if self.current_state in self.animations:
+            self.animations[self.current_state].update(dt)
+        else:
+            if "idle" in self.animations:
+                self.current_state = "idle"
+                self.animations["idle"].update(dt)
+        
+        return victims
+
+    def draw(self, surface: pygame.Surface):
+        if self.current_state not in self.animations:
+            super().draw(surface)
+            return
+            
+        anim = self.animations[self.current_state]
+        if not anim.frames:
+            super().draw(surface)
+            return
+            
+        frame = anim.frames[anim.current_index]
+        draw_frame = frame
+        if self.facing_left:
+            draw_frame = pygame.transform.flip(frame, True, False)
+            
+        bob = math.sin(self._anim_time * 5.0 + self._float_phase) * 3.0
+        draw_rect = draw_frame.get_rect(center=(round(self.position.x), round(self.position.y + bob)))
+        surface.blit(draw_frame, draw_rect)
+
 class PacmanEnemyManager:
     """Container for one or more pacman-style chasers."""
 
@@ -349,17 +454,23 @@ class PacmanEnemyManager:
         colors: Sequence[tuple[int, int, int]] | None = None,
         speed: float = PACMAN_GHOST_SPEED,
     ):
-        palette = list(colors or PACMAN_GHOST_COLORS)
-        if not palette:
-            palette = [PACMAN_GHOST_COLORS[0]]
-
         self.enemies: list[PacmanEnemy] = []
+        self.speed = speed
+        self.spawn_timer = 15.0  # Spawn a new monster every 15 seconds
+
+        initial_roles = [1, 4]
         for index, position in enumerate(spawn_positions):
-            enemy = PacmanEnemy(position, palette[index % len(palette)], speed=speed)
+            if index < len(initial_roles):
+                monster_type = initial_roles[index]
+            else:
+                monster_type = random.randint(1, 5)
+            
+            enemy = MonsterEnemy(position, monster_type=monster_type, speed=speed)
             enemy._activation_timer += index * 0.25
             self.enemies.append(enemy)
 
     def reset(self):
+        self.spawn_timer = 15.0
         for enemy in self.enemies:
             enemy.reset()
 
@@ -370,6 +481,24 @@ class PacmanEnemyManager:
         walkable_mask,
         walkable_bounds,
     ) -> list[object]:
+        
+        self.spawn_timer -= dt
+        if self.spawn_timer <= 0.0 and len(self.enemies) < 12:
+            self.spawn_timer = 15.0
+            
+            # Find a location away from players
+            if walkable_bounds:
+                center_x, center_y = walkable_bounds.center
+                ox = random.choice([-250, 250, -300, 300])
+                oy = random.choice([-250, 250, -300, 300])
+                spawn_pos = (center_x + ox, center_y + oy)
+            else:
+                spawn_pos = (400, 400)
+                
+            new_enemy = MonsterEnemy(spawn_pos, monster_type=random.randint(1, 5), speed=self.speed)
+            new_enemy._activation_timer = 1.0  # Wait a second before engaging
+            self.enemies.append(new_enemy)
+
         victims: list[object] = []
         seen_ids: set[int] = set()
         for enemy in self.enemies:
@@ -397,6 +526,7 @@ class PacmanEnemyManager:
                     "dir_y": float(enemy._direction.y),
                     "activation_timer": float(enemy._activation_timer),
                     "anim_time": float(enemy._anim_time),
+                    "monster_type": getattr(enemy, "monster_type", 1)
                 }
                 for enemy in self.enemies
             ]
@@ -409,6 +539,13 @@ class PacmanEnemyManager:
         states = snapshot.get("enemies")
         if not isinstance(states, list):
             return
+
+        if len(states) != len(self.enemies):
+            self.enemies = []
+            for state in states:
+                pos = (float(state.get("x", 0)), float(state.get("y", 0)))
+                m_type = int(state.get("monster_type", 1))
+                self.enemies.append(MonsterEnemy(pos, monster_type=m_type))
 
         for enemy, state in zip(self.enemies, states):
             if not isinstance(state, dict):
@@ -444,4 +581,4 @@ class PacmanEnemyManager:
             enemy.draw(surface)
 
 
-__all__ = ["PacmanEnemy", "PacmanEnemyManager"]
+__all__ = ["PacmanEnemy", "MonsterEnemy", "PacmanEnemyManager"]
