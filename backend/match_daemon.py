@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.vps_match_server import MatchServerManager
 from network import PKT_DATA, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
+from settings import PLAYER_START_POS
 
 
 class MatchDaemon:
@@ -87,7 +88,9 @@ class MatchDaemon:
                     "start_time": time.time(),
                 })
                 session_players = session["players"]
-                session_players[player] = {"addr": addr, "x": 100.0 + 48.0 * len(session_players), "y": 280.0, "last_input": {}}
+                spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
+                spawn_y = float(PLAYER_START_POS[1])
+                session_players[player] = {"addr": addr, "x": spawn_x, "y": spawn_y, "last_input": {}}
 
             seq = self._next_seq()
             # reply with ok and session id (reuse token as session id)
