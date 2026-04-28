@@ -6,6 +6,7 @@ import pygame
 from backend.account_service import AccountService
 from audio import get_audio
 from game import GameManager
+from lan_prompts import draw_lan_backdrop
 from online_play.session_flow import run_online_session_setup, wait_for_online_match_start
 from scenes import (
     AccountPortalScreen,
