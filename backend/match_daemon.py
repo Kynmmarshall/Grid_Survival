@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from backend.vps_match_server import MatchServerManager
-from network import PKT_DATA, PKT_FRAGMENT
+from network import PKT_DATA, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
 
 
 class MatchDaemon:
@@ -106,6 +106,11 @@ class MatchDaemon:
                         self._send_packet(addr, PKT_DATA, seq, 0, "snapshot", snap)
                         break
             return
+
+    def _handle_hello(self, addr: tuple[str, int]) -> None:
+        """Reply to the client's UDP hello so it can complete the session handshake."""
+        seq = self._next_seq()
+        self._send_packet(addr, PKT_HELLO_ACK, seq, 0, "", {})
 
     def _build_snapshot(self, session: dict) -> dict[str, Any]:
         now = time.time()
@@ -209,6 +214,9 @@ class MatchDaemon:
                 if not isinstance(packet, dict):
                     continue
                 kind = packet.get("k")
+                if kind == PKT_HELLO:
+                    self._handle_hello(addr)
+                    continue
                 if kind == PKT_DATA:
                     self._handle_data(addr, packet)
                 elif kind == PKT_FRAGMENT:

@@ -21,10 +21,12 @@ from __future__ import annotations
 import base64
 import json
 import re
+import os
 import queue
 import socket
 import threading
 import time
+import urllib.parse
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
@@ -642,12 +644,20 @@ class NetworkManager:
         if self.peer_address is None:
             return
         if address[0] != self.peer_address[0] or address[1] != self.peer_address[1]:
+            try:
+                print(f"[DEBUG] hello_ack ignored, expected={self.peer_address} got={address}")
+            except Exception:
+                pass
             return
 
         self.connected = True
         self.udp_connected = True
         self._disconnect_notified = False
         self._last_recv_time = time.time()
+        try:
+            print(f"[DEBUG] hello_ack accepted from {address}")
+        except Exception:
+            pass
 
     def _receive_loop(self) -> None:
         while self.running and self.socket:
@@ -672,6 +682,11 @@ class NetworkManager:
                 continue
 
             kind = packet.get("k")
+            if not self.is_host and not self.connected:
+                try:
+                    print(f"[DEBUG] handshake recv from {address}: {packet}")
+                except Exception:
+                    pass
             if kind == PKT_HELLO:
                 self._handle_hello(address)
                 continue
@@ -1024,6 +1039,30 @@ class InternetSessionClient(NetworkClient):
                 return None
         return host, port
 
+    @staticmethod
+    def _fallback_public_host() -> str | None:
+        raw = (
+            os.getenv("GRID_SURVIVAL_ONLINE_API")
+            or os.getenv("GRID_SURVIVAL_CONTROL_PLANE_URL")
+            or ""
+        ).strip()
+        if not raw:
+            return None
+        parsed = urllib.parse.urlparse(raw if "://" in raw else f"http://{raw}")
+        host = (parsed.hostname or "").strip()
+        if not host:
+            return None
+        return host
+
+    @staticmethod
+    def _normalize_match_host(host: str) -> str:
+        clean = str(host or "").strip()
+        if clean in {"0.0.0.0", "127.0.0.1", "localhost", "::1", ""}:
+            fallback = InternetSessionClient._fallback_public_host()
+            if fallback:
+                return fallback
+        return clean
+
     def connect_to_match(self, *, endpoint: str, token: str, player_name: str) -> bool:
         parsed = self._parse_endpoint(endpoint)
         if parsed is None:
@@ -1031,7 +1070,18 @@ class InternetSessionClient(NetworkClient):
             return False
 
         host, port = parsed
+        host = self._normalize_match_host(host)
+        # DEBUG: report what endpoint/host:port we will connect to
+        try:
+            print(f"[DEBUG] InternetSessionClient.connect_to_match -> endpoint={endpoint} parsed={host}:{port} token_set={bool(token)} player={player_name}")
+        except Exception:
+            pass
+
         if not self.connect_to_host(host, port):
+            try:
+                print(f"[DEBUG] connect_to_host failed -> last_error={self.last_error}")
+            except Exception:
+                pass
             return False
 
         self.match_endpoint = str(endpoint)
@@ -1049,23 +1099,43 @@ class InternetSessionClient(NetworkClient):
             resume=False,
         ):
             self.last_error = "Failed to send internet_auth"
+            try:
+                print(f"[DEBUG] send_message(internet_auth) failed -> last_error={self.last_error}")
+            except Exception:
+                pass
             self.disconnect()
             return False
 
         started = time.time()
         while time.time() - started < 2.5:
             for message in self.get_messages():
+                try:
+                    print(f"[DEBUG] recv msg during auth: {message}")
+                except Exception:
+                    pass
                 if message.get("type") == "internet_auth_ok":
                     self.session_id = str(message.get("session_id", "")) or None
                     self._last_auth_ok = True
+                    try:
+                        print(f"[DEBUG] internet_auth_ok session_id={self.session_id}")
+                    except Exception:
+                        pass
                     return True
                 if message.get("type") == "internet_auth_error":
                     self.last_error = str(message.get("error", "auth rejected"))
+                    try:
+                        print(f"[DEBUG] internet_auth_error -> {self.last_error}")
+                    except Exception:
+                        pass
                     self.disconnect()
                     return False
             time.sleep(0.02)
 
         # Non-blocking handshake fallback: allow gameplay loop to proceed; server may ack later.
+        try:
+            print("[DEBUG] internet_auth timed out; requesting resync and allowing non-blocking join")
+        except Exception:
+            pass
         self.request_resync("initial_join")
         return True
 
