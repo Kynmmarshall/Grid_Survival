@@ -6,6 +6,7 @@ import random
 import string
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -447,20 +448,28 @@ def _matchmaking_loop() -> None:
         try:
             STATE.matchmaking_tick()
         except Exception:
-            pass
+            traceback.print_exc()
         time.sleep(1.0)
+
+
+def _run_match_daemon() -> None:
+    try:
+        print("[DEBUG] Starting match daemon thread", flush=True)
+        run_daemon_from_manager(MATCH_SERVER_MANAGER)
+    except Exception:
+        traceback.print_exc()
 
 
 def run_server() -> None:
     threading.Thread(target=_matchmaking_loop, daemon=True).start()
     # start match daemon co-located so issued assignments are consumable in-process
     try:
-        t = threading.Thread(target=run_daemon_from_manager, args=(MATCH_SERVER_MANAGER,), daemon=True)
+        t = threading.Thread(target=_run_match_daemon, daemon=True)
         t.start()
     except Exception:
-        pass
+        traceback.print_exc()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Control-plane listening on http://{HOST}:{PORT}")
+    print(f"Control-plane listening on http://{HOST}:{PORT}", flush=True)
     server.serve_forever()
 
 
