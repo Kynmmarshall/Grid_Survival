@@ -2,11 +2,35 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
+
+def _load_repo_env_if_present() -> None:
+    """Load local .env files for the desktop client without overriding explicit env vars."""
+    if load_dotenv is None:
+        return
+
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates = [
+        repo_root / ".env",
+        repo_root / "backend" / ".env",
+    ]
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                load_dotenv(candidate, override=False)
+        except Exception:
+            continue
 
 
 @dataclass(frozen=True)
@@ -29,6 +53,7 @@ class OnlineService:
 
     @classmethod
     def from_env(cls) -> "OnlineService":
+        _load_repo_env_if_present()
         base_url = (
             os.getenv("GRID_SURVIVAL_ONLINE_API")
             or os.getenv("GRID_SURVIVAL_CONTROL_PLANE_URL")
