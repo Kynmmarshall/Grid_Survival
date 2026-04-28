@@ -42,8 +42,22 @@ class MatchDaemon:
         packet = {"k": kind, "s": int(seq), "r": int(reliable), "t": msg_type, "p": payload}
         try:
             raw = json.dumps(packet, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-            self.sock.sendto(raw, addr)
+            try:
+                self.sock.sendto(raw, addr)
+                try:
+                    print(f"[DEBUG] MatchDaemon.sent -> kind={kind} to={addr} seq={seq} type={msg_type}")
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    print(f"[DEBUG] MatchDaemon.sendto failed -> addr={addr} kind={kind} seq={seq} err={e}")
+                except Exception:
+                    pass
         except Exception:
+            try:
+                print("[DEBUG] MatchDaemon._send_packet: failed to encode/send packet")
+            except Exception:
+                pass
             return
 
     def _handle_data(self, addr: tuple[str, int], packet: dict[str, Any]) -> None:
@@ -110,6 +124,10 @@ class MatchDaemon:
     def _handle_hello(self, addr: tuple[str, int]) -> None:
         """Reply to the client's UDP hello so it can complete the session handshake."""
         seq = self._next_seq()
+        try:
+            print(f"[DEBUG] MatchDaemon._handle_hello -> replying hello_ack to {addr}")
+        except Exception:
+            pass
         self._send_packet(addr, PKT_HELLO_ACK, seq, 0, "", {})
 
     def _build_snapshot(self, session: dict) -> dict[str, Any]:
@@ -172,6 +190,10 @@ class MatchDaemon:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((self.bind_addr, self.bind_port))
+        try:
+            print(f"[DEBUG] MatchDaemon.run -> bound to {self.bind_addr}:{self.bind_port}")
+        except Exception:
+            pass
         s.settimeout(0.05)
         self.sock = s
 
@@ -207,8 +229,20 @@ class MatchDaemon:
                     continue
 
                 try:
+                    try:
+                        print(f"[DEBUG] MatchDaemon.recv from {addr} raw={raw[:200]!r}")
+                    except Exception:
+                        pass
                     packet = json.loads(raw.decode("utf-8"))
+                    try:
+                        print(f"[DEBUG] MatchDaemon.recv decoded -> {packet}")
+                    except Exception:
+                        pass
                 except Exception:
+                    try:
+                        print("[DEBUG] MatchDaemon: failed to decode incoming UDP datagram")
+                    except Exception:
+                        pass
                     continue
 
                 if not isinstance(packet, dict):
