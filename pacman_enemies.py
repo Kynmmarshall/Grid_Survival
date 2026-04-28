@@ -353,8 +353,8 @@ def get_monster_frames(monster_type: int) -> dict[str, list[pygame.Surface]]:
         path = base_path / state
         if path.exists():
             # Apply a 0.5 scale assuming monsters are too big? We can use the scale kwarg in load_frames_from_directory
-            # Let's pass scale=0.15 to match the size of players.
-            frames = load_frames_from_directory(path, scale=0.15)
+            # Let's pass scale=0.22 to make them slightly larger than before.
+            frames = load_frames_from_directory(path, scale=0.22)
             if frames:
                 frames_dict[state.lower()] = frames
     _monster_frames[monster_type] = frames_dict
