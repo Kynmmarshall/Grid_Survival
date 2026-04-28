@@ -1,4 +1,5 @@
 import math
+import time
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,8 @@ class GameManager:
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
         self._client_remote_extrapolation_cap = 1 / 16
+        self._network_disconnect_started_at: float | None = None
+        self._network_last_reconnect_attempt_at = 0.0
         # Rate-limiting for client input messages: only send when the state
         # changes or when the minimum interval has elapsed (60 Hz cap).
         self._input_send_timer: float = 0.0
@@ -351,8 +354,29 @@ class GameManager:
 
         if self.is_network_game:
             if not self.network or not self.network.connected:
-                self.running = False
+                now = time.time()
+                if self._network_disconnect_started_at is None:
+                    self._network_disconnect_started_at = now
+                    self._network_last_reconnect_attempt_at = 0.0
+
+                reconnect = getattr(self.network, "reconnect", None) if self.network else None
+                if callable(reconnect) and now - self._network_last_reconnect_attempt_at >= 2.0:
+                    self._network_last_reconnect_attempt_at = now
+                    try:
+                        if reconnect(attempts=1):
+                            self._network_disconnect_started_at = None
+                            self._network_last_reconnect_attempt_at = 0.0
+                            self._process_network_messages()
+                            return
+                    except Exception:
+                        pass
+
+                if now - self._network_disconnect_started_at > 15.0:
+                    self.running = False
                 return
+
+            self._network_disconnect_started_at = None
+            self._network_last_reconnect_attempt_at = 0.0
 
             self._process_network_messages()
             if not self.running or not self.network.connected:
@@ -702,7 +726,13 @@ class GameManager:
         if latest_match_result is not None:
             self._apply_network_match_result(latest_match_result)
         if saw_disconnect:
-            self.running = False
+            now = time.time()
+            if self._network_disconnect_started_at is None:
+                self._network_disconnect_started_at = now
+            try:
+                print("[DEBUG] network disconnect received; entering reconnect grace", flush=True)
+            except Exception:
+                pass
             return
 
     def _build_local_input_state(self, keys) -> dict:
