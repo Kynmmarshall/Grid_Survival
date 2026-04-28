@@ -7,9 +7,32 @@ import threading
 import time
 from typing import Any
 
+import pygame
+
 from backend.vps_match_server import MatchServerManager
+from pacman_enemies import PacmanEnemyManager
 from network import PKT_DATA, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
-from settings import PLAYER_START_POS
+from settings import PLAYER_START_POS, WINDOW_SIZE
+
+
+class _PlayerProxy:
+    def __init__(self, name: str, x: float, y: float, *, bot: bool = False):
+        self.name = str(name)
+        self.position = pygame.Vector2(float(x), float(y))
+        self.rect = pygame.Rect(0, 0, 48, 48)
+        self.rect.center = (round(self.position.x), round(self.position.y))
+        self._eliminated = False
+        self.state = "idle"
+        self.drowning = False
+        self.falling = False
+        self._shield_timer = 0.0
+        self.bot = bool(bot)
+
+    def get_feet_rect(self):
+        return self.rect
+
+    def has_active_shield(self) -> bool:
+        return False
 
 
 class MatchDaemon:
@@ -99,6 +122,10 @@ class MatchDaemon:
                 session = self._sessions.setdefault(match_id, {
                     "assignment": assignment,
                     "players": {},  # name -> {addr, x,y,last_input}
+                    "bot_names": [],
+                    "bot_profiles": {},
+                    "enemy_manager": None,
+                    "bot_ai_timer": 0.0,
                     "created_at": time.time(),
                     "round_seq": 0,
                     "start_time": time.time(),
@@ -107,6 +134,27 @@ class MatchDaemon:
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
                 spawn_y = float(PLAYER_START_POS[1])
                 session_players[player] = {"addr": addr, "x": spawn_x, "y": spawn_y, "last_input": {}}
+                bot_entries = assignment.get("payload", {}).get("players", [])
+                if isinstance(bot_entries, list) and not session.get("bot_names"):
+                    for idx, entry in enumerate(bot_entries):
+                        if not isinstance(entry, dict) or not bool(entry.get("bot", False)):
+                            continue
+                        bot_name = str(entry.get("name", f"BOT-{idx + 1}"))
+                        session["bot_names"].append(bot_name)
+                        session["bot_profiles"][bot_name] = str(entry.get("profile", "Bot"))
+                        bot_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(session_players) + len(session["bot_names"]))
+                        bot_y = float(PLAYER_START_POS[1])
+                        session_players[bot_name] = {
+                            "addr": None,
+                            "x": bot_x,
+                            "y": bot_y,
+                            "last_input": {},
+                            "bot": True,
+                            "profile": str(entry.get("profile", "Bot")),
+                        }
+                    if session.get("bot_names"):
+                        enemy_spawns = self._build_enemy_spawns(session)
+                        session["enemy_manager"] = PacmanEnemyManager(enemy_spawns)
 
             seq = self._next_seq()
             # reply with ok and session id (reuse token as session id)
@@ -161,9 +209,11 @@ class MatchDaemon:
                     "state": "idle",
                     "falling": False,
                     "drowning": False,
-                    "eliminated": False,
+                    "eliminated": bool(entry.get("eliminated", False)),
                 },
                 "power": None,
+                "bot": bool(entry.get("bot", False)),
+                "name": name,
             })
         snapshot = {
             "time_since_start": float(now - session.get("start_time", now)),
@@ -179,11 +229,95 @@ class MatchDaemon:
         }
         return snapshot
 
+    def _build_enemy_spawns(self, session: dict) -> list[tuple[int, int]]:
+        players = session.get("players", {})
+        if players:
+            positions = [
+                (int(round(entry.get("x", PLAYER_START_POS[0]))), int(round(entry.get("y", PLAYER_START_POS[1]))))
+                for entry in players.values()
+            ]
+        else:
+            positions = [PLAYER_START_POS]
+
+        base_x = int(WINDOW_SIZE[0] * 0.5)
+        base_y = int(WINDOW_SIZE[1] * 0.42)
+        offsets = [
+            (0, -140),
+            (140, 0),
+            (0, 140),
+            (-140, 0),
+        ]
+        spawns: list[tuple[int, int]] = []
+        for idx, offset in enumerate(offsets):
+            if len(spawns) >= max(1, len(session.get("bot_names", []))):
+                break
+            spawns.append((base_x + offset[0], base_y + offset[1]))
+        while len(spawns) < max(1, len(session.get("bot_names", []))):
+            px, py = positions[len(spawns) % len(positions)]
+            spawns.append((px + 120 + len(spawns) * 30, py - 80))
+        return spawns
+
+    def _tick_bots(self, session: dict, dt: float) -> None:
+        bot_names = list(session.get("bot_names", []))
+        if not bot_names:
+            return
+
+        players = session.get("players", {})
+        humans = [name for name, entry in players.items() if not bool(entry.get("bot", False)) and not bool(entry.get("eliminated", False))]
+        if not humans:
+            return
+
+        session["bot_ai_timer"] = float(session.get("bot_ai_timer", 0.0) + dt)
+        choose_new_input = session["bot_ai_timer"] >= 0.18
+        if choose_new_input:
+            session["bot_ai_timer"] = 0.0
+
+        for bot_name in bot_names:
+            entry = players.get(bot_name)
+            if not entry or bool(entry.get("eliminated", False)):
+                continue
+            if not choose_new_input and entry.get("last_input"):
+                continue
+
+            bot_pos = pygame.Vector2(float(entry.get("x", 0.0)), float(entry.get("y", 0.0)))
+            nearest_human = None
+            nearest_dist = float("inf")
+            for human_name in humans:
+                human_entry = players.get(human_name)
+                if not human_entry:
+                    continue
+                human_pos = pygame.Vector2(float(human_entry.get("x", 0.0)), float(human_entry.get("y", 0.0)))
+                dist = bot_pos.distance_to(human_pos)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest_human = human_pos
+
+            if nearest_human is None:
+                continue
+
+            delta = nearest_human - bot_pos
+            move = {"up": False, "down": False, "left": False, "right": False}
+            if abs(delta.x) > 8.0:
+                move["right"] = delta.x > 0
+                move["left"] = delta.x < 0
+            if abs(delta.y) > 8.0:
+                move["down"] = delta.y > 0
+                move["up"] = delta.y < 0
+
+            # Nudge bots to keep moving even when already near the target.
+            if not any(move.values()):
+                move["right"] = True
+
+            entry["last_input"] = move
+
     def _tick_physics(self, dt: float) -> None:
         with self._lock:
             for session in list(self._sessions.values()):
                 players = session.get("players", {})
+                self._tick_bots(session, dt)
                 for name, entry in players.items():
+                    if bool(entry.get("eliminated", False)):
+                        continue
                     inp = entry.get("last_input") or {}
                     up = bool(inp.get("up"))
                     down = bool(inp.get("down"))
@@ -202,6 +336,29 @@ class MatchDaemon:
                         dy += speed * dt
                     entry["x"] = float(entry.get("x", 0.0) + dx)
                     entry["y"] = float(entry.get("y", 0.0) + dy)
+
+                enemy_manager = session.get("enemy_manager")
+                if enemy_manager is None and session.get("bot_names"):
+                    enemy_manager = PacmanEnemyManager(self._build_enemy_spawns(session))
+                    session["enemy_manager"] = enemy_manager
+
+                if enemy_manager is not None:
+                    proxies = [
+                        _PlayerProxy(name, entry.get("x", 0.0), entry.get("y", 0.0), bot=bool(entry.get("bot", False)))
+                        for name, entry in players.items()
+                    ]
+                    victims = enemy_manager.update(
+                        dt,
+                        proxies,
+                        None,
+                        pygame.Rect(0, 0, WINDOW_SIZE[0], WINDOW_SIZE[1]),
+                    )
+                    for victim in victims:
+                        victim_name = getattr(victim, "name", None)
+                        if victim_name in players:
+                            players[victim_name]["eliminated"] = True
+                            players[victim_name]["state"] = "death"
+
                 # Keep round_seq stable during a running match.
                 # The client uses round_seq as a round-transition marker, so
                 # changing it every tick makes the client reset its world state
@@ -235,12 +392,24 @@ class MatchDaemon:
                     with self._lock:
                         for session in list(self._sessions.values()):
                             snap = self._build_snapshot(session)
+                            enemy_manager = session.get("enemy_manager")
+                            if enemy_manager is not None:
+                                dynamic_snapshot = {
+                                    "time_since_start": float(now - session.get("start_time", now)),
+                                    "round_seq": int(session.get("round_seq", 0)),
+                                    "pacman_enemies": enemy_manager.snapshot_state(),
+                                }
+                            else:
+                                dynamic_snapshot = None
                             for pname, entry in session.get("players", {}).items():
                                 addr = entry.get("addr")
                                 if not addr:
                                     continue
                                 seq = self._next_seq()
                                 self._send_packet(addr, PKT_DATA, seq, 0, "snapshot", snap)
+                                if dynamic_snapshot is not None:
+                                    seq = self._next_seq()
+                                    self._send_packet(addr, PKT_DATA, seq, 0, "world_dynamic_snapshot", dynamic_snapshot)
 
                 # Receive incoming datagrams
                 try:
