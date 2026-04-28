@@ -28,7 +28,9 @@ class MatchDaemon:
         self.bind_port = bind_port or 5555
         self.sock: socket.socket | None = None
         self.running = False
-        self._lock = threading.Lock()
+        # RLock avoids deadlock when snapshot send paths call _next_seq()
+        # while already inside a lock-protected section.
+        self._lock = threading.RLock()
         self._sessions: dict[str, dict] = {}  # token -> session state
         self._seq = 1
 
