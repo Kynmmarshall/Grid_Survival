@@ -3,7 +3,7 @@ import sys
 
 import pygame
 
-from network import LanGameFinder
+from online_play import LanGameFinder
 from scenes.common import SceneAudioOverlay, _draw_rounded_rect, _load_font
 from settings import (
     FONT_PATH_BODY,
