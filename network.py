@@ -960,10 +960,17 @@ class NetworkClient(NetworkManager):
 
             deadline = time.time() + HELLO_TIMEOUT
             next_hello = 0.0
+            hello_sent = 0
             while self.running and not self.connected and time.time() < deadline:
                 now = time.time()
                 if now >= next_hello:
                     self._send_control(PKT_HELLO, ts=now)
+                    hello_sent += 1
+                    if hello_sent <= 3 or hello_sent % 10 == 0:
+                        try:
+                            print(f"[DEBUG] hello sent #{hello_sent} to {self.peer_address}")
+                        except Exception:
+                            pass
                     next_hello = now + HELLO_RETRY_INTERVAL
                 time.sleep(0.02)
 
@@ -1077,11 +1084,22 @@ class InternetSessionClient(NetworkClient):
         except Exception:
             pass
 
-        if not self.connect_to_host(host, port):
+        connected = False
+        connect_attempts = 3
+        for attempt in range(1, connect_attempts + 1):
+            if self.connect_to_host(host, port):
+                connected = True
+                break
             try:
-                print(f"[DEBUG] connect_to_host failed -> last_error={self.last_error}")
+                print(
+                    f"[DEBUG] connect_to_host attempt {attempt}/{connect_attempts} failed -> last_error={self.last_error}"
+                )
             except Exception:
                 pass
+            if attempt < connect_attempts:
+                time.sleep(0.35)
+
+        if not connected:
             return False
 
         self.match_endpoint = str(endpoint)
