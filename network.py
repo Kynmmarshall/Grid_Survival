@@ -1,5 +1,6 @@
-"""Compatibility facade for the extracted online-play package."""
+"""Compatibility facade for the extracted online-play modules."""
 
+from online_play.internet_session import InternetSessionClient
 from online_play.match_flow import (
     CRITICAL_MESSAGE_TYPES,
     LATEST_ONLY_MESSAGE_TYPES,
@@ -48,3 +49,49 @@ from online_play.transport import (
     RELIABLE_MAX_RETRIES,
     RELIABLE_RESEND_INTERVAL,
 )
+
+__all__ = [
+    "CONNECTION_TIMEOUT",
+    "CRITICAL_MESSAGE_TYPES",
+    "DEFAULT_PORT",
+    "DISCOVERY_HOST_MAX_AGE",
+    "DISCOVERY_MAGIC",
+    "DISCOVERY_PORT",
+    "DiscoveredHost",
+    "FRAGMENT_RAW_CHUNK_BYTES",
+    "FRAGMENT_TTL_SECONDS",
+    "GAME_UDP_PORT_OFFSET",
+    "HELLO_RETRY_INTERVAL",
+    "HELLO_TIMEOUT",
+    "InputState",
+    "InternetSessionClient",
+    "KEEPALIVE_INTERVAL",
+    "LATEST_ONLY_MESSAGE_TYPES",
+    "LanGameFinder",
+    "MAX_FRAGMENT_MESSAGES",
+    "MAX_MESSAGE_BYTES",
+    "MAX_UDP_DATAGRAM_BYTES",
+    "MatchSettings",
+    "MatchStartPayload",
+    "NetworkClient",
+    "NetworkHost",
+    "NetworkManager",
+    "NetworkPlayerSetup",
+    "PKT_ACK",
+    "PKT_DATA",
+    "PKT_DISCONNECT",
+    "PKT_FRAGMENT",
+    "PKT_HELLO",
+    "PKT_HELLO_ACK",
+    "PKT_KEEPALIVE",
+    "PlayerState",
+    "RELIABLE_MAX_RETRIES",
+    "RELIABLE_RESEND_INTERVAL",
+    "UNRELIABLE_MESSAGE_TYPES",
+    "build_game_start_payload",
+    "build_player_setup_payload",
+    "get_local_ip",
+    "get_public_ip",
+    "parse_game_start_message",
+    "parse_player_setup_message",
+]

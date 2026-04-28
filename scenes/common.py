@@ -336,16 +336,11 @@ class SceneAudioOverlay:
                 self.audio.toggle_mute()
                 return True
 
-        if event.type == pygame.MOUSEWHEEL:
-            if event.y:
-                self.audio.adjust_volume(event.y * AUDIO_VOLUME_STEP)
-                return True
-
         if event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_PAGEUP, pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_RIGHTBRACKET):
+            if event.key in (pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_RIGHTBRACKET):
                 self.audio.adjust_volume(AUDIO_VOLUME_STEP)
                 return True
-            if event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
+            if event.key in (pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
                 self.audio.adjust_volume(-AUDIO_VOLUME_STEP)
                 return True
 
@@ -388,7 +383,7 @@ class SceneAudioOverlay:
         hint_bg = pygame.Surface(hint_rect.size, pygame.SRCALPHA)
         hint_bg.fill((8, 12, 18, 165))
         surface.blit(hint_bg, hint_rect.topleft)
-        hint = self._font_hint.render("VOL: +/- OR [ ] OR WHEEL", True, (180, 190, 210))
+        hint = self._font_hint.render("VOL: +/- OR [ ]", True, (180, 190, 210))
         surface.blit(hint, hint.get_rect(center=hint_rect.center))
 
         if self._show_online_status:

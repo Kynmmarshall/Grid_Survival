@@ -5,7 +5,7 @@
     "left": "K_A",
     "right": "K_D",
     "jump": "K_SPACE",
-    "power": "K_E"
+    "power": "K_Q"
   },
   "player2": {
     "up": "K_UP",

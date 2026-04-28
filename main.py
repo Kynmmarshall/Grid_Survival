@@ -6,31 +6,12 @@ import pygame
 from backend.account_service import AccountService
 from audio import get_audio
 from game import GameManager
-from host_waiting_screen import host_waiting_screen
-from lan_prompts import (
-    draw_lan_backdrop,
-    prompt_discovered_host,
-    prompt_host_or_join,
-    prompt_ip_entry,
-    toast_message,
-)
-from online_play import (
-    MatchSettings,
-    MatchStartPayload,
-    NetworkClient,
-    NetworkHost,
-    NetworkPlayerSetup,
-    build_game_start_payload,
-    build_player_setup_payload,
-    get_local_ip,
-    get_public_ip,
-    parse_game_start_message,
-    parse_player_setup_message,
-)
+from online_play.session_flow import run_online_session_setup, wait_for_online_match_start
 from scenes import (
     AccountPortalScreen,
     LevelSelectionScreen,
     ModeSelectionScreen,
+    PlayerCountSelectionScreen,
     PlayerSelectionScreen,
     TargetScoreSelectionScreen,
 )
@@ -49,53 +30,6 @@ from settings import (
     WINDOW_SIZE,
     WINDOW_TITLE,
 )
-
-
-def _draw_lobby_panel(
-    screen,
-    title: str,
-    lines: list[str],
-    accent=(180, 80, 255),
-    audio_overlay: SceneAudioOverlay | None = None,
-):
-    width, height = WINDOW_SIZE
-    font_title = _load_font(FONT_PATH_HEADING, 32, bold=True)
-    font_body = _load_font(FONT_PATH_BODY, 24)
-    font_small = _load_font(FONT_PATH_BODY, 18)
-
-    anim_time = pygame.time.get_ticks() / 1000.0
-    draw_lan_backdrop(screen, anim_time)
-    panel = pygame.Rect(0, 0, min(900, width - 120), 300)
-    panel.center = (width // 2, height // 2)
-    pulse = 0.5 + 0.5 * math.sin(anim_time * 2.6)
-    glow = pygame.Surface((panel.width + 24, panel.height + 24), pygame.SRCALPHA)
-    pygame.draw.rect(
-        glow,
-        (accent[0], accent[1], accent[2], int(30 + 18 * pulse)),
-        glow.get_rect(),
-        border_radius=24,
-    )
-    screen.blit(glow, (panel.left - 12, panel.top - 12), special_flags=pygame.BLEND_ADD)
-    _draw_rounded_rect(screen, panel, (20, 28, 48), accent, 3, 18)
-
-    title_surf = font_title.render(title, True, (255, 255, 255))
-    screen.blit(title_surf, title_surf.get_rect(center=(panel.centerx, panel.top + 48)))
-
-    y = panel.top + 110
-    for idx, line in enumerate(lines):
-        font = font_body if idx < 2 else font_small
-        color = accent if idx == 1 else (225, 230, 240)
-        if idx == 0:
-            color = (255, 255, 255)
-        surf = font.render(line, True, color)
-        screen.blit(surf, surf.get_rect(center=(panel.centerx, y)))
-        y += 38 if idx < 2 else 30
-
-    if audio_overlay is not None:
-        audio_overlay.draw(screen)
-
-    pygame.display.flip()
-
 
 def _prompt_campaign_ranked_choice(screen, clock) -> bool | None:
     width, height = WINDOW_SIZE
@@ -240,101 +174,6 @@ def _prompt_campaign_ranked_choice(screen, clock) -> bool | None:
         audio_overlay.draw(screen)
         pygame.display.flip()
 
-
-def _wait_for_online_match_start(
-    screen,
-    clock,
-    network,
-    player_name: str,
-    character_name: str,
-    selected_level_id: int,
-    selected_target_score: int,
-):
-    local_setup = NetworkPlayerSetup(name=player_name, character=character_name)
-    audio_overlay = SceneAudioOverlay()
-    if not network.send_message("player_setup", **build_player_setup_payload(local_setup)):
-        return None
-
-    while True:
-        if not network.connected:
-            return None
-
-        for event in pygame.event.get():
-            if audio_overlay.handle_event(event):
-                continue
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                network.send_message("disconnect")
-                return None
-
-        for message in network.get_messages():
-            message_type = message.get("type")
-            if message_type == "disconnect":
-                return None
-
-            if network.is_host and message_type == "player_setup":
-                peer_setup = parse_player_setup_message(
-                    message,
-                    default_name="Player 2",
-                    default_character=character_name,
-                )
-                if peer_setup is None:
-                    continue
-                start_payload = MatchStartPayload(
-                    players=[local_setup, peer_setup],
-                    local_player_index=1,
-                    settings=MatchSettings(
-                        level_id=int(selected_level_id),
-                        target_score=int(selected_target_score),
-                    ),
-                )
-                network.send_message(
-                    "game_start",
-                    **build_game_start_payload(start_payload),
-                )
-                return {
-                    "players": [
-                        build_player_setup_payload(player)
-                        for player in start_payload.players
-                    ],
-                    "local_player_index": 0,
-                    "level_id": int(selected_level_id),
-                    "target_score": int(selected_target_score),
-                }
-
-            if (not network.is_host) and message_type == "game_start":
-                game_start = parse_game_start_message(message)
-                if game_start is None:
-                    continue
-                return {
-                    "players": [
-                        build_player_setup_payload(player)
-                        for player in game_start.players
-                    ],
-                    "local_player_index": int(game_start.local_player_index),
-                    "level_id": int(game_start.settings.level_id),
-                    "target_score": int(game_start.settings.target_score),
-                }
-
-        title = "PLAY OVER LAN" if network.is_host else "JOINING OVER LAN"
-        peer_line = "Connected. Syncing character choices..."
-        if network.peer_address:
-            peer_line = f"Connected to {network.peer_address[0]}"
-        _draw_lobby_panel(
-            screen,
-            title,
-            [
-                f"{local_setup.name} selected {local_setup.character}",
-                peer_line,
-                "Press ESC to cancel and go back.",
-            ],
-            audio_overlay=audio_overlay,
-        )
-        clock.tick(30)
-
-
 def _sync_account_in_menu(account_service: AccountService, username: str | None) -> None:
     """Run account sync only from menu flow (never during gameplay)."""
     if not username:
@@ -346,6 +185,21 @@ def _sync_account_in_menu(account_service: AccountService, username: str | None)
     except Exception:
         synced = False
     set_menu_sync_indicator_result(synced)
+
+
+def _resolve_account_rating(account_service: AccountService, username: str | None) -> int:
+    if not username:
+        return 1000
+    try:
+        profile = account_service.get_profile(username)
+    except Exception:
+        return 1000
+    if profile is None:
+        return 1000
+    try:
+        return max(0, int(profile.rr))
+    except Exception:
+        return 1000
 
 
 def main():
@@ -397,6 +251,7 @@ def main():
             num_players = 2 if game_mode == MODE_LOCAL_MULTIPLAYER else 1
             selected_level = None
             selected_target_score = 3
+            selected_player_count = 2
             network_player_names = None
             ranked_override = None
 
@@ -406,118 +261,65 @@ def main():
                     continue
 
             if game_mode == MODE_ONLINE_MULTIPLAYER:
-                choice = prompt_host_or_join(screen, clock)
-                if choice is None:
-                    continue
+                def _choose_player_count():
+                    player_count_screen = PlayerCountSelectionScreen(screen, clock)
+                    selected = player_count_screen.run()
+                    if selected is None and getattr(player_count_screen, "quit_requested", False):
+                        pygame.quit()
+                        sys.exit()
+                    return selected
 
-                if choice == "host":
-                    network = NetworkHost()
-                    hosting = network.start_hosting()
-                    if not hosting:
-                        toast_message(screen, clock, "Hosting failed.")
-                        continue
+                def _choose_level():
+                    level_screen = LevelSelectionScreen(screen, clock, game_mode)
+                    selected = level_screen.run()
+                    if selected is None and getattr(level_screen, "quit_requested", False):
+                        pygame.quit()
+                        sys.exit()
+                    return selected
 
-                    host_ip = get_local_ip()
+                def _choose_target_score():
+                    target_score_screen = TargetScoreSelectionScreen(screen, clock)
+                    selected = target_score_screen.run()
+                    if selected is None and getattr(target_score_screen, "quit_requested", False):
+                        pygame.quit()
+                        sys.exit()
+                    return selected
 
-                    # Fetch the public IP and try UPnP in background threads so
-                    # the waiting screen renders immediately without freezing.
-                    import threading as _threading
-
-                    _pub_result: list[str | None] = [None]
-                    _upnp_result: list[str | None] = [None]
-
-                    def _fetch_public_ip():
-                        _pub_result[0] = get_public_ip(timeout=6.0)
-
-                    def _try_upnp():
-                        status = network.try_upnp_mapping()
-                        if status:
-                            _upnp_result[0] = f"UPnP OK \u2013 port {network.port} opened automatically"
-                        else:
-                            _upnp_result[0] = (
-                                f"UPnP unavailable \u2013 forward port {network.port} "
-                                "on your router for internet play"
-                            )
-
-                    _threading.Thread(target=_fetch_public_ip, daemon=True).start()
-                    _threading.Thread(target=_try_upnp, daemon=True).start()
-
-                    # Pass lambdas so the waiting screen reads the latest value
-                    # from the background threads on every display tick — the
-                    # public IP and UPnP status appear as soon as they resolve.
-                    ok = host_waiting_screen(
+                def _choose_characters(count: int):
+                    char_select = PlayerSelectionScreen(
                         screen,
                         clock,
-                        host_ip,
-                        network,
-                        public_ip=lambda: _pub_result[0],
-                        upnp_status=lambda: _upnp_result[0],
+                        game_mode,
+                        num_players=max(1, int(count)),
                     )
-                    if not ok:
-                        # The host_waiting_screen already returned False; respect that.
-                        if network:
-                            network.disconnect()
-                        toast_message(screen, clock, "Hosting cancelled.")
-                        network = None
-                        continue
+                    selected = char_select.run()
+                    if not selected and getattr(char_select, "quit_requested", False):
+                        pygame.quit()
+                        sys.exit()
+                    return selected
 
-                    local_player_index = 0
+                online_selection = run_online_session_setup(
+                    screen,
+                    clock,
+                    player_name=player_name,
+                    rating=_resolve_account_rating(account_service, active_account_username),
+                    choose_player_count=_choose_player_count,
+                    choose_level=_choose_level,
+                    choose_target_score=_choose_target_score,
+                    choose_characters=_choose_characters,
+                    resolve_level_option=resolve_level_option,
+                )
+                if online_selection is None:
+                    continue
 
-                elif choice == "discover":
-                    # LAN auto-discovery: scan for broadcasting hosts.
-                    result = prompt_discovered_host(screen, clock)
-                    if not result:
-                        continue
-                    network = NetworkClient()
-                    connected = network.connect_to_host(result["address"], result["port"])
-                    if not connected:
-                        toast_message(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
-                        continue
-                    local_player_index = 1
-
-                else:  # join_ip — manual entry, works for both LAN and internet
-                    ip = prompt_ip_entry(screen, clock)
-                    if not ip:
-                        continue
-                    network = NetworkClient()
-                    connected = network.connect_to_host(ip)
-                    if not connected:
-                        toast_message(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
-                        continue
-                    local_player_index = 1
-
-                if choice == "host":
-                    while True:
-                        level_screen = LevelSelectionScreen(screen, clock, game_mode)
-                        selected_level = level_screen.run()
-                        if selected_level is None:
-                            if getattr(level_screen, "quit_requested", False):
-                                pygame.quit()
-                                return
-                            if network:
-                                network.disconnect()
-                            break
-
-                        target_score_screen = TargetScoreSelectionScreen(screen, clock)
-                        selected_target_score = target_score_screen.run()
-                        if selected_target_score is None:
-                            if getattr(target_score_screen, "quit_requested", False):
-                                pygame.quit()
-                                return
-                            continue
-
-                        selected_target_score = max(1, int(selected_target_score))
-                        break
-
-                    if selected_level is None:
-                        continue
-                else:
-                    selected_level = resolve_level_option(1)
-                    if selected_level is None:
-                        toast_message(screen, clock, "No levels available.")
-                        if network:
-                            network.disconnect()
-                        continue
+                network = online_selection.network
+                local_player_index = int(online_selection.local_player_index)
+                selected_level = online_selection.selected_level
+                selected_target_score = int(online_selection.selected_target_score)
+                selected_player_count = int(online_selection.selected_player_count)
+                network_player_names = online_selection.network_player_names
+                preselected_online_characters = online_selection.selected_characters
+                requires_match_start = bool(online_selection.requires_match_start)
             else:
                 while True:
                     level_screen = LevelSelectionScreen(screen, clock, game_mode)
@@ -542,24 +344,32 @@ def main():
                 if selected_level is None:
                     continue
 
-            while True:
-                char_select = PlayerSelectionScreen(
-                    screen,
-                    clock,
-                    game_mode,
-                    num_players=num_players,
-                )
-                selected_characters = char_select.run()
-                if not selected_characters:
-                    if getattr(char_select, "quit_requested", False):
-                        pygame.quit()
-                        return
-                    if network:
-                        network.disconnect()
-                    break
+            if game_mode != MODE_ONLINE_MULTIPLAYER:
+                preselected_online_characters = None
+                requires_match_start = False
 
-                if game_mode == MODE_ONLINE_MULTIPLAYER:
-                    match_setup = _wait_for_online_match_start(
+            while True:
+                if preselected_online_characters:
+                    selected_characters = list(preselected_online_characters)
+                    preselected_online_characters = None
+                else:
+                    char_select = PlayerSelectionScreen(
+                        screen,
+                        clock,
+                        game_mode,
+                        num_players=num_players,
+                    )
+                    selected_characters = char_select.run()
+                    if not selected_characters:
+                        if getattr(char_select, "quit_requested", False):
+                            pygame.quit()
+                            return
+                        if network:
+                            network.disconnect()
+                        break
+
+                if game_mode == MODE_ONLINE_MULTIPLAYER and requires_match_start:
+                    match_setup = wait_for_online_match_start(
                         screen,
                         clock,
                         network,
@@ -567,6 +377,7 @@ def main():
                         selected_characters[0],
                         selected_level.level_id,
                         selected_target_score,
+                        selected_player_count,
                     )
                     if not match_setup:
                         network.disconnect()
@@ -586,6 +397,10 @@ def main():
                     selected_target_score = max(
                         1,
                         int(match_setup.get("target_score", selected_target_score)),
+                    )
+                    selected_player_count = max(
+                        2,
+                        min(4, int(match_setup.get("player_count", selected_player_count))),
                     )
 
                 get_audio().stop_music(fade_ms=500)

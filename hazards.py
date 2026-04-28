@@ -312,6 +312,18 @@ class HazardManager:
             trap.draw(surface)
         for explosion in self.explosions:
             explosion.draw(surface)
+
+    def advance_visuals(self, dt: float):
+        """Client-side visual smoothing between host snapshots."""
+        for bullet in self.bullets[:]:
+            bullet.update(dt)
+            if not bullet.active:
+                self.bullets.remove(bullet)
+
+        for trap in self.traps:
+            trap.update(dt)
+
+        self.explosions = [explosion for explosion in self.explosions if explosion.update(dt)]
     
     def check_player_collision(self, player) -> bool:
         """Check if any hazard hits the player."""
