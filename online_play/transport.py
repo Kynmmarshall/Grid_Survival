@@ -637,10 +637,17 @@ class UdpClientTransport(NetworkManager):
             self._start_threads()
             deadline = time.time() + HELLO_TIMEOUT
             next_hello = 0.0
+            hello_sent = 0
             while self.running and not self.connected and time.time() < deadline:
                 now = time.time()
                 if now >= next_hello:
                     self._send_control(PKT_HELLO, ts=now)
+                    hello_sent += 1
+                    if hello_sent <= 3 or hello_sent % 10 == 0:
+                        try:
+                            print(f"[DEBUG] hello sent #{hello_sent} to {self.peer_address}")
+                        except Exception:
+                            pass
                     next_hello = now + HELLO_RETRY_INTERVAL
                 time.sleep(0.02)
             if self.connected:

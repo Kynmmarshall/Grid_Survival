@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.vps_match_server import MatchServerManager
 from network import PKT_DATA, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
+from settings import PLAYER_START_POS
 
 
 class MatchDaemon:
@@ -45,20 +46,34 @@ class MatchDaemon:
             try:
                 self.sock.sendto(raw, addr)
                 try:
-                    print(f"[DEBUG] MatchDaemon.sent -> kind={kind} to={addr} seq={seq} type={msg_type}")
+                    print(f"[DEBUG] MatchDaemon.sent -> kind={kind} to={addr} seq={seq} type={msg_type}", flush=True)
                 except Exception:
                     pass
             except Exception as e:
                 try:
-                    print(f"[DEBUG] MatchDaemon.sendto failed -> addr={addr} kind={kind} seq={seq} err={e}")
+                    print(f"[DEBUG] MatchDaemon.sendto failed -> addr={addr} kind={kind} seq={seq} err={e}", flush=True)
                 except Exception:
                     pass
         except Exception:
             try:
-                print("[DEBUG] MatchDaemon._send_packet: failed to encode/send packet")
+                print("[DEBUG] MatchDaemon._send_packet: failed to encode/send packet", flush=True)
             except Exception:
                 pass
             return
+
+    @staticmethod
+    def _looks_like_hello_probe(raw: bytes) -> bool:
+        """Best-effort hello detection for malformed/partial JSON probes."""
+        if not raw:
+            return False
+        if raw in {b"h", b"hello", b"HELLO"}:
+            return True
+        try:
+            text = raw.decode("utf-8", errors="ignore")
+        except Exception:
+            return False
+        compact = text.replace(" ", "")
+        return '"k":"h"' in compact
 
     def _handle_data(self, addr: tuple[str, int], packet: dict[str, Any]) -> None:
         t = packet.get("t")
@@ -87,7 +102,9 @@ class MatchDaemon:
                     "start_time": time.time(),
                 })
                 session_players = session["players"]
-                session_players[player] = {"addr": addr, "x": 100.0 + 48.0 * len(session_players), "y": 280.0, "last_input": {}}
+                spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
+                spawn_y = float(PLAYER_START_POS[1])
+                session_players[player] = {"addr": addr, "x": spawn_x, "y": spawn_y, "last_input": {}}
 
             seq = self._next_seq()
             # reply with ok and session id (reuse token as session id)
@@ -125,7 +142,7 @@ class MatchDaemon:
         """Reply to the client's UDP hello so it can complete the session handshake."""
         seq = self._next_seq()
         try:
-            print(f"[DEBUG] MatchDaemon._handle_hello -> replying hello_ack to {addr}")
+            print(f"[DEBUG] MatchDaemon._handle_hello -> replying hello_ack to {addr}", flush=True)
         except Exception:
             pass
         self._send_packet(addr, PKT_HELLO_ACK, seq, 0, "", {})
@@ -194,7 +211,7 @@ class MatchDaemon:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((self.bind_addr, self.bind_port))
         try:
-            print(f"[DEBUG] MatchDaemon.run -> bound to {self.bind_addr}:{self.bind_port}")
+            print(f"[DEBUG] MatchDaemon.run -> bound to {self.bind_addr}:{self.bind_port}", flush=True)
         except Exception:
             pass
         s.settimeout(0.05)
@@ -233,17 +250,22 @@ class MatchDaemon:
 
                 try:
                     try:
-                        print(f"[DEBUG] MatchDaemon.recv from {addr} raw={raw[:200]!r}")
+                        print(f"[DEBUG] MatchDaemon.recv from {addr} raw={raw[:200]!r}", flush=True)
                     except Exception:
                         pass
                     packet = json.loads(raw.decode("utf-8"))
                     try:
-                        print(f"[DEBUG] MatchDaemon.recv decoded -> {packet}")
+                        print(f"[DEBUG] MatchDaemon.recv decoded -> {packet}", flush=True)
                     except Exception:
                         pass
                 except Exception:
+                    # Some clients/middleboxes may alter probe payload formatting;
+                    # still answer hello probes to establish UDP reachability.
+                    if self._looks_like_hello_probe(raw):
+                        self._handle_hello(addr)
+                        continue
                     try:
-                        print("[DEBUG] MatchDaemon: failed to decode incoming UDP datagram")
+                        print("[DEBUG] MatchDaemon: failed to decode incoming UDP datagram", flush=True)
                     except Exception:
                         pass
                     continue

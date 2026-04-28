@@ -84,7 +84,27 @@ class InternetSessionClient(NetworkClient):
 
         host, port = parsed
         host = self._normalize_match_host(host)
-        if not self.connect_to_host(host, port):
+        try:
+            print(f"[DEBUG] InternetSessionClient.connect_to_match -> endpoint={endpoint} parsed={host}:{port} token_set={bool(token)} player={player_name}")
+        except Exception:
+            pass
+
+        connected = False
+        connect_attempts = 3
+        for attempt in range(1, connect_attempts + 1):
+            if self.connect_to_host(host, port):
+                connected = True
+                break
+            try:
+                print(
+                    f"[DEBUG] connect_to_host attempt {attempt}/{connect_attempts} failed -> last_error={self.last_error}"
+                )
+            except Exception:
+                pass
+            if attempt < connect_attempts:
+                time.sleep(0.35)
+
+        if not connected:
             return False
 
         self.match_endpoint = str(endpoint)
