@@ -120,6 +120,16 @@ class NetworkManager:
         self._disconnect_notified = False
         self.last_error: Optional[str] = None
 
+    def _clear_incoming_state(self) -> None:
+        while not self.message_queue.empty():
+            try:
+                self.message_queue.get_nowait()
+            except queue.Empty:
+                break
+        with self._latest_messages_lock:
+            self._latest_messages.clear()
+        self._last_recv_seq_by_type.clear()
+
     def send_message(self, message_type: str, **payload: Any) -> bool:
         if not self.connected or not self.peer_address:
             return False
@@ -557,11 +567,9 @@ class NetworkManager:
             self._pending_reliable.clear()
         with self._latest_outgoing_lock:
             self._latest_outgoing.clear()
-        with self._latest_messages_lock:
-            self._latest_messages.clear()
+        self._clear_incoming_state()
         self._seen_reliable.clear()
         self._fragment_buffer.clear()
-        self._last_recv_seq_by_type.clear()
 
 
 class UdpHostTransport(NetworkManager):
@@ -621,6 +629,7 @@ class UdpClientTransport(NetworkManager):
 
     def connect_to_host(self, host: str, port: int = DEFAULT_PORT) -> bool:
         try:
+            self._clear_incoming_state()
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             client_socket.bind(("0.0.0.0", 0))
