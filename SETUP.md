@@ -55,6 +55,7 @@ Select: **ONLINE MULTIPLAYER** → **INTERNET** → Configure & Play
   - `requests` - HTTP client for lobby API
   - `python-dotenv` - Load environment variables from `.env`
   - `miniupnpc` - Optional UPnP support for LAN
+  - `pytmx` - TMX map loading for tile/world snapshots
 
 ### Environment Variables
 

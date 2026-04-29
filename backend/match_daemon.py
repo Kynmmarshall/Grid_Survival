@@ -9,30 +9,91 @@ from typing import Any
 
 import pygame
 
+from assets import load_tilemap_surface
+from collision_manager import CollisionManager
+from hazards import HazardManager
+from level_config import get_level
+from orbs import OrbManager
 from backend.vps_match_server import MatchServerManager
 from pacman_enemies import PacmanEnemyManager
 from network import PKT_DATA, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
-from settings import PLAYER_START_POS, WINDOW_SIZE
+from settings import MAP_PATH, PLAYER_START_POS, WINDOW_SIZE
+from tile_system import TMXTileManager
 
 
 class _PlayerProxy:
-    def __init__(self, name: str, x: float, y: float, *, bot: bool = False):
+    def __init__(self, name: str, entry: dict[str, Any], *, bot: bool = False):
         self.name = str(name)
-        self.position = pygame.Vector2(float(x), float(y))
+        self._entry = entry
+        self.position = pygame.Vector2(float(entry.get("x", 0.0)), float(entry.get("y", 0.0)))
         self.rect = pygame.Rect(0, 0, 48, 48)
         self.rect.center = (round(self.position.x), round(self.position.y))
-        self._eliminated = False
-        self.state = "idle"
-        self.drowning = False
-        self.falling = False
+        self._eliminated = bool(entry.get("eliminated", False))
+        self.state = str(entry.get("state", "idle"))
+        self.drowning = bool(entry.get("drowning", False))
+        self.falling = bool(entry.get("falling", False))
         self._shield_timer = 0.0
         self.bot = bool(bot)
+        self._orb_speed_boost = float(entry.get("orb_speed_boost", 1.0))
+        self._orb_speed_timer = float(entry.get("orb_speed_timer", 0.0))
+        self._shield_timer = float(entry.get("shield_timer", 0.0))
+        self._void_walk_timer = float(entry.get("void_walk_timer", 0.0))
+        self._freeze_timer = float(entry.get("freeze_timer", 0.0))
+        self._power_orb_charges = int(entry.get("power_orb_charges", 0))
+        self._lives = int(entry.get("lives", 0))
+        self._active_orb_label = str(entry.get("active_orb_label", ""))
+        self._active_orb_timer = float(entry.get("active_orb_timer", 0.0))
 
     def get_feet_rect(self):
         return self.rect
 
     def has_active_shield(self) -> bool:
-        return False
+        return self._shield_timer > 0.0
+
+    def add_shield(self, duration: float) -> None:
+        self._shield_timer = max(self._shield_timer, float(duration))
+        self._entry["shield_timer"] = self._shield_timer
+
+    def apply_freeze(self, duration: float) -> None:
+        self._freeze_timer = max(self._freeze_timer, float(duration))
+        self._entry["freeze_timer"] = self._freeze_timer
+
+    def add_power_orb_charge(self) -> int:
+        self._power_orb_charges += 1
+        self._entry["power_orb_charges"] = self._power_orb_charges
+        return self._power_orb_charges
+
+    def add_life(self) -> None:
+        self._lives += 1
+        self._entry["lives"] = self._lives
+
+    def enable_void_walk(self, duration: float) -> None:
+        self._void_walk_timer = max(self._void_walk_timer, float(duration))
+        self._entry["void_walk_timer"] = self._void_walk_timer
+
+    def set_active_orb(self, label: str, duration: float | None) -> None:
+        self._active_orb_label = str(label)
+        self._active_orb_timer = float(duration or 0.0)
+        self._entry["active_orb_label"] = self._active_orb_label
+        self._entry["active_orb_timer"] = self._active_orb_timer
+
+    def sync_back(self) -> None:
+        self._entry["x"] = float(self.position.x)
+        self._entry["y"] = float(self.position.y)
+        self._entry["eliminated"] = bool(self._eliminated)
+        self._entry["state"] = str(self.state)
+        self._entry["falling"] = bool(self.falling)
+        self._entry["drowning"] = bool(self.drowning)
+        self._entry["bot"] = bool(self.bot)
+        self._entry["orb_speed_boost"] = float(self._orb_speed_boost)
+        self._entry["orb_speed_timer"] = float(self._orb_speed_timer)
+        self._entry["shield_timer"] = float(self._shield_timer)
+        self._entry["void_walk_timer"] = float(self._void_walk_timer)
+        self._entry["freeze_timer"] = float(self._freeze_timer)
+        self._entry["power_orb_charges"] = int(self._power_orb_charges)
+        self._entry["lives"] = int(self._lives)
+        self._entry["active_orb_label"] = str(self._active_orb_label)
+        self._entry["active_orb_timer"] = float(self._active_orb_timer)
 
 
 class MatchDaemon:
@@ -51,6 +112,7 @@ class MatchDaemon:
         self.bind_port = bind_port or 5555
         self.sock: socket.socket | None = None
         self.running = False
+        self.eliminated_players: list[_PlayerProxy] = []
         # RLock avoids deadlock when snapshot send paths call _next_seq()
         # while already inside a lock-protected section.
         self._lock = threading.RLock()
@@ -155,6 +217,7 @@ class MatchDaemon:
                     if session.get("bot_names"):
                         enemy_spawns = self._build_enemy_spawns(session)
                         session["enemy_manager"] = PacmanEnemyManager(enemy_spawns)
+                self._initialize_session_world(session)
 
             seq = self._next_seq()
             # reply with ok and session id (reuse token as session id)
@@ -257,6 +320,88 @@ class MatchDaemon:
             spawns.append((px + 120 + len(spawns) * 30, py - 80))
         return spawns
 
+    def _initialize_session_world(self, session: dict) -> None:
+        if session.get("world_initialized"):
+            return
+
+        payload = session.get("assignment", {}).get("payload", {})
+        map_id = int(payload.get("map_id", 1) or 1)
+        level = get_level(map_id)
+
+        _, tmx_data, walkable_mask, walkable_bounds, scale_x, scale_y, map_offset = load_tilemap_surface(WINDOW_SIZE, MAP_PATH)
+        tile_manager = None
+        if tmx_data is not None:
+            tile_manager = TMXTileManager(tmx_data, scale_x, scale_y, map_offset)
+            tile_manager.grace_period = float(level.tile.grace_period)
+            tile_manager.base_disappear_interval = float(level.tile.base_interval)
+            tile_manager.min_disappear_interval = float(level.tile.min_interval)
+            tile_manager.difficulty_scale_rate = float(level.tile.scale_rate)
+            tile_manager.current_interval = float(level.tile.base_interval)
+            tile_manager.simultaneous_tiles = int(level.tile.base_simultaneous)
+            tile_manager.time_elapsed = 0.0
+            tile_manager.grace_timer = 0.0
+            tile_manager.disappear_timer = 0.0
+
+        collision_manager = CollisionManager()
+        hazard_manager = HazardManager(collision_manager)
+        hazard_manager.hazard_start_time = float(level.hazard.start_delay)
+        hazard_manager.bullet_spawn_interval = float(level.hazard.bullet_interval)
+        hazard_manager.min_bullet_interval = float(level.hazard.bullet_min_interval)
+        hazard_manager.trap_spawn_interval = float(level.hazard.trap_interval)
+        hazard_manager.min_trap_interval = float(level.hazard.trap_min_interval)
+        hazard_manager.difficulty_scale_rate = float(level.hazard.difficulty_scale_rate)
+        hazard_manager.bullet_spawn_timer = 0.0
+        hazard_manager.trap_spawn_timer = 0.0
+        hazard_manager.time_elapsed = 0.0
+
+        orb_manager = OrbManager(level.number)
+
+        session["level"] = level
+        session["tile_manager"] = tile_manager
+        session["collision_manager"] = collision_manager
+        session["hazard_manager"] = hazard_manager
+        session["orb_manager"] = orb_manager
+        session["walkable_mask"] = walkable_mask
+        session["walkable_bounds"] = walkable_bounds
+        session["world_initialized"] = True
+
+    def _build_world_snapshot(self, session: dict) -> dict[str, Any]:
+        tile_manager = session.get("tile_manager")
+        return {
+            "time_since_start": float(time.time() - session.get("start_time", time.time())),
+            "round_seq": int(session.get("round_seq", 0)),
+            "tiles": tile_manager.snapshot_state() if tile_manager is not None else None,
+        }
+
+    def _build_world_dynamic_snapshot(self, session: dict) -> dict[str, Any]:
+        hazard_manager = session.get("hazard_manager")
+        orb_manager = session.get("orb_manager")
+        enemy_manager = session.get("enemy_manager")
+        return {
+            "time_since_start": float(time.time() - session.get("start_time", time.time())),
+            "round_seq": int(session.get("round_seq", 0)),
+            "hazards": hazard_manager.snapshot_state() if hazard_manager is not None else None,
+            "orbs": orb_manager.snapshot_state() if orb_manager is not None else None,
+            "pacman_enemies": enemy_manager.snapshot_state() if enemy_manager is not None else None,
+        }
+
+    def _rescue_player_to_safe_tile(self, player: Any) -> bool:
+        try:
+            if hasattr(player, "_eliminated"):
+                player._eliminated = False
+            if hasattr(player, "state"):
+                player.state = "idle"
+            if hasattr(player, "position"):
+                player.position.x = float(PLAYER_START_POS[0])
+                player.position.y = float(PLAYER_START_POS[1])
+            if hasattr(player, "rect"):
+                player.rect.center = (int(PLAYER_START_POS[0]), int(PLAYER_START_POS[1]))
+            if hasattr(player, "sync_back"):
+                player.sync_back()
+            return True
+        except Exception:
+            return False
+
     def _tick_bots(self, session: dict, dt: float) -> None:
         bot_names = list(session.get("bot_names", []))
         if not bot_names:
@@ -314,16 +459,32 @@ class MatchDaemon:
         with self._lock:
             for session in list(self._sessions.values()):
                 players = session.get("players", {})
+                self._initialize_session_world(session)
                 self._tick_bots(session, dt)
+                player_proxies: dict[str, _PlayerProxy] = {
+                    name: _PlayerProxy(name, entry, bot=bool(entry.get("bot", False)))
+                    for name, entry in players.items()
+                }
                 for name, entry in players.items():
-                    if bool(entry.get("eliminated", False)):
+                    proxy = player_proxies.get(name)
+                    if proxy is None or bool(entry.get("eliminated", False)):
                         continue
+                    proxy._orb_speed_timer = max(0.0, float(entry.get("orb_speed_timer", 0.0) or 0.0) - dt)
+                    proxy._shield_timer = max(0.0, float(entry.get("shield_timer", 0.0) or 0.0) - dt)
+                    proxy._void_walk_timer = max(0.0, float(entry.get("void_walk_timer", 0.0) or 0.0) - dt)
+                    proxy._freeze_timer = max(0.0, float(entry.get("freeze_timer", 0.0) or 0.0) - dt)
+                    if proxy._orb_speed_timer <= 0.0:
+                        proxy._orb_speed_boost = 1.0
+                    else:
+                        proxy._orb_speed_boost = max(1.0, float(entry.get("orb_speed_boost", 1.0) or 1.0))
                     inp = entry.get("last_input") or {}
                     up = bool(inp.get("up"))
                     down = bool(inp.get("down"))
                     left = bool(inp.get("left"))
                     right = bool(inp.get("right"))
-                    speed = 160.0
+                    speed = 160.0 * float(proxy._orb_speed_boost or 1.0)
+                    if proxy._freeze_timer > 0.0:
+                        speed *= 0.2
                     dx = 0.0
                     dy = 0.0
                     if left:
@@ -334,30 +495,62 @@ class MatchDaemon:
                         dy -= speed * dt
                     if down:
                         dy += speed * dt
-                    entry["x"] = float(entry.get("x", 0.0) + dx)
-                    entry["y"] = float(entry.get("y", 0.0) + dy)
+
+                    proxy.position.x = float(entry.get("x", 0.0) + dx)
+                    proxy.position.y = float(entry.get("y", 0.0) + dy)
+                    proxy.rect.center = (round(proxy.position.x), round(proxy.position.y))
+                    proxy.sync_back()
+
+                tile_manager = session.get("tile_manager")
+                if tile_manager is not None:
+                    tile_manager.update(dt)
+                    original_mask = session.get("walkable_mask")
+                    if original_mask is not None:
+                        session["walkable_mask"] = tile_manager.get_updated_walkable_mask(original_mask)
+
+                hazard_manager = session.get("hazard_manager")
+                if hazard_manager is not None:
+                    hazard_manager.update(dt)
 
                 enemy_manager = session.get("enemy_manager")
                 if enemy_manager is None and session.get("bot_names"):
                     enemy_manager = PacmanEnemyManager(self._build_enemy_spawns(session))
                     session["enemy_manager"] = enemy_manager
 
+                current_proxies = list(player_proxies.values())
+                self.eliminated_players = [proxy for proxy in current_proxies if proxy._eliminated]
+
+                if hazard_manager is not None:
+                    for proxy in current_proxies:
+                        if proxy._eliminated:
+                            continue
+                        if hazard_manager.check_player_collision(proxy):
+                            proxy._eliminated = True
+                            proxy.state = "death"
+                            self.eliminated_players.append(proxy)
+
                 if enemy_manager is not None:
-                    proxies = [
-                        _PlayerProxy(name, entry.get("x", 0.0), entry.get("y", 0.0), bot=bool(entry.get("bot", False)))
-                        for name, entry in players.items()
-                    ]
                     victims = enemy_manager.update(
                         dt,
-                        proxies,
-                        None,
-                        pygame.Rect(0, 0, WINDOW_SIZE[0], WINDOW_SIZE[1]),
+                        current_proxies,
+                        session.get("walkable_mask"),
+                        session.get("walkable_bounds") or pygame.Rect(0, 0, WINDOW_SIZE[0], WINDOW_SIZE[1]),
                     )
                     for victim in victims:
                         victim_name = getattr(victim, "name", None)
-                        if victim_name in players:
-                            players[victim_name]["eliminated"] = True
-                            players[victim_name]["state"] = "death"
+                        proxy = player_proxies.get(str(victim_name))
+                        if proxy is not None:
+                            proxy._eliminated = True
+                            proxy.state = "death"
+                            if proxy not in self.eliminated_players:
+                                self.eliminated_players.append(proxy)
+
+                orb_manager = session.get("orb_manager")
+                if orb_manager is not None:
+                    orb_manager.update(dt, session.get("walkable_bounds"), current_proxies, self)
+
+                for proxy in current_proxies:
+                    proxy.sync_back()
 
                 # Keep round_seq stable during a running match.
                 # The client uses round_seq as a round-transition marker, so
@@ -392,21 +585,16 @@ class MatchDaemon:
                     with self._lock:
                         for session in list(self._sessions.values()):
                             snap = self._build_snapshot(session)
-                            enemy_manager = session.get("enemy_manager")
-                            if enemy_manager is not None:
-                                dynamic_snapshot = {
-                                    "time_since_start": float(now - session.get("start_time", now)),
-                                    "round_seq": int(session.get("round_seq", 0)),
-                                    "pacman_enemies": enemy_manager.snapshot_state(),
-                                }
-                            else:
-                                dynamic_snapshot = None
+                            world_snapshot = self._build_world_snapshot(session)
+                            dynamic_snapshot = self._build_world_dynamic_snapshot(session)
                             for pname, entry in session.get("players", {}).items():
                                 addr = entry.get("addr")
                                 if not addr:
                                     continue
                                 seq = self._next_seq()
                                 self._send_packet(addr, PKT_DATA, seq, 0, "snapshot", snap)
+                                seq = self._next_seq()
+                                self._send_packet(addr, PKT_DATA, seq, 0, "world_snapshot", world_snapshot)
                                 if dynamic_snapshot is not None:
                                     seq = self._next_seq()
                                     self._send_packet(addr, PKT_DATA, seq, 0, "world_dynamic_snapshot", dynamic_snapshot)
