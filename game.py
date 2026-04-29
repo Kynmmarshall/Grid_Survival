@@ -1055,9 +1055,16 @@ class GameManager:
             applied_any = True
         if (
             "pacman_enemies" in snapshot
-            and self.pacman_enemy_manager
             and incoming_time + epsilon >= self._last_client_pacman_snapshot_time
         ):
+            if self.pacman_enemy_manager is None:
+                enemy_states = snapshot.get("pacman_enemies", {}).get("enemies", []) or []
+                spawn_positions = [
+                    (int(round(state.get("x", PLAYER_START_POS[0]))), int(round(state.get("y", PLAYER_START_POS[1]))))
+                    for state in enemy_states
+                    if isinstance(state, dict)
+                ] or [PLAYER_START_POS]
+                self.pacman_enemy_manager = PacmanEnemyManager(spawn_positions)
             self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
             self._last_client_pacman_snapshot_time = incoming_time
             applied_any = True
