@@ -453,11 +453,17 @@ def _matchmaking_loop() -> None:
 
 
 def _run_match_daemon() -> None:
-    try:
-        print("[DEBUG] Starting match daemon thread", flush=True)
-        run_daemon_from_manager(MATCH_SERVER_MANAGER)
-    except Exception:
-        traceback.print_exc()
+    while True:
+        try:
+            print("[DEBUG] Starting match daemon thread", flush=True)
+            run_daemon_from_manager(MATCH_SERVER_MANAGER)
+            # Defensive: if run_daemon_from_manager returns unexpectedly,
+            # restart shortly to keep UDP matchmaking available.
+            print("[WARN] Match daemon exited unexpectedly; restarting", flush=True)
+        except Exception:
+            traceback.print_exc()
+            print("[WARN] Match daemon crashed; restarting", flush=True)
+        time.sleep(1.0)
 
 
 def run_server() -> None:
