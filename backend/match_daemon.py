@@ -86,14 +86,14 @@ class _PlayerProxy:
         self._entry["drowning"] = bool(self.drowning)
         self._entry["bot"] = bool(self.bot)
         self._entry["orb_speed_boost"] = float(self._orb_speed_boost)
-        self._entry["orb_speed_timer"] = float(self._orb_speed_timer)
-        self._entry["shield_timer"] = float(self._shield_timer)
-        self._entry["void_walk_timer"] = float(self._void_walk_timer)
-        self._entry["freeze_timer"] = float(self._freeze_timer)
-        self._entry["power_orb_charges"] = int(self._power_orb_charges)
-        self._entry["lives"] = int(self._lives)
-        self._entry["active_orb_label"] = str(self._active_orb_label)
-        self._entry["active_orb_timer"] = float(self._active_orb_timer)
+        self._entry["orb_speed_timer"] = float(getattr(self, "_orb_speed_timer", 0.0))
+        self._entry["shield_timer"] = float(getattr(self, "_shield_timer", 0.0))
+        self._entry["void_walk_timer"] = float(getattr(self, "_void_walk_timer", 0.0))
+        self._entry["freeze_timer"] = float(getattr(self, "_freeze_timer", 0.0))
+        self._entry["power_orb_charges"] = int(getattr(self, "_power_orb_charges", 0))
+        self._entry["lives"] = int(getattr(self, "_lives", 0))
+        self._entry["active_orb_label"] = str(getattr(self, "_active_orb_label", ""))
+        self._entry["active_orb_timer"] = float(getattr(self, "_active_orb_timer", 0.0))
 
 
 class MatchDaemon:
