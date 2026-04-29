@@ -1,4 +1,5 @@
 import math
+import os
 from pathlib import Path
 import pygame
 
@@ -17,6 +18,20 @@ try:
     from pytmx.util_pygame import load_pygame
 except ImportError:  # pragma: no cover - informs developer about missing dependency
     load_pygame = None
+
+
+def _ensure_headless_display() -> None:
+    if pygame.display.get_init() and pygame.display.get_surface() is not None:
+        return
+    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    try:
+        pygame.display.init()
+    except Exception:
+        return
+    try:
+        pygame.display.set_mode((1, 1))
+    except Exception:
+        pass
 
 
 def _calculate_surface_size(tmx_data):
@@ -204,6 +219,8 @@ def load_tilemap_surface(window_size, map_path: str | Path | None = None):
     if load_pygame is None:
         print("Install pytmx (pip install pytmx) to render Tiled maps.")
         return None, None, None, None, 1.0, 1.0, (0, 0)
+
+    _ensure_headless_display()
 
     selected_map_path = Path(map_path) if map_path else MAP_PATH
     if not selected_map_path.exists():
