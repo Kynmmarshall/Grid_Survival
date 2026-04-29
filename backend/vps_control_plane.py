@@ -4,6 +4,7 @@ import json
 import os
 import random
 import string
+import signal
 import threading
 import time
 import traceback
@@ -359,6 +360,11 @@ class ControlPlaneState:
 STATE = ControlPlaneState()
 
 
+class ControlPlaneHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "GridSurvivalControlPlane/0.1"
 
@@ -467,6 +473,15 @@ def _run_match_daemon() -> None:
 
 
 def run_server() -> None:
+    stop_event = threading.Event()
+
+    def _request_stop(*_args: object) -> None:
+        stop_event.set()
+        try:
+            server.shutdown()
+        except Exception:
+            pass
+
     threading.Thread(target=_matchmaking_loop, daemon=True).start()
     # start match daemon co-located so issued assignments are consumable in-process
     try:
@@ -474,9 +489,19 @@ def run_server() -> None:
         t.start()
     except Exception:
         traceback.print_exc()
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+
+    server = ControlPlaneHTTPServer((HOST, PORT), Handler)
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
     print(f"Control-plane listening on http://{HOST}:{PORT}", flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever(poll_interval=0.5)
+    finally:
+        stop_event.set()
+        try:
+            server.server_close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
