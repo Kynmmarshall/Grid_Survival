@@ -43,6 +43,11 @@ class _PlayerProxy:
         self._lives = int(entry.get("lives", 0))
         self._active_orb_label = str(entry.get("active_orb_label", ""))
         self._active_orb_timer = float(entry.get("active_orb_timer", 0.0))
+        # CollisionManager expects player.current_animation.image to exist.
+        # On the daemon we only need a simple opaque surface for mask checks.
+        dummy_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        dummy_surface.fill((255, 255, 255, 255))
+        self.current_animation = type("_Anim", (), {"image": dummy_surface})()
 
     def get_feet_rect(self):
         return self.rect
