@@ -605,17 +605,17 @@ class MatchDaemon:
                             for pname, entry in session.get("players", {}).items():
                                 addr = entry.get("addr")
                                 if not addr:
-
-                                                                    # Skip sending snapshots to stale clients (no activity for >CLIENT_TIMEOUT)
-                                                                    last_seen = entry.get("last_seen", now)
-                                                                    if now - last_seen > self.CLIENT_TIMEOUT:
-                                                                        try:
-                                                                            print(f"[DEBUG] MatchDaemon: skipping stale client {addr} (last_seen {now - last_seen:.1f}s ago)", flush=True)
-                                                                        except Exception:
-                                                                            pass
-                                                                        continue
-
                                     continue
+
+                                # Skip sending snapshots to stale clients (no activity for >CLIENT_TIMEOUT)
+                                last_seen = entry.get("last_seen", now)
+                                if now - last_seen > self.CLIENT_TIMEOUT:
+                                    try:
+                                        print(f"[DEBUG] MatchDaemon: skipping stale client {addr} (last_seen {now - last_seen:.1f}s ago)", flush=True)
+                                    except Exception:
+                                        pass
+                                    continue
+
                                 seq = self._next_seq()
                                 self._send_packet(addr, PKT_DATA, seq, 0, "snapshot", snap)
                                 seq = self._next_seq()
