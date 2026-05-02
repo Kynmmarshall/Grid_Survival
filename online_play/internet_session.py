@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import random
 import time
 import urllib.parse
 
@@ -157,7 +158,8 @@ class InternetSessionClient(NetworkClient):
             self.last_error = "Missing session data for reconnect"
             return False
 
-        for _ in range(max(1, int(attempts))):
+        max_attempts = max(1, int(attempts))
+        for attempt in range(max_attempts):
             if self.connect_to_host(self._last_host, self._last_port):
                 auth_sent = self.send_message(
                     "internet_auth",
@@ -170,6 +172,9 @@ class InternetSessionClient(NetworkClient):
                     self.request_resync("reconnect")
                     self._last_auth_ok = True
                     return True
-            time.sleep(0.35)
+            if attempt < max_attempts - 1:
+                base_delay = min(4.0, 0.35 * (2 ** attempt))
+                jitter = random.uniform(0.0, min(0.75, base_delay * 0.4))
+                time.sleep(base_delay + jitter)
         self.last_error = self.last_error or "Reconnect failed"
         return False

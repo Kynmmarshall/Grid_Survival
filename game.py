@@ -1,4 +1,6 @@
 import math
+import random
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -126,6 +128,7 @@ class GameManager:
         self._client_remote_extrapolation_cap = 1 / 16
         self._network_disconnect_started_at: float | None = None
         self._network_last_reconnect_attempt_at = 0.0
+        self._network_reconnect_thread: threading.Thread | None = None
         # Rate-limiting for client input messages: only send when the state
         # changes or when the minimum interval has elapsed (60 Hz cap).
         self._input_send_timer: float = 0.0
@@ -360,21 +363,14 @@ class GameManager:
                     self._network_last_reconnect_attempt_at = 0.0
                     print(f"[NETWORK] Disconnected at time={self._time_since_start:.1f}s, will attempt reconnect", flush=True)
 
-                reconnect = getattr(self.network, "reconnect", None) if self.network else None
                 disconnect_duration = now - self._network_disconnect_started_at
-                
-                # Don't block game loop during reconnect - do it async with timeout
-                if callable(reconnect) and now - self._network_last_reconnect_attempt_at >= 2.0:
-                    self._network_last_reconnect_attempt_at = now
-                    try:
-                        if reconnect(attempts=1):
-                            self._network_disconnect_started_at = None
-                            self._network_last_reconnect_attempt_at = 0.0
-                            print(f"[NETWORK] Reconnected at time={self._time_since_start:.1f}s", flush=True)
-                            self._process_network_messages()
-                            return
-                    except Exception as e:
-                        print(f"[NETWORK] Reconnect failed: {e}", flush=True)
+
+                if not self._network_reconnect_thread or not self._network_reconnect_thread.is_alive():
+                    self._network_reconnect_thread = threading.Thread(
+                        target=self._start_network_reconnect_worker,
+                        daemon=True,
+                    )
+                    self._network_reconnect_thread.start()
 
                 # Log disconnect duration
                 if int(disconnect_duration) % 5 == 0 and disconnect_duration > 0:
@@ -387,6 +383,8 @@ class GameManager:
 
             self._network_disconnect_started_at = None
             self._network_last_reconnect_attempt_at = 0.0
+            if self._network_reconnect_thread and not self._network_reconnect_thread.is_alive():
+                self._network_reconnect_thread = None
 
             self._process_network_messages()
             if not self.running or not self.network.connected:
@@ -2234,17 +2232,61 @@ class GameManager:
 
     def _restart_network_round(self, reset_match: bool = False):
         """Host-authoritative restart path for LAN games."""
+        self._network_round_seq += 1
         self._restart_game(reset_match=reset_match)
         if self.is_network_game and self.is_network_host and self.network and self.network.connected:
             self._snapshot_send_timer = 0.0
             self._world_dynamic_snapshot_send_timer = 0.0
             self._world_snapshot_send_timer = 0.0
+            try:
+                print(f"[NETWORK] Advancing to round_seq={self._network_round_seq} reset_match={reset_match}", flush=True)
+            except Exception:
+                pass
             self.network.send_message("snapshot", state=self._build_network_snapshot())
             self.network.send_message(
                 "world_dynamic_snapshot",
                 state=self._build_network_dynamic_world_snapshot(),
             )
             self.network.send_message("world_snapshot", state=self._build_network_world_snapshot())
+
+    def _start_network_reconnect_worker(self) -> None:
+        if self._network_reconnect_thread and self._network_reconnect_thread.is_alive():
+            return
+
+        def worker() -> None:
+            attempt = 0
+            while self.running and self.is_network_game and self.network and not self.network.connected:
+                base_delay = min(4.0, 0.35 * (2 ** attempt))
+                jitter = random.uniform(0.0, min(0.75, base_delay * 0.4))
+                delay = base_delay + jitter
+                try:
+                    print(f"[NETWORK] Reconnect worker attempt={attempt + 1} sleep={delay:.2f}s", flush=True)
+                except Exception:
+                    pass
+                time.sleep(delay)
+                if not self.running or not self.is_network_game or not self.network or self.network.connected:
+                    break
+                try:
+                    if self.network.reconnect(attempts=1):
+                        try:
+                            print(f"[NETWORK] Reconnected at time={self._time_since_start:.1f}s", flush=True)
+                        except Exception:
+                            pass
+                        self._network_disconnect_started_at = None
+                        self._network_last_reconnect_attempt_at = 0.0
+                        return
+                except Exception as exc:
+                    try:
+                        print(f"[NETWORK] Reconnect attempt failed: {exc}", flush=True)
+                    except Exception:
+                        pass
+                attempt += 1
+
+            try:
+                print("[NETWORK] Reconnect worker exited", flush=True)
+            except Exception:
+                pass
+            self._network_reconnect_thread = None
 
     def _force_safe_spawns(self):
         """Clamp every player to a valid walkable tile and clear fall/drown flags."""

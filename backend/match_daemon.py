@@ -16,7 +16,7 @@ from level_config import get_level
 from orbs import OrbManager
 from backend.vps_match_server import MatchServerManager
 from pacman_enemies import PacmanEnemyManager
-from network import PKT_DATA, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
+from network import PKT_DATA, PKT_DISCONNECT, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
 from settings import MAP_PATH, PLAYER_START_POS, WINDOW_SIZE
 from tile_system import TMXTileManager
 
@@ -290,6 +290,37 @@ class MatchDaemon:
                 for entry in players.values():
                     if entry.get("addr") == addr:
                         entry["last_seen"] = time.time()
+
+    def _handle_disconnect(self, addr: tuple[str, int]) -> None:
+        now = time.time()
+        removed_sessions: list[str] = []
+        with self._lock:
+            for session_id, session in list(self._sessions.items()):
+                players = session.get("players", {})
+                matched = False
+                for entry in players.values():
+                    if entry.get("addr") != addr:
+                        continue
+                    entry["addr"] = None
+                    entry["last_seen"] = now
+                    entry["disconnected_at"] = now
+                    matched = True
+                if not matched:
+                    continue
+                active_players = [entry for entry in players.values() if entry.get("addr")]
+                if not active_players:
+                    removed_sessions.append(session_id)
+            for session_id in removed_sessions:
+                session = self._sessions.pop(session_id, None)
+                if session is None:
+                    continue
+                try:
+                    print(
+                        f"[SESSION] Closed empty session {session_id} after disconnect (players={len(session.get('players', {}))})",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
 
     def _build_snapshot(self, session: dict) -> dict[str, Any]:
         now = time.time()
@@ -709,6 +740,9 @@ class MatchDaemon:
                 kind = packet.get("k")
                 if kind == PKT_HELLO:
                     self._handle_hello(addr)
+                    continue
+                if kind == PKT_DISCONNECT:
+                    self._handle_disconnect(addr)
                     continue
                 if kind == PKT_DATA:
                     self._handle_data(addr, packet)
