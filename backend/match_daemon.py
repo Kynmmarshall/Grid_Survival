@@ -198,6 +198,7 @@ class MatchDaemon:
             # create or join session keyed by assignment.match_id
             match_id = str(assignment.get("match_id"))
             with self._lock:
+                is_new_session = match_id not in self._sessions
                 session = self._sessions.setdefault(match_id, {
                     "assignment": assignment,
                     "players": {},  # name -> {addr, x,y,last_input}
@@ -239,6 +240,13 @@ class MatchDaemon:
             seq = self._next_seq()
             # reply with ok and session id (reuse token as session id)
             self._send_packet(addr, PKT_DATA, seq, 0, "internet_auth_ok", {"session_id": token})
+            try:
+                if is_new_session:
+                    print(f"[SESSION] New session created: match_id={match_id}, player={player}, addr={addr}", flush=True)
+                else:
+                    print(f"[SESSION] Player joined existing session: match_id={match_id}, player={player}, addr={addr}, active_players={len([p for p in session_players.values() if p.get('addr')])}", flush=True)
+            except Exception:
+                pass
             return
 
         if t == "input_state":
@@ -580,6 +588,34 @@ class MatchDaemon:
                 # changing it every tick makes the client reset its world state
                 # continuously.
 
+    def _cleanup_stale_sessions(self, now: float) -> None:
+        """Remove sessions with no active players for >90 seconds."""
+        stale_sessions = []
+        with self._lock:
+            for session_id, session in list(self._sessions.items()):
+                # Check if session has any non-stale players
+                has_active_player = False
+                for pname, entry in session.get("players", {}).items():
+                    last_seen = entry.get("last_seen", now)
+                    if now - last_seen <= self.CLIENT_TIMEOUT:
+                        has_active_player = True
+                        break
+                
+                # Session is stale if created >90s ago AND no active players
+                created_at = session.get("created_at", now)
+                session_age = now - created_at
+                if session_age > 90.0 and not has_active_player:
+                    stale_sessions.append(session_id)
+            
+            # Remove stale sessions
+            for session_id in stale_sessions:
+                session = self._sessions.pop(session_id, None)
+                if session:
+                    try:
+                        print(f"[CLEANUP] Removed stale session {session_id} (age={now - session.get('created_at', now):.1f}s, players={len(session.get('players', {}))})", flush=True)
+                    except Exception:
+                        pass
+
     def run(self) -> None:
         self.running = True
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -593,6 +629,7 @@ class MatchDaemon:
         self.sock = s
 
         last_snapshot_send = 0.0
+        last_cleanup = 0.0
         last_tick = time.time()
         try:
             while self.running:
@@ -601,6 +638,11 @@ class MatchDaemon:
                 last_tick = now
                 # Tick physics
                 self._tick_physics(dt)
+
+                # Cleanup stale sessions every 10 seconds
+                if now - last_cleanup >= 10.0:
+                    last_cleanup = now
+                    self._cleanup_stale_sessions(now)
 
                 # Send snapshots at 10 Hz
                 if now - last_snapshot_send >= 0.1:

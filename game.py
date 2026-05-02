@@ -358,20 +358,30 @@ class GameManager:
                 if self._network_disconnect_started_at is None:
                     self._network_disconnect_started_at = now
                     self._network_last_reconnect_attempt_at = 0.0
+                    print(f"[NETWORK] Disconnected at time={self._time_since_start:.1f}s, will attempt reconnect", flush=True)
 
                 reconnect = getattr(self.network, "reconnect", None) if self.network else None
+                disconnect_duration = now - self._network_disconnect_started_at
+                
+                # Don't block game loop during reconnect - do it async with timeout
                 if callable(reconnect) and now - self._network_last_reconnect_attempt_at >= 2.0:
                     self._network_last_reconnect_attempt_at = now
                     try:
                         if reconnect(attempts=1):
                             self._network_disconnect_started_at = None
                             self._network_last_reconnect_attempt_at = 0.0
+                            print(f"[NETWORK] Reconnected at time={self._time_since_start:.1f}s", flush=True)
                             self._process_network_messages()
                             return
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[NETWORK] Reconnect failed: {e}", flush=True)
 
-                if now - self._network_disconnect_started_at > 15.0:
+                # Log disconnect duration
+                if int(disconnect_duration) % 5 == 0 and disconnect_duration > 0:
+                    print(f"[NETWORK] Disconnected for {disconnect_duration:.1f}s, status=DISCONNECTED, dt={dt:.1f}ms", flush=True)
+
+                if disconnect_duration > 15.0:
+                    print(f"[NETWORK] Timeout after {disconnect_duration:.1f}s, exiting", flush=True)
                     self.running = False
                 return
 
@@ -964,6 +974,13 @@ class GameManager:
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
             return
+
+        # Diagnostic: snapshot receipt timing
+        snapshot_time = float(snapshot.get("time_since_start", -1.0))
+        try:
+            print(f"[SNAPSHOT] Received snap: round_seq={snapshot.get('round_seq')}, time={snapshot_time:.3f}s, players_count={len(snapshot.get('players', []))}, has_hazards={bool(snapshot.get('hazards'))}", flush=True)
+        except Exception:
+            pass
 
         incoming_round_seq = self._parse_round_seq(
             snapshot.get("round_seq", self._last_client_snapshot_round_seq),

@@ -23,7 +23,6 @@ GAME_UDP_PORT_OFFSET = 0
 
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_UDP_DATAGRAM_BYTES = 1200
-MAX_UDP_READ_BYTES = 65535
 FRAGMENT_RAW_CHUNK_BYTES = 480
 MAX_FRAGMENT_MESSAGES = 256
 FRAGMENT_TTL_SECONDS = 2.5
@@ -120,16 +119,6 @@ class NetworkManager:
         self._last_keepalive_sent = 0.0
         self._disconnect_notified = False
         self.last_error: Optional[str] = None
-
-    def _clear_incoming_state(self) -> None:
-        while not self.message_queue.empty():
-            try:
-                self.message_queue.get_nowait()
-            except queue.Empty:
-                break
-        with self._latest_messages_lock:
-            self._latest_messages.clear()
-        self._last_recv_seq_by_type.clear()
 
     def send_message(self, message_type: str, **payload: Any) -> bool:
         if not self.connected or not self.peer_address:
@@ -503,16 +492,10 @@ class NetworkManager:
     def _receive_loop(self) -> None:
         while self.running and self.socket:
             try:
-                payload, address = self.socket.recvfrom(MAX_UDP_READ_BYTES)
+                payload, address = self.socket.recvfrom(MAX_UDP_DATAGRAM_BYTES * 2)
             except socket.timeout:
                 continue
-            except OSError as exc:
-                # On Windows, WSAEMSGSIZE (10040) means datagram was larger than
-                # the provided read buffer. Skip it and keep the socket alive.
-                if getattr(exc, "winerror", None) == 10040:
-                    continue
-                break
-            except socket.error:
+            except (socket.error, OSError):
                 break
             if not payload or len(payload) > MAX_MESSAGE_BYTES:
                 continue
@@ -542,7 +525,6 @@ class NetworkManager:
                 self._handle_data_packet(packet)
             elif kind == PKT_FRAGMENT:
                 self._handle_fragment(packet)
-        
         if not self.is_host and self.connected:
             self._mark_disconnected(notify=True)
 
@@ -575,9 +557,11 @@ class NetworkManager:
             self._pending_reliable.clear()
         with self._latest_outgoing_lock:
             self._latest_outgoing.clear()
-        self._clear_incoming_state()
+        with self._latest_messages_lock:
+            self._latest_messages.clear()
         self._seen_reliable.clear()
         self._fragment_buffer.clear()
+        self._last_recv_seq_by_type.clear()
 
 
 class UdpHostTransport(NetworkManager):
@@ -592,8 +576,6 @@ class UdpHostTransport(NetworkManager):
         try:
             host_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             host_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Increase recv buffer to handle large snapshots
-            host_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256*1024)  # 256KB
             host_socket.bind(("0.0.0.0", self.port))
             host_socket.settimeout(0.05)
             self.socket = host_socket
@@ -639,26 +621,8 @@ class UdpClientTransport(NetworkManager):
 
     def connect_to_host(self, host: str, port: int = DEFAULT_PORT) -> bool:
         try:
-            # Stop any existing connection before starting new one
-            if self.running or self.connected or self.socket:
-                self.running = False
-                self.connected = False
-                self.udp_connected = False
-                # Close old socket if it exists
-                old_socket = self.socket
-                self.socket = None
-                self.udp_socket = None
-                if old_socket:
-                    try:
-                        old_socket.close()
-                    except OSError:
-                        pass
-            
-            self._clear_incoming_state()
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Increase recv buffer to handle large snapshots
-            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256*1024)  # 256KB
             client_socket.bind(("0.0.0.0", 0))
             client_socket.settimeout(0.05)
             self.socket = client_socket
@@ -673,10 +637,17 @@ class UdpClientTransport(NetworkManager):
             self._start_threads()
             deadline = time.time() + HELLO_TIMEOUT
             next_hello = 0.0
+            hello_sent = 0
             while self.running and not self.connected and time.time() < deadline:
                 now = time.time()
                 if now >= next_hello:
                     self._send_control(PKT_HELLO, ts=now)
+                    hello_sent += 1
+                    if hello_sent <= 3 or hello_sent % 10 == 0:
+                        try:
+                            print(f"[DEBUG] hello sent #{hello_sent} to {self.peer_address}")
+                        except Exception:
+                            pass
                     next_hello = now + HELLO_RETRY_INTERVAL
                 time.sleep(0.02)
             if self.connected:
