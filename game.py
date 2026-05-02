@@ -717,13 +717,13 @@ class GameManager:
             elif self.is_network_host and message_type == "power_use_request":
                 self._pending_remote_power_uses = min(8, self._pending_remote_power_uses + 1)
             elif (not self.is_network_host) and message_type == "snapshot":
-                latest_snapshot = message.get("state")
+                latest_snapshot = message
             elif (not self.is_network_host) and message_type == "world_snapshot":
-                latest_world_snapshot = message.get("state")
+                latest_world_snapshot = message
             elif (not self.is_network_host) and message_type == "world_dynamic_snapshot":
-                latest_world_dynamic_snapshot = message.get("state")
+                latest_world_dynamic_snapshot = message
             elif (not self.is_network_host) and message_type == "match_result":
-                latest_match_result = message.get("state")
+                latest_match_result = message
         
         # Diagnostic: Log message batch info
         if message_count > 0:

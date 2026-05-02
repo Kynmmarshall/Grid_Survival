@@ -172,6 +172,16 @@ class MatchDaemon:
     def _handle_data(self, addr: tuple[str, int], packet: dict[str, Any]) -> None:
         t = packet.get("t")
         p = packet.get("p") or {}
+
+        def touch_addr() -> None:
+            now = time.time()
+            with self._lock:
+                for session in self._sessions.values():
+                    for entry in session.get("players", {}).values():
+                        if entry.get("addr") == addr:
+                            entry["last_seen"] = now
+                            return
+
         if t == "internet_auth":
             token = str(p.get("token") or "").strip()
             player = str(p.get("player") or "").strip()
@@ -202,7 +212,7 @@ class MatchDaemon:
                 session_players = session["players"]
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
                 spawn_y = float(PLAYER_START_POS[1])
-                session_players[player] = {"addr": addr, "x": spawn_x, "y": spawn_y, "last_input": {}}
+                session_players[player] = {"addr": addr, "x": spawn_x, "y": spawn_y, "last_input": {}, "last_seen": time.time()}
                 bot_entries = assignment.get("payload", {}).get("players", [])
                 if isinstance(bot_entries, list) and not session.get("bot_names"):
                     for idx, entry in enumerate(bot_entries):
@@ -232,21 +242,19 @@ class MatchDaemon:
             return
 
         if t == "input_state":
-            # find session by matching addr -> session players
-            player = str(p.get("player") or p.get("name") or "")
-            if not player:
-                return
+            # Refresh liveness from the packet source address.
+            touch_addr()
             with self._lock:
                 for session in self._sessions.values():
-                    players = session.get("players", {})
-                    if player in players:
-                        entry = players[player]
+                    for entry in session.get("players", {}).values():
+                        if entry.get("addr") != addr:
+                            continue
                         entry["last_input"] = p.get("input") or {}
-                        entry["last_seen"] = time.time()
                         break
             return
 
         if t == "resync_request":
+            touch_addr()
             player = str(p.get("player") or "")
             with self._lock:
                 for session in self._sessions.values():

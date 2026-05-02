@@ -19,10 +19,9 @@ The client freezes ~5 seconds after connecting to online play, and the server co
 ### STEP 1: Run Server with Diagnostics
 ```bash
 ssh root@38.242.246.126
-cd /root/grid-survival-vps/backend
+cd /root/grid-survival-vps
 source venv/bin/activate
-python match_daemon.py
-..\venv\Scripts\python.exe match_daemon_main.py
+python -m backend.vps_control_plane
 ```
 - **Watch for:** Server should bind to :5555 and be ready to receive clients
 - **Look for:** `[DEBUG] MatchDaemon.run -> bound to 0.0.0.0:5555`
