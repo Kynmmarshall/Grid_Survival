@@ -693,8 +693,16 @@ class GameManager:
         latest_world_dynamic_snapshot = None
         latest_match_result = None
         saw_disconnect = False
+        message_count = 0
+        
+        # Diagnostic: Track message arrival
+        debug_msg_types = []
+        
         for message in self.network.get_messages():
+            message_count += 1
             message_type = message.get("type")
+            debug_msg_types.append(message_type)
+            
             if message_type == "disconnect":
                 saw_disconnect = True
                 continue
@@ -716,6 +724,13 @@ class GameManager:
                 latest_world_dynamic_snapshot = message.get("state")
             elif (not self.is_network_host) and message_type == "match_result":
                 latest_match_result = message.get("state")
+        
+        # Diagnostic: Log message batch info
+        if message_count > 0:
+            try:
+                print(f"[DIAG] ProcessMessages: got {message_count} messages, types={set(debug_msg_types)}, snap={latest_snapshot is not None}, world_snap={latest_world_snapshot is not None}", flush=True)
+            except Exception:
+                pass
 
         if latest_snapshot is not None:
             self._apply_network_snapshot(latest_snapshot)
@@ -2510,17 +2525,40 @@ class GameManager:
         return self.selected_characters[-1]
 
     def run(self):
+        frame_count = 0
+        last_diag_time = time.time()
+        
         while self.running:
+            frame_start = time.time()
             dt = self.clock.tick(TARGET_FPS) / 1000.0
+            frame_count += 1
+            
             update_online_status(dt)
             self.handle_events()
             keys = pygame.key.get_pressed()
             self.update(dt, keys)
             self.draw()
+            
+            # Diagnostic: Report frame timing every 30 frames (~0.5s at 60fps)
+            now = time.time()
+            if now - last_diag_time >= 0.5:
+                frame_elapsed = (now - frame_start) * 1000.0
+                try:
+                    if self.is_network_game:
+                        conn_status = "CONNECTED" if (self.network and self.network.connected) else "DISCONNECTED"
+                        queue_depth = len(self.network.incoming_messages) if (self.network and hasattr(self.network, 'incoming_messages')) else 0
+                        print(f"[DIAG] Frame {frame_count}: dt={dt*1000:.1f}ms, elapsed={frame_elapsed:.1f}ms, status={conn_status}, queue_depth={queue_depth}", flush=True)
+                except Exception:
+                    pass
+                last_diag_time = now
 
         if hasattr(self, "audio"):
             self.audio.stop_music()
         if self.network:
+            try:
+                print("[DIAG] Game shutting down, disconnecting network", flush=True)
+            except Exception:
+                pass
             self.network.disconnect()
             
         if getattr(self, "return_to_main_menu", False):

@@ -111,6 +111,8 @@ class MatchDaemon:
     - emits snapshot, world_snapshot periodically.
     """
 
+    CLIENT_TIMEOUT = 30.0  # Stop sending snapshots to clients silent for 30 seconds
+
     def __init__(self, manager: MatchServerManager, bind_addr: str = "0.0.0.0", bind_port: int | None = None):
         self.manager = manager
         self.bind_addr = bind_addr
@@ -264,6 +266,14 @@ class MatchDaemon:
         except Exception:
             pass
         self._send_packet(addr, PKT_HELLO_ACK, seq, 0, "", {})
+
+        # Track hello reception for client timeout detection
+        with self._lock:
+            for session in self._sessions.values():
+                players = session.get("players", {})
+                for entry in players.values():
+                    if entry.get("addr") == addr:
+                        entry["last_seen"] = time.time()
 
     def _build_snapshot(self, session: dict) -> dict[str, Any]:
         now = time.time()
@@ -595,6 +605,16 @@ class MatchDaemon:
                             for pname, entry in session.get("players", {}).items():
                                 addr = entry.get("addr")
                                 if not addr:
+
+                                                                    # Skip sending snapshots to stale clients (no activity for >CLIENT_TIMEOUT)
+                                                                    last_seen = entry.get("last_seen", now)
+                                                                    if now - last_seen > self.CLIENT_TIMEOUT:
+                                                                        try:
+                                                                            print(f"[DEBUG] MatchDaemon: skipping stale client {addr} (last_seen {now - last_seen:.1f}s ago)", flush=True)
+                                                                        except Exception:
+                                                                            pass
+                                                                        continue
+
                                     continue
                                 seq = self._next_seq()
                                 self._send_packet(addr, PKT_DATA, seq, 0, "snapshot", snap)
