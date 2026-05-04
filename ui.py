@@ -106,6 +106,9 @@ class GameHUD:
         self.pause_rect = None
         self.mute_rect = None   # Mute button hit area
         self.volume_rect = None
+        self.timer_rect = None
+        self.alive_rect = None
+        self.player_card_rects: List[pygame.Rect] = []
 
     def update(self, dt: float):
         """Update HUD state."""
@@ -144,6 +147,7 @@ class GameHUD:
         is_paused: bool = False,
     ):
         """Draw HUD elements."""
+        self.alive_rect = None
         self._draw_timer_panel(surface)
         self._draw_pause_button(surface, is_paused)
         self._draw_mute_button(surface, is_muted)
@@ -263,6 +267,7 @@ class GameHUD:
         panel_h = label_surf.get_height() + value_surf.get_height() + HUD_PANEL_PADDING_V * 3
         panel_rect = pygame.Rect(0, 20, panel_w, panel_h)
         panel_rect.centerx = WINDOW_SIZE[0] // 2
+        self.timer_rect = panel_rect.copy()
 
         _draw_panel(surface, panel_rect, bg_color, border_color,
                     HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
@@ -295,6 +300,7 @@ class GameHUD:
         panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
         panel_rect.right = WINDOW_SIZE[0] - 20
         panel_rect.bottom = WINDOW_SIZE[1] - 20
+        self.alive_rect = panel_rect.copy()
 
         _draw_panel(surface, panel_rect, HUD_PANEL_BG, border_color,
                     HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
@@ -308,12 +314,12 @@ class GameHUD:
         surface.blit(value_surf, (vx, vy))
 
     def _draw_player_cards(self, surface: pygame.Surface, players: List):
-        self._player_cards.draw(
+        self.player_card_rects = self._player_cards.draw(
             surface,
             players,
             round_wins=self.round_wins,
             target_score=self.target_score,
-        )
+        ) or []
 
     def reset(self):
         """Reset HUD state."""
@@ -506,7 +512,7 @@ class EliminationScreen:
             blink_alpha = int(120 + 135 * abs(math.sin(self._time * math.pi * 1.5)))
             if self.allow_actions:
                 restart_surf = self.font_small.render(
-                    "Press  R  to Restart    |    Press  ESC  to Quit",
+                    "Press  R  to Restart Match",
                     True, (180, 180, 180)
                 )
                 restart_surf.set_alpha(blink_alpha)
@@ -657,7 +663,7 @@ class VictoryScreen:
             blink_alpha = int(120 + 135 * abs(math.sin(self._time * math.pi * 1.5)))
             if self.allow_actions:
                 restart_surf = self.font_small.render(
-                    "Press  R  to Restart    |    Press  ESC  to Quit",
+                    "Press  R  to Restart Match",
                     True, (180, 180, 180)
                 )
                 restart_surf.set_alpha(blink_alpha)

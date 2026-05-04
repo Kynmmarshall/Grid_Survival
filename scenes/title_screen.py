@@ -62,7 +62,14 @@ from .common import SceneAudioOverlay, _draw_rounded_rect, _load_font
 class TitleScreen:
     """Opening title screen with animated logo, particles, and name entry."""
 
-    def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock):
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        clock: pygame.time.Clock,
+        *,
+        start_music: bool = True,
+        enable_tutorial_prompt: bool = True,
+    ):
         self.screen = screen
         self.clock = clock
         self.width, self.height = WINDOW_SIZE
@@ -104,13 +111,14 @@ class TitleScreen:
         self._particles = []
         self._spawn_particles(TITLE_PARTICLE_COUNT)
 
-        self._start_music()
+        if start_music:
+            self._start_music()
         self._tutorial_button_rect = pygame.Rect(24, self.height - 124, 190, 46)
         self._back_button_rect = pygame.Rect(24, self.height - 68, 150, 46)
         self._controls_button_rect = pygame.Rect(self.width - 134, self.height - 68, 110, 46)
 
         # First time playing prompt - only show if not answered yet
-        self._show_tutorial_prompt = not _first_time_prompt_answered
+        self._show_tutorial_prompt = bool(enable_tutorial_prompt and not _first_time_prompt_answered)
         # Adjust tutorial prompt box dimensions
         self._prompt_yes_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
         self._prompt_no_rect = pygame.Rect(0, 0, 100, 40)  # Smaller width and height
@@ -266,7 +274,7 @@ class TitleScreen:
 
     def _draw_input(self) -> None:
         # Label
-        label = self._font_small.render("ENTER YOUR NAME :", True, INPUT_LABEL_COLOR)
+        label = self._font_small.render("GUEST NAME (OPTIONAL) :", True, INPUT_LABEL_COLOR)
         self.screen.blit(label, label.get_rect(center=(self.width // 2, 310)))
 
         # Input box
@@ -285,7 +293,7 @@ class TitleScreen:
 
         # "PRESS ENTER TO CONTINUE" prompt — blinking fade
         prompt_alpha = int(80 + 175 * abs(math.sin(self._title_time * PROMPT_BLINK_SPEED * math.pi)))
-        prompt_surf = self._font_small.render("PRESS ENTER TO CONTINUE", True, PROMPT_TEXT_COLOR)
+        prompt_surf = self._font_small.render("PRESS ENTER FOR ACCOUNT MENU", True, PROMPT_TEXT_COLOR)
         prompt_surf.set_alpha(prompt_alpha)
         self.screen.blit(prompt_surf, prompt_surf.get_rect(center=(self.width // 2, 440)))
 
@@ -884,11 +892,8 @@ class TitleScreen:
                         self._fade("out")
                         return None
                     if event.key == pygame.K_RETURN:
-                        if self.player_name.strip():
-                            self._fade("out")
-                            return self.player_name.strip()
-                        self.warning_text = "PLEASE ENTER YOUR NAME"
-                        self.warning_timer = WARNING_DISPLAY_DURATION
+                        self._fade("out")
+                        return self.player_name.strip() or "Player"
                     elif event.key == pygame.K_BACKSPACE:
                         self.player_name = self.player_name[:-1]
                     elif event.unicode and event.unicode.isprintable():
