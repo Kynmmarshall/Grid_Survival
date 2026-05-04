@@ -364,7 +364,13 @@ def prompt_discovered_host(screen, clock):
 
                 title_surf = font_title.render(host.host_name.upper(), True, border if active else (255, 255, 255))
                 machine_surf = font_body.render(host.machine_name, True, (220, 225, 235))
-                address_surf = font_small.render(f"{host.address}:{host.port}", True, (165, 175, 205))
+                port_label = host.lobby_port if getattr(host, "lobby_port", None) else host.port
+                slot_label = ""
+                if getattr(host, "member_count", None) is not None and getattr(host, "max_players", None) is not None:
+                    slot_label = f"  {host.member_count}/{host.max_players}"
+                    if getattr(host, "full", False):
+                        slot_label += " full"
+                address_surf = font_small.render(f"{host.address}:{port_label}{slot_label}", True, (165, 175, 205))
                 screen.blit(title_surf, title_surf.get_rect(topleft=(rect.left + 28, rect.top + 14)))
                 screen.blit(machine_surf, machine_surf.get_rect(topleft=(rect.left + 28, rect.top + 58)))
                 screen.blit(address_surf, address_surf.get_rect(topright=(rect.right - 28, rect.top + 24)))
@@ -440,7 +446,11 @@ def prompt_discovered_host(screen, clock):
                             "host_name": host.host_name,
                             "machine_name": host.machine_name,
                             "address": host.address,
-                            "port": host.port,
+                            "port": host.game_port if getattr(host, "game_port", None) else host.port,
+                            "lobby_port": host.lobby_port if getattr(host, "lobby_port", None) else host.port,
+                            "member_count": getattr(host, "member_count", None),
+                            "max_players": getattr(host, "max_players", None),
+                            "full": getattr(host, "full", False),
                         }
                     elif event.key == pygame.K_ESCAPE:
                         return None
@@ -451,7 +461,11 @@ def prompt_discovered_host(screen, clock):
                                 "host_name": host.host_name,
                                 "machine_name": host.machine_name,
                                 "address": host.address,
-                                "port": host.port,
+                                "port": host.game_port if getattr(host, "game_port", None) else host.port,
+                                "lobby_port": host.lobby_port if getattr(host, "lobby_port", None) else host.port,
+                                "member_count": getattr(host, "member_count", None),
+                                "max_players": getattr(host, "max_players", None),
+                                "full": getattr(host, "full", False),
                             }
     finally:
         finder.close()

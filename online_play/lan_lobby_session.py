@@ -289,12 +289,19 @@ class LanLobbyHostSession:
                 continue
             if message.get("magic") != DISCOVERY_MAGIC or message.get("type") != "discover":
                 continue
+            if len(self.members) >= self.max_players:
+                continue
             response = {
                 "magic": DISCOVERY_MAGIC,
                 "type": "host_announce",
                 "host_name": self.host_name,
                 "machine_name": socket.gethostname(),
                 "port": self.port,
+                "lobby_port": self.port,
+                "game_port": DEFAULT_PORT,
+                "member_count": len(self.members),
+                "max_players": self.max_players,
+                "full": len(self.members) >= self.max_players,
             }
             try:
                 self.discovery_socket.sendto(json.dumps(response, separators=(",", ":")).encode("utf-8"), addr)

@@ -24,6 +24,11 @@ class DiscoveredHost:
     address: str
     port: int
     last_seen: float
+    game_port: int | None = None
+    lobby_port: int | None = None
+    member_count: int | None = None
+    max_players: int | None = None
+    full: bool = False
 
 
 class NetworkHost(UdpHostTransport):
@@ -144,6 +149,11 @@ class NetworkHost(UdpHostTransport):
                 "host_name": self.advertised_name,
                 "machine_name": self.machine_name,
                 "port": self.port,
+                "game_port": self.port,
+                "lobby_port": None,
+                "member_count": 1,
+                "max_players": 1,
+                "full": False,
             }
             try:
                 self.discovery_socket.sendto(
@@ -227,19 +237,36 @@ class LanGameFinder:
             port = int(message.get("port", DEFAULT_PORT))
             host_name = str(message.get("host_name", "Host"))
             machine_name = str(message.get("machine_name", addr[0]))
-            identity = (machine_name.lower(), port)
+            game_port = message.get("game_port")
+            lobby_port = message.get("lobby_port")
+            identity = (machine_name.lower(), int(lobby_port or port))
             existing = self._hosts.get(identity)
             if existing is not None:
                 existing.last_seen = now
                 existing.host_name = host_name
                 if existing.address.startswith("127.") and not addr[0].startswith("127."):
                     existing.address = addr[0]
+                existing.port = port
+                existing.game_port = int(game_port) if game_port is not None else existing.game_port
+                existing.lobby_port = int(lobby_port) if lobby_port is not None else existing.lobby_port
+                existing.member_count = (
+                    int(message.get("member_count")) if message.get("member_count") is not None else existing.member_count
+                )
+                existing.max_players = (
+                    int(message.get("max_players")) if message.get("max_players") is not None else existing.max_players
+                )
+                existing.full = bool(message.get("full", existing.full))
                 continue
             self._hosts[identity] = DiscoveredHost(
                 host_name=host_name,
                 machine_name=machine_name,
                 address=addr[0],
                 port=port,
+                game_port=int(game_port) if game_port is not None else None,
+                lobby_port=int(lobby_port) if lobby_port is not None else None,
+                member_count=int(message.get("member_count")) if message.get("member_count") is not None else None,
+                max_players=int(message.get("max_players")) if message.get("max_players") is not None else None,
+                full=bool(message.get("full", False)),
                 last_seen=now,
             )
         active_hosts = [

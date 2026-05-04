@@ -580,8 +580,11 @@ def run_online_session_setup(
         result = prompt_discovered_host(screen, clock)
         if not result:
             return None
+        game_port = int(result.get("port", 5555))
+        lobby_port = int(result.get("lobby_port", LAN_LOBBY_PORT))
+        print(f"[SESSION_FLOW] Client discovering host: {result['address']} game={game_port} lobby={lobby_port}")
         network = NetworkClient()
-        connected = network.connect_to_host(result["address"], result["port"])
+        connected = network.connect_to_host(result["address"], game_port)
         lobby_host = str(result.get("address", "")).strip() or result["address"]
     else:
         ip = prompt_ip_entry(screen, clock)
@@ -590,13 +593,14 @@ def run_online_session_setup(
         network = NetworkClient()
         connected = network.connect_to_host(ip)
         lobby_host = str(ip)
+        lobby_port = LAN_LOBBY_PORT
 
     if not connected:
         toast(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
         return None
 
     lobby_session = LanLobbyClientSession(player_name=player_name)
-    if not lobby_session.connect(lobby_host, LAN_LOBBY_PORT):
+    if not lobby_session.connect(lobby_host, lobby_port):
         toast(screen, clock, f"LAN lobby join failed: {lobby_session.last_error or 'unknown error'}")
         lobby_session = None
 
