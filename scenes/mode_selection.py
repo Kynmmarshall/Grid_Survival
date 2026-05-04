@@ -84,10 +84,10 @@ class ModeSelectionScreen:
         self._font_heading = _load_font(FONT_PATH_HEADING, FONT_SIZE_HEADING, bold=True)
         self._font_body = _load_font(FONT_PATH_BODY, FONT_SIZE_BODY)
         self._font_small = _load_font(FONT_PATH_SMALL, FONT_SIZE_SMALL)
-        self._font_card_title = _load_font(FONT_PATH_HEADING, 22, bold=True)
-        self._font_card_desc = _load_font(FONT_PATH_BODY, 16)
-        self._font_header = _load_font(FONT_PATH_HEADING, 36, bold=True)
-        self._font_icon = pygame.font.SysFont("segoe ui emoji", 40)
+        self._font_card_title = _load_font(FONT_PATH_HEADING, 30, bold=True)
+        self._font_card_desc = _load_font(FONT_PATH_BODY, 20)
+        self._font_header = _load_font(FONT_PATH_HEADING, 46, bold=True)
+        self._font_icon = pygame.font.SysFont("segoe ui emoji", 52)
 
         # Header animation state
         self._anim_time = 0.0
@@ -97,11 +97,11 @@ class ModeSelectionScreen:
         self._subtitle_visible = False
 
         # Card hover animation (smooth y offset per card)
-        card_w = MODE_CARD_WIDTH
-        card_h = MODE_CARD_HEIGHT
-        gap = 28
+        card_w = min(max(MODE_CARD_WIDTH + 140, 580), self.width - 140)
+        card_h = max(MODE_CARD_HEIGHT + 44, 156)
+        gap = 36
         total_h = 3 * card_h + 2 * gap
-        start_y = (self.height - total_h) // 2 + 60
+        start_y = (self.height - total_h) // 2 + 76
 
         self.cards = [
             {
@@ -128,8 +128,8 @@ class ModeSelectionScreen:
             },
             {
                 "mode": MODE_ONLINE_MULTIPLAYER,
-                "title": "PLAY OVER LAN",
-                "desc": "Host or join a match on the same local network",
+                "title": "ONLINE MULTIPLAYER",
+                "desc": "LAN direct or Internet lobby + matchmaking",
                 "key": "[3]",
                 "rect": pygame.Rect(0, start_y + (card_h + gap) * 2, card_w, card_h),
                 "hover_y": 0.0,
@@ -183,7 +183,24 @@ class ModeSelectionScreen:
             except Exception as e:
                 print(f"Failed to load mode bg: {e}")
 
-        self._back_button_rect = pygame.Rect(24, self.height - 72, 160, 48)
+        self._back_button_rect = pygame.Rect(24, self.height - 82, 192, 58)
+
+    def _wrap_card_text(self, text: str, max_width: int) -> list[str]:
+        words = text.split()
+        if not words:
+            return [""]
+
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if self._font_card_desc.size(candidate)[0] <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return lines
 
     def _update_animations(self, dt: float):
         self._anim_time += dt
@@ -260,7 +277,7 @@ class ModeSelectionScreen:
 
         subtitle_surf = self._font_body.render("CHOOSE YOUR GAME MODE", True, MODE_SUBTITLE_COLOR)
         subtitle_surf.set_alpha(int(self._subtitle_alpha))
-        self.screen.blit(subtitle_surf, subtitle_surf.get_rect(center=(self.width // 2, header_y + 55)))
+        self.screen.blit(subtitle_surf, subtitle_surf.get_rect(center=(self.width // 2, header_y + 64)))
 
         self._draw_back_button()
 
@@ -301,7 +318,7 @@ class ModeSelectionScreen:
         bg_color = hover_color if hovered else base_color
         border_color = (120, 150, 200)
         _draw_rounded_rect(self.screen, self._back_button_rect, bg_color, border_color, 2, 14)
-        label = self._font_small.render("BACK", True, (235, 235, 245))
+        label = self._font_body.render("BACK", True, (235, 235, 245))
         self.screen.blit(label, label.get_rect(center=self._back_button_rect.center))
 
     def _draw_unavailable_message(self) -> None:
@@ -438,20 +455,24 @@ class ModeSelectionScreen:
             icon_surf = self._font_icon.render(icon_str, True, (255, 255, 255))
         except Exception:
             icon_surf = self._font_body.render(icon_str, True, (255, 255, 255))
-        icon_rect = icon_surf.get_rect(centerx=rect.centerx, top=rect.top + 18)
+        icon_rect = icon_surf.get_rect(centerx=rect.centerx, top=rect.top + 12)
         self.screen.blit(icon_surf, icon_rect)
 
         title_color = border_color if hovered else MODE_CARD_TITLE_COLOR
         title_surf = self._font_card_title.render(card["title"], True, title_color)
-        title_rect = title_surf.get_rect(centerx=rect.centerx, top=icon_rect.bottom + 10)
+        title_rect = title_surf.get_rect(centerx=rect.centerx, top=icon_rect.bottom + 8)
         self.screen.blit(title_surf, title_rect)
 
-        desc_surf = self._font_card_desc.render(card["desc"], True, MODE_CARD_DESC_COLOR)
-        desc_rect = desc_surf.get_rect(centerx=rect.centerx, top=title_rect.bottom + 8)
-        self.screen.blit(desc_surf, desc_rect)
+        max_text_width = rect.width - 64
+        desc_lines = self._wrap_card_text(card["desc"], max_text_width)
+        line_y = title_rect.bottom + 8
+        for line in desc_lines[:2]:
+            desc_surf = self._font_card_desc.render(line, True, MODE_CARD_DESC_COLOR)
+            self.screen.blit(desc_surf, desc_surf.get_rect(centerx=rect.centerx, top=line_y))
+            line_y += self._font_card_desc.get_height() + 2
 
         key_surf = self._font_small.render(card["key"], True, border_color)
-        key_rect = key_surf.get_rect(right=rect.right - 12, bottom=rect.bottom - 10)
+        key_rect = key_surf.get_rect(right=rect.right - 14, bottom=rect.bottom - 12)
         self.screen.blit(key_surf, key_rect)
 
     def _fade(self, fade_in: bool) -> None:

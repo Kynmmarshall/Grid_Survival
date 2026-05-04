@@ -72,9 +72,10 @@ class PlayerCardRenderer:
         players: List,
         round_wins: Optional[List[int]] = None,
         target_score: int = 1,
-    ) -> None:
+    ) -> List[pygame.Rect]:
+        occupied_rects: List[pygame.Rect] = []
         if not players:
-            return
+            return occupied_rects
         render_players = list(players)
         rounds = round_wins if isinstance(round_wins, list) else []
         card_w, card_h = CARD_WIDTH, CARD_HEIGHT
@@ -86,7 +87,9 @@ class PlayerCardRenderer:
             wins = int(max(0, rounds[idx])) if idx < len(rounds) else 0
             self._draw_player_card(surface, rects[idx], player, idx, border_color)
             eliminated = bool(getattr(player, "_eliminated", False))
-            self._draw_wins_footer(surface, rects[idx], wins, border_color, eliminated)
+            footer_rect = self._draw_wins_footer(surface, rects[idx], wins, border_color, eliminated)
+            occupied_rects.append(rects[idx].union(footer_rect))
+        return occupied_rects
 
     def _player_card_rects(self, count: int, width: int, height: int) -> List[pygame.Rect]:
         rects: List[pygame.Rect] = []
@@ -194,7 +197,7 @@ class PlayerCardRenderer:
         round_wins: int,
         border_color: tuple,
         eliminated: bool,
-    ) -> None:
+    ) -> pygame.Rect:
         """Draw a large wins number under each player card."""
         wins_text = str(max(0, int(round_wins)))
         wins_surf = self._font_wins.render(wins_text, True, (250, 252, 255))
@@ -213,6 +216,7 @@ class PlayerCardRenderer:
 
         wins_rect = wins_surf.get_rect(center=footer_rect.center)
         surface.blit(wins_surf, wins_rect)
+        return footer_rect
 
     def _draw_eliminated_overlay(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
         overlay = pygame.Surface(rect.size, pygame.SRCALPHA)

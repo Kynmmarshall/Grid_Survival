@@ -229,6 +229,10 @@ class TMXTile:
         self.state = TileState.NORMAL
         self.warning_timer = 0.0
         self.crumble_timer = 0.0
+        self.fall_timer = 0.0
+        self.fall_velocity = 0.0
+        self.fall_offset_y = 0.0
+        self.shake_timer = 0.0
         self.alpha = 255
         self.particles.clear()
 
@@ -441,6 +445,26 @@ class TMXTileManager:
             elif self.time_elapsed > 60 and self.simultaneous_tiles < 4:
                 self.simultaneous_tiles = 3
 
+    def advance_visuals(self, dt: float):
+        """Client-side visual updates without host-only random spawn logic."""
+        for asteroid in list(self.asteroids):
+            hit = asteroid.update(dt)
+            if hit:
+                tile = asteroid.target_tile
+                if tile.state not in (TileState.FALLING, TileState.DISAPPEARED):
+                    tile.state = TileState.FALLING
+                    tile.fall_timer = 0.0
+                    tile.fall_velocity = 0.0
+                    tile.fall_offset_y = 0.0
+                self.asteroids.remove(asteroid)
+            elif not asteroid.active:
+                self.asteroids.remove(asteroid)
+
+        for tile in self.tiles.values():
+            just_disappeared = tile.update(dt)
+            if just_disappeared and tile not in self.disappeared_tiles:
+                self.disappeared_tiles.append(tile)
+
     def _trigger_random_tiles(self):
         """Select random normal tiles and set them to warning state."""
         normal_tiles = [t for t in self.tiles.values() if t.state == TileState.NORMAL]
@@ -544,7 +568,28 @@ class TMXTileManager:
                     "state": tile.state.value,
                     "warning_timer": float(tile.warning_timer),
                     "crumble_timer": float(tile.crumble_timer),
+                    "fall_timer": float(tile.fall_timer),
+                    "fall_velocity": float(tile.fall_velocity),
+                    "fall_offset_y": float(tile.fall_offset_y),
+                    "shake_timer": float(tile.shake_timer),
                     "alpha": int(tile.alpha),
+                }
+            )
+
+        asteroid_states = []
+        for asteroid in self.asteroids:
+            tile = getattr(asteroid, "target_tile", None)
+            if tile is None:
+                continue
+            asteroid_states.append(
+                {
+                    "target_x": int(tile.grid_x),
+                    "target_y": int(tile.grid_y),
+                    "x": float(asteroid.pos.x),
+                    "y": float(asteroid.pos.y),
+                    "radius": int(asteroid.radius),
+                    "speed": float(asteroid.speed),
+                    "active": bool(asteroid.active),
                 }
             )
 
@@ -555,6 +600,7 @@ class TMXTileManager:
             "simultaneous_tiles": int(self.simultaneous_tiles),
             "grace_timer": float(self.grace_timer),
             "tiles": tile_states,
+            "asteroids": asteroid_states,
         }
 
     def apply_snapshot(self, snapshot: dict | None) -> None:
@@ -591,6 +637,36 @@ class TMXTileManager:
                 tile.state = TileState.NORMAL
             tile.warning_timer = float(state.get("warning_timer", 0.0))
             tile.crumble_timer = float(state.get("crumble_timer", 0.0))
+            tile.fall_timer = float(state.get("fall_timer", 0.0))
+            tile.fall_velocity = float(state.get("fall_velocity", 0.0))
+            tile.fall_offset_y = float(state.get("fall_offset_y", 0.0))
+            tile.shake_timer = float(state.get("shake_timer", 0.0))
             tile.alpha = int(state.get("alpha", 255))
             if tile.state == TileState.DISAPPEARED:
                 self.disappeared_tiles.append(tile)
+
+        restored_asteroids: list[Asteroid] = []
+        for asteroid_state in snapshot.get("asteroids", []) or []:
+            if not isinstance(asteroid_state, dict):
+                continue
+
+            key = (
+                int(asteroid_state.get("target_x", -1)),
+                int(asteroid_state.get("target_y", -1)),
+            )
+            target_tile = self.tiles.get(key)
+            if target_tile is None:
+                continue
+
+            asteroid = Asteroid(target_tile)
+            asteroid.pos = pygame.Vector2(
+                float(asteroid_state.get("x", asteroid.pos.x)),
+                float(asteroid_state.get("y", asteroid.pos.y)),
+            )
+            asteroid.radius = int(asteroid_state.get("radius", asteroid.radius))
+            asteroid.speed = float(asteroid_state.get("speed", asteroid.speed))
+            asteroid.active = bool(asteroid_state.get("active", True))
+            asteroid.trail.clear()
+            restored_asteroids.append(asteroid)
+
+        self.asteroids = restored_asteroids

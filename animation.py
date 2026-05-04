@@ -24,7 +24,9 @@ def load_frames_from_directory(directory: Path, scale=None, limit=None):
 
     frames = []
     for path in frame_paths:
-        surface = pygame.image.load(path.as_posix()).convert_alpha()
+        surface = pygame.image.load(path.as_posix())
+        if pygame.display.get_init() and pygame.display.get_surface() is not None:
+            surface = surface.convert_alpha()
         if scale:
             if isinstance(scale, (tuple, list)):
                 surface = pygame.transform.smoothscale(surface, scale)
@@ -60,7 +62,9 @@ def load_frames_from_spritesheet(
     if not sheet_path.exists():
         raise FileNotFoundError(f"Sprite sheet not found: {sheet_path}")
 
-    sheet = pygame.image.load(sheet_path.as_posix()).convert_alpha()
+    sheet = pygame.image.load(sheet_path.as_posix())
+    if pygame.display.get_init() and pygame.display.get_surface() is not None:
+        sheet = sheet.convert_alpha()
     sheet_width, sheet_height = sheet.get_size()
 
     columns = columns or max(1, sheet_width // frame_width)

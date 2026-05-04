@@ -40,7 +40,17 @@ def _detect_display_size() -> tuple[int, int]:
 
 
 WINDOW_SIZE = _detect_display_size()
-WINDOW_FLAGS = pygame.NOFRAME  # borderless windowed mode for easier screen capture
+
+
+def _resolve_window_flags() -> int:
+    """Use a normal window by default; allow opt-in borderless mode for capture/dev."""
+    borderless_value = str(os.getenv("GRID_SURVIVAL_BORDERLESS", "")).strip().lower()
+    if borderless_value in {"1", "true", "yes", "on"}:
+        return pygame.NOFRAME
+    return 0
+
+
+WINDOW_FLAGS = _resolve_window_flags()
 WINDOW_TITLE = "GRID SURVIVAL"
 
 # Define Color Palette
@@ -393,6 +403,9 @@ BACKGROUND_MUSIC_TRACKS = [
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 2.mp3",
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 3.mp3",
 	ASSETS_DIR / "Audio" / "Background" / "Grid survival 4.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 5.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 6.mp3",
+	ASSETS_DIR / "Audio" / "Background" / "Grid survival 7.mp3",
 ]
 TUTORIAL_VIDEO_PATH = ASSETS_DIR / "tutorial" / "1.mp4"
 MUSIC_PATH = BACKGROUND_MUSIC_TRACKS[0]

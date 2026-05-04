@@ -3,18 +3,19 @@ venv/
 .venv/
 env/
 ENV/
+output/
 custom_controls.json
 # Python cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.pyo
-
+custom_controls.json
 # Distribution / packaging
 *.egg-info/
 dist/
 build/
-
+player_accounts.db
 # IDE / editor
 .vscode/
 .idea/
