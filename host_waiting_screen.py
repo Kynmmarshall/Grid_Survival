@@ -103,6 +103,11 @@ def host_waiting_screen(
                 lobby_member_count = None
 
         connected = network.poll_connection()
+        lobby_ready = (
+            lobby_session is not None
+            and lobby_member_count is not None
+            and lobby_member_count >= expected_player_count
+        )
 
         # Resolve dynamic values each tick so background-thread results appear
         # on screen as soon as they become available.
@@ -144,7 +149,7 @@ def host_waiting_screen(
             audio_overlay=audio_overlay,
         )
 
-        if connected:
+        if lobby_ready or (lobby_session is None and connected):
             peer_ip = network.peer_address[0] if network.peer_address else "Unknown"
             for _ in range(24):
                 _draw_waiting_panel(
