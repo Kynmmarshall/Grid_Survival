@@ -15,6 +15,7 @@ MSG_PAUSE_TOGGLE_REQUEST = "pause_toggle_request"
 MSG_PLAYER_SETUP = "player_setup"
 MSG_RESTART_REQUEST = "restart_request"
 MSG_SNAPSHOT = "snapshot"
+MSG_WORLD_DYNAMIC_SNAPSHOT = "world_dynamic_snapshot"
 MSG_WORLD_SNAPSHOT = "world_snapshot"
 
 CRITICAL_MESSAGE_TYPES = frozenset(
@@ -33,6 +34,7 @@ LATEST_ONLY_MESSAGE_TYPES = frozenset(
     {
         MSG_INPUT_STATE,
         MSG_SNAPSHOT,
+        MSG_WORLD_DYNAMIC_SNAPSHOT,
         MSG_WORLD_SNAPSHOT,
     }
 )
@@ -41,6 +43,7 @@ UNRELIABLE_MESSAGE_TYPES = frozenset(
     {
         MSG_INPUT_STATE,
         MSG_SNAPSHOT,
+        MSG_WORLD_DYNAMIC_SNAPSHOT,
         MSG_WORLD_SNAPSHOT,
     }
 )

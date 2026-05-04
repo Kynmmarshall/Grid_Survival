@@ -157,6 +157,7 @@ class NetworkManager:
             latest_input = self._latest_messages.pop("input_state", None)
             latest_snapshot = self._latest_messages.pop("snapshot", None)
             latest_world = self._latest_messages.pop("world_snapshot", None)
+            latest_world_dynamic = self._latest_messages.pop("world_dynamic_snapshot", None)
 
         if latest_input is not None:
             messages.append(latest_input)
@@ -164,6 +165,8 @@ class NetworkManager:
             messages.append(latest_snapshot)
         if latest_world is not None:
             messages.append(latest_world)
+        if latest_world_dynamic is not None:
+            messages.append(latest_world_dynamic)
         return messages
 
     def _start_threads(self) -> None:
