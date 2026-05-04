@@ -40,7 +40,17 @@ def _detect_display_size() -> tuple[int, int]:
 
 
 WINDOW_SIZE = _detect_display_size()
-WINDOW_FLAGS = pygame.NOFRAME  # borderless windowed mode for easier screen capture
+
+
+def _resolve_window_flags() -> int:
+    """Use a normal window by default; allow opt-in borderless mode for capture/dev."""
+    borderless_value = str(os.getenv("GRID_SURVIVAL_BORDERLESS", "")).strip().lower()
+    if borderless_value in {"1", "true", "yes", "on"}:
+        return pygame.NOFRAME
+    return 0
+
+
+WINDOW_FLAGS = _resolve_window_flags()
 WINDOW_TITLE = "GRID SURVIVAL"
 
 # Define Color Palette

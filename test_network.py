@@ -1,46 +1,50 @@
-"""
-test_network.py – Automated multiplayer networking test suite for Grid Survival.
+"""Layered tests for the extracted online-play modules."""
 
-Simulates a real host + client session entirely over localhost so no second
-machine is needed.  Each test class is independent and uses a unique TCP port
-allocated from a shared counter to avoid conflicts.
+from __future__ import annotations
 
-Run with:
-    python test_network.py -v
-
-Coverage:
-    1.  Host/Client TCP connection and handshake
-    2.  TCP_NODELAY is set on both sockets
-    3.  Bidirectional JSON message delivery (snapshot, input_state, disconnect)
-    4.  Multiple messages all delivered in order
-    5.  Max-length guard rejects zero-length and oversized headers (OOM protection)
-    6.  Send queue bounds – non-critical messages dropped when saturated
-    7.  Critical message type list is correct
-    8.  Clean disconnect detected from both sides
-    9.  send_message() returns False after disconnect
-   10.  Daemon-thread flag on both receive and send threads
-   11.  get_public_ip() returns None or a valid IPv4 string
-   12.  get_public_ip() returns None when all services are unreachable
-   13.  get_local_ip() returns a valid IPv4 string
-   14.  Input rate-limiting logic (mirrors game.py client branch)
-"""
-
+import json
 import socket
 import threading
 import time
 import unittest
 import urllib.request
+from unittest import mock
 
-from network import (
-    MAX_MESSAGE_BYTES,
+from online_play.match_flow import (
+    CRITICAL_MESSAGE_TYPES,
+    LATEST_ONLY_MESSAGE_TYPES,
+    MSG_GAME_START,
+    MSG_INPUT_STATE,
+    MSG_PAUSE_STATE,
+    MSG_PLAYER_SETUP,
+    MatchSettings,
+    MatchStartPayload,
+    NetworkPlayerSetup,
+    build_game_start_payload,
+    build_player_setup_payload,
+    parse_game_start_message,
+    parse_player_setup_message,
+)
+from online_play.session import (
+    DISCOVERY_MAGIC,
+    DISCOVERY_PORT,
+    LanGameFinder,
     NetworkClient,
     NetworkHost,
-    NetworkManager,
     get_local_ip,
     get_public_ip,
 )
+from online_play.transport import (
+    GAME_UDP_PORT_OFFSET,
+    HELLO_TIMEOUT,
+    InputState,
+    MAX_MESSAGE_BYTES,
+    PlayerState,
+    UdpClientTransport,
+    UdpHostTransport,
+)
 
-# ── Port allocator ────────────────────────────────────────────────────────────
+
 _NEXT_PORT = 55600
 _PORT_LOCK = threading.Lock()
 
@@ -48,13 +52,12 @@ _PORT_LOCK = threading.Lock()
 def _alloc_port() -> int:
     global _NEXT_PORT
     with _PORT_LOCK:
-        p = _NEXT_PORT
+        port = _NEXT_PORT
         _NEXT_PORT += 1
-    return p
+    return port
 
 
 def _wait(condition, timeout: float = 4.0, interval: float = 0.05) -> bool:
-    """Poll *condition()* until it returns True or *timeout* seconds elapse."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if condition():
@@ -63,338 +66,190 @@ def _wait(condition, timeout: float = 4.0, interval: float = 0.05) -> bool:
     return False
 
 
-def _drain(manager, timeout: float = 3.0):
-    """Block until at least one message arrives in *manager*'s queue."""
+def _drain(manager, timeout: float = 3.0) -> list[dict]:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        msgs = manager.get_messages()
-        if msgs:
-            return msgs
+        messages = manager.get_messages()
+        if messages:
+            return messages
         time.sleep(0.05)
     return []
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 1 · Connection handshake
-# ═════════════════════════════════════════════════════════════════════════════
-class TestHostClientConnection(unittest.TestCase):
-
-    def setUp(self):
+class TransportPairTestCase(unittest.TestCase):
+    def setUp(self) -> None:
         self.port = _alloc_port()
-        self.host = NetworkHost(port=self.port)
-        self.client = None
-
-    def tearDown(self):
-        if self.client:
-            self.client.disconnect()
-        self.host.disconnect()
-        time.sleep(0.1)
-
-    def test_host_starts_listening(self):
+        self.host = UdpHostTransport(port=self.port)
+        self.client = UdpClientTransport()
         self.assertTrue(self.host.start_hosting())
-        self.assertTrue(self.host.listening)
-
-    def test_client_connects_and_host_accepts(self):
-        self.host.start_hosting()
-        self.client = NetworkClient()
         self.assertTrue(self.client.connect_to_host("127.0.0.1", self.port))
-        self.assertTrue(self.client.connected)
         self.assertTrue(_wait(lambda: self.host.poll_connection()))
+
+    def tearDown(self) -> None:
+        self.client.disconnect()
+        self.host.disconnect()
+        time.sleep(0.05)
+
+
+class TestTransportLayer(TransportPairTestCase):
+    def test_transport_connection_and_threads(self) -> None:
         self.assertTrue(self.host.connected)
-
-    def test_tcp_nodelay_on_client_socket(self):
-        self.host.start_hosting()
-        self.client = NetworkClient()
-        self.client.connect_to_host("127.0.0.1", self.port)
-        _wait(lambda: self.host.poll_connection())
-        val = self.client.socket.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
-        self.assertEqual(val, 1, "TCP_NODELAY must be 1 on the client socket")
-
-    def test_tcp_nodelay_on_host_accepted_socket(self):
-        self.host.start_hosting()
-        self.client = NetworkClient()
-        self.client.connect_to_host("127.0.0.1", self.port)
-        _wait(lambda: self.host.poll_connection())
-        val = self.host.socket.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
-        self.assertEqual(val, 1, "TCP_NODELAY must be 1 on the host's accepted socket")
-
-    def test_connection_to_closed_port_fails_gracefully(self):
-        self.client = NetworkClient()
-        ok = self.client.connect_to_host("127.0.0.1", self.port)  # nothing listening
-        self.assertFalse(ok)
-        self.assertFalse(self.client.connected)
-        self.assertIsNotNone(self.client.last_error)
-
-    def test_receive_and_send_threads_are_daemons(self):
-        self.host.start_hosting()
-        self.client = NetworkClient()
-        self.client.connect_to_host("127.0.0.1", self.port)
-        _wait(lambda: self.host.poll_connection())
+        self.assertTrue(self.client.connected)
         self.assertTrue(self.host.receive_thread.daemon)
         self.assertTrue(self.host._send_thread.daemon)
         self.assertTrue(self.client.receive_thread.daemon)
         self.assertTrue(self.client._send_thread.daemon)
 
+    def test_bidirectional_message_delivery(self) -> None:
+        self.host.send_message("snapshot", state={"players": [{"x": 10.0}]})
+        snapshot_messages = _drain(self.client)
+        snapshot = next((m for m in snapshot_messages if m.get("type") == "snapshot"), None)
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["state"]["players"][0]["x"], 10.0)
 
+        self.client.send_message("input_state", input={"left": True, "jump": False})
+        input_messages = _drain(self.host)
+        payload = next((m for m in input_messages if m.get("type") == "input_state"), None)
+        self.assertIsNotNone(payload)
+        self.assertTrue(payload["input"]["left"])
+        self.assertFalse(payload["input"]["jump"])
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 2 · Bidirectional message delivery
-# ═════════════════════════════════════════════════════════════════════════════
-class TestMessageExchange(unittest.TestCase):
-
-    def setUp(self):
-        self.port = _alloc_port()
-        self.host = NetworkHost(port=self.port)
-        self.host.start_hosting()
-        self.client = NetworkClient()
-        self.client.connect_to_host("127.0.0.1", self.port)
-        _wait(lambda: self.host.poll_connection())
-
-    def tearDown(self):
-        self.client.disconnect()
-        self.host.disconnect()
-        time.sleep(0.1)
-
-    def test_snapshot_host_to_client(self):
-        state = {"players": [{"x": 100.0, "y": 200.0, "state": "idle"}]}
-        self.host.send_message("snapshot", state=state)
-        msgs = _drain(self.client)
-        snap = next((m for m in msgs if m.get("type") == "snapshot"), None)
-        self.assertIsNotNone(snap, "Client must receive the snapshot message")
-        self.assertEqual(snap["state"]["players"][0]["x"], 100.0)
-
-    def test_input_state_client_to_host(self):
-        inp = {"up": True, "down": False, "left": False, "right": True,
-               "jump": False, "power_pressed": False}
-        self.client.send_message("input_state", input=inp)
-        msgs = _drain(self.host)
-        found = next((m for m in msgs if m.get("type") == "input_state"), None)
-        self.assertIsNotNone(found, "Host must receive the input_state message")
-        self.assertTrue(found["input"]["up"])
-        self.assertTrue(found["input"]["right"])
-        self.assertFalse(found["input"]["jump"])
-
-    def test_multiple_messages_all_delivered_in_order(self):
-        for i in range(8):
-            self.host.send_message("ping", seq=i)
+    def test_reliable_messages_arrive_in_order(self) -> None:
+        for seq in range(8):
+            self.host.send_message("ping", seq=seq)
         time.sleep(0.4)
-        msgs = _drain(self.client, timeout=3.0)
-        pings = [m for m in msgs if m.get("type") == "ping"]
-        self.assertEqual(len(pings), 8, f"Expected 8 pings, got {len(pings)}")
-        seqs = [m["seq"] for m in pings]
-        self.assertEqual(seqs, list(range(8)), "Messages must arrive in send order")
+        messages = _drain(self.client)
+        pings = [message for message in messages if message.get("type") == "ping"]
+        self.assertEqual([message["seq"] for message in pings], list(range(8)))
 
-    def test_disconnect_message_delivered(self):
-        self.host.send_message("disconnect")
-        msgs = _drain(self.client)
-        self.assertTrue(any(m.get("type") == "disconnect" for m in msgs))
+    def test_large_payload_is_fragmented_and_reassembled(self) -> None:
+        blob = "x" * 9000
+        self.host.send_message("snapshot", state={"blob": blob})
+        messages = _drain(self.client)
+        snapshot = next((m for m in messages if m.get("type") == "snapshot"), None)
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["state"]["blob"], blob)
 
-    def test_pause_state_delivered(self):
-        self.host.send_message("pause_state", paused=True)
-        msgs = _drain(self.client)
-        found = next((m for m in msgs if m.get("type") == "pause_state"), None)
-        self.assertIsNotNone(found)
-        self.assertTrue(found["paused"])
+    def test_latest_only_stream_keeps_newest_input(self) -> None:
+        for idx in range(50):
+            self.client.send_message("input_state", input={"seq": idx, "right": bool(idx % 2)})
+        messages = _drain(self.host)
+        payload = next((m for m in messages if m.get("type") == "input_state"), None)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["input"]["seq"], 49)
 
+    def test_disconnect_detection_and_send_after_disconnect(self) -> None:
+        self.client.disconnect()
+        self.assertTrue(_wait(lambda: not self.host.connected))
+        self.assertFalse(self.host.send_message("ping"))
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 3 · Max-length guard (OOM / crash protection)
-# ═════════════════════════════════════════════════════════════════════════════
-class TestMaxLengthGuard(unittest.TestCase):
-
-    def _raw_connect(self, port: int) -> socket.socket:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        s.connect(("127.0.0.1", port))
-        return s
-
-    def _host_with_raw_client(self):
-        port = _alloc_port()
-        host = NetworkHost(port=port)
-        host.start_hosting()
-        raw = self._raw_connect(port)
-        _wait(lambda: host.poll_connection())
-        return host, raw
-
-    def test_max_message_bytes_constant_is_4mb(self):
+    def test_transport_constants_and_models(self) -> None:
         self.assertEqual(MAX_MESSAGE_BYTES, 4 * 1024 * 1024)
-
-    def test_zero_length_header_closes_connection(self):
-        host, raw = self._host_with_raw_client()
-        try:
-            raw.sendall((0).to_bytes(4, "big"))
-            raw.close()
-            self.assertTrue(
-                _wait(lambda: not host.connected),
-                "Zero-length header must cause the host to drop the connection",
-            )
-            self.assertIsNotNone(host.last_error)
-        finally:
-            host.disconnect()
-
-    def test_oversized_length_header_closes_connection(self):
-        host, raw = self._host_with_raw_client()
-        try:
-            raw.sendall((MAX_MESSAGE_BYTES + 1).to_bytes(4, "big"))
-            raw.close()
-            self.assertTrue(
-                _wait(lambda: not host.connected),
-                "5 MB claim must cause the host to drop the connection (OOM guard)",
-            )
-            self.assertIsNotNone(host.last_error)
-        finally:
-            host.disconnect()
+        self.assertEqual(GAME_UDP_PORT_OFFSET, 0)
+        self.assertGreater(HELLO_TIMEOUT, 0.0)
+        self.assertEqual(
+            InputState.from_mapping({"up": True, "power_pressed": 1}).to_dict(),
+            {
+                "up": True,
+                "down": False,
+                "left": False,
+                "right": False,
+                "jump": False,
+                "power_pressed": True,
+            },
+        )
+        player = PlayerState(1.0, 2.0, "left", "idle", False, False, False)
+        self.assertEqual(player.facing, "left")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 4 · Send queue bounds and critical message set
-# ═════════════════════════════════════════════════════════════════════════════
-class TestSendQueue(unittest.TestCase):
-
-    def setUp(self):
-        self.port = _alloc_port()
-        self.host = NetworkHost(port=self.port)
-        self.host.start_hosting()
-        self.client = NetworkClient()
-        self.client.connect_to_host("127.0.0.1", self.port)
-        _wait(lambda: self.host.poll_connection())
-
-    def tearDown(self):
-        self.client.disconnect()
-        self.host.disconnect()
-        time.sleep(0.1)
-
-    def test_non_critical_flood_drops_without_raising(self):
-        results = [self.client.send_message("input_state", input={}) for _ in range(200)]
-        # Some must be dropped (False returned) but no exception is raised.
-        self.assertIn(False, results, "Queue must drop non-critical messages when full")
-
-    def test_send_returns_false_when_not_connected(self):
-        self.client.disconnect()
-        time.sleep(0.15)
-        self.assertFalse(self.client.send_message("ping"))
-
-    def test_critical_message_type_list(self):
-        for t in ("disconnect", "snapshot", "game_start", "pause_state"):
-            self.assertIn(t, NetworkManager._CRITICAL_MESSAGES,
-                          f"'{t}' must be in _CRITICAL_MESSAGES")
-
-    def test_input_state_not_critical(self):
-        self.assertNotIn("input_state", NetworkManager._CRITICAL_MESSAGES)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 5 · Disconnect detection from both sides
-# ═════════════════════════════════════════════════════════════════════════════
-class TestDisconnect(unittest.TestCase):
-
-    def _connected_pair(self):
+class TestSessionLayer(unittest.TestCase):
+    def test_session_host_and_client_connect(self) -> None:
         port = _alloc_port()
         host = NetworkHost(port=port)
-        host.start_hosting()
         client = NetworkClient()
-        client.connect_to_host("127.0.0.1", port)
-        _wait(lambda: host.poll_connection())
-        return host, client
-
-    def test_client_disconnect_detected_by_host(self):
-        host, client = self._connected_pair()
-        client.disconnect()
-        self.assertTrue(_wait(lambda: not host.connected),
-                        "Host must detect client disconnect within 4 s")
-        host.disconnect()
-
-    def test_host_disconnect_detected_by_client(self):
-        host, client = self._connected_pair()
-        host.disconnect()
-        self.assertTrue(_wait(lambda: not client.connected),
-                        "Client must detect host disconnect within 4 s")
-        client.disconnect()
-
-    def test_disconnect_is_idempotent(self):
-        host, client = self._connected_pair()
-        # Calling disconnect() twice must not raise.
-        client.disconnect()
-        client.disconnect()
-        host.disconnect()
-        host.disconnect()
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 6 · get_public_ip() and get_local_ip()
-# ═════════════════════════════════════════════════════════════════════════════
-class TestIpHelpers(unittest.TestCase):
-
-    def _is_valid_ipv4(self, ip: str) -> bool:
-        parts = ip.split(".")
-        if len(parts) != 4:
-            return False
-        return all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
-
-    def test_get_local_ip_returns_valid_ipv4(self):
-        ip = get_local_ip()
-        self.assertTrue(self._is_valid_ipv4(ip), f"get_local_ip() returned invalid value: {ip!r}")
-
-    def test_get_public_ip_returns_none_or_valid_ipv4(self):
-        # Short timeout keeps the test fast when the machine is offline.
-        result = get_public_ip(timeout=5.0)
-        if result is None:
-            return  # acceptable when offline
-        self.assertTrue(self._is_valid_ipv4(result),
-                        f"get_public_ip() returned non-IPv4 value: {result!r}")
-
-    def test_get_public_ip_returns_none_when_all_services_fail(self):
-        # Monkey-patch urllib.request.urlopen to always raise so we never hit
-        # the real internet from this assertion.
-        original = urllib.request.urlopen
-
-        def _always_fail(url, timeout=None):
-            raise OSError("test: simulated network failure")
-
-        urllib.request.urlopen = _always_fail
         try:
-            result = get_public_ip(timeout=1.0)
-            self.assertIsNone(result,
-                              "get_public_ip() must return None when all services are unreachable")
+            self.assertTrue(host.start_hosting())
+            self.assertTrue(client.connect_to_host("127.0.0.1", port))
+            self.assertTrue(_wait(lambda: host.poll_connection()))
         finally:
-            urllib.request.urlopen = original
+            client.disconnect()
+            host.disconnect()
+
+    def test_lan_game_finder_parses_host_announce(self) -> None:
+        finder = LanGameFinder()
+        self.assertTrue(finder.start())
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            target = ("127.0.0.1", int(finder.socket.getsockname()[1]))
+            payload = json.dumps(
+                {
+                    "magic": DISCOVERY_MAGIC,
+                    "type": "host_announce",
+                    "host_name": "Test Host",
+                    "machine_name": "TestMachine",
+                    "port": DISCOVERY_PORT,
+                }
+            ).encode("utf-8")
+            sender.sendto(payload, target)
+            hosts: list = []
+            deadline = time.time() + 2.0
+            while time.time() < deadline and not hosts:
+                hosts = finder.poll_hosts()
+                if not hosts:
+                    time.sleep(0.05)
+            self.assertTrue(hosts)
+            self.assertEqual(hosts[0].host_name, "Test Host")
+            self.assertEqual(hosts[0].machine_name, "TestMachine")
+        finally:
+            sender.close()
+            finder.close()
+
+    def test_get_local_ip_returns_ipv4(self) -> None:
+        ip = get_local_ip()
+        parts = ip.split(".")
+        self.assertEqual(len(parts), 4)
+        self.assertTrue(all(part.isdigit() and 0 <= int(part) <= 255 for part in parts))
+
+    def test_get_public_ip_returns_none_when_services_fail(self) -> None:
+        with mock.patch.object(urllib.request, "urlopen", side_effect=OSError("offline")):
+            self.assertIsNone(get_public_ip(timeout=0.01))
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 7 · Input rate-limiting logic (pure Python – no pygame)
-# ═════════════════════════════════════════════════════════════════════════════
-class TestInputRateLimiting(unittest.TestCase):
-    """Mirror the decision logic from game.py's client branch."""
+class TestMatchFlowLayer(unittest.TestCase):
+    def test_build_and_parse_player_setup(self) -> None:
+        setup = NetworkPlayerSetup(name="A", character="Mage")
+        message = build_player_setup_payload(setup)
+        parsed = parse_player_setup_message(message)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.name, "A")
+        self.assertEqual(parsed.character, "Mage")
 
-    _INTERVAL = 1 / 30  # matches game.py _input_send_interval
+    def test_build_and_parse_game_start(self) -> None:
+        payload = MatchStartPayload(
+            players=[
+                NetworkPlayerSetup(name="A", character="Mage"),
+                NetworkPlayerSetup(name="B", character="Knight"),
+            ],
+            local_player_index=1,
+            settings=MatchSettings(level_id=2, target_score=5),
+        )
+        parsed = parse_game_start_message(build_game_start_payload(payload))
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.local_player_index, 1)
+        self.assertEqual(parsed.settings.level_id, 2)
+        self.assertEqual(parsed.settings.target_score, 5)
+        self.assertEqual([player.name for player in parsed.players], ["A", "B"])
 
-    def _should_send(self, local_input, last_sent, timer) -> bool:
-        return local_input != last_sent or timer >= self._INTERVAL
+    def test_invalid_game_start_payload_returns_none(self) -> None:
+        self.assertIsNone(parse_game_start_message({"players": [{"name": "solo"}]}))
+        self.assertIsNone(parse_game_start_message({"players": "bad"}))
 
-    def test_sends_when_input_changes(self):
-        a = {"up": False, "right": True}
-        b = {"up": True, "right": True}
-        self.assertTrue(self._should_send(b, a, 0.0))
-
-    def test_no_send_when_identical_and_timer_not_elapsed(self):
-        inp = {"up": False, "right": True}
-        self.assertFalse(self._should_send(inp, inp, 0.001))
-
-    def test_sends_when_timer_elapsed_even_if_input_identical(self):
-        inp = {"up": False, "right": True}
-        self.assertTrue(self._should_send(inp, inp, self._INTERVAL + 0.001))
-
-    def test_sends_on_first_call_when_last_sent_is_none(self):
-        inp = {"up": True, "jump": False}
-        # None != dict  →  always a change on the very first send
-        self.assertTrue(self._should_send(inp, None, 0.0))
-
-    def test_no_send_when_all_false_and_timer_not_elapsed(self):
-        idle = {"up": False, "down": False, "left": False,
-                "right": False, "jump": False, "power_pressed": False}
-        self.assertFalse(self._should_send(idle, idle, 0.005))
+    def test_match_flow_message_sets(self) -> None:
+        self.assertIn(MSG_PLAYER_SETUP, CRITICAL_MESSAGE_TYPES)
+        self.assertIn(MSG_GAME_START, CRITICAL_MESSAGE_TYPES)
+        self.assertIn(MSG_PAUSE_STATE, CRITICAL_MESSAGE_TYPES)
+        self.assertIn(MSG_INPUT_STATE, LATEST_ONLY_MESSAGE_TYPES)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,4 +1,7 @@
 import math
+import random
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +126,9 @@ class GameManager:
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
         self._client_remote_extrapolation_cap = 1 / 16
+        self._network_disconnect_started_at: float | None = None
+        self._network_last_reconnect_attempt_at = 0.0
+        self._network_reconnect_thread: threading.Thread | None = None
         # Rate-limiting for client input messages: only send when the state
         # changes or when the minimum interval has elapsed (60 Hz cap).
         self._input_send_timer: float = 0.0
@@ -215,8 +221,7 @@ class GameManager:
                     for key, value in DEFAULT_CONTROLS.items()
                 }
 
-            slot_count = max(2, min(4, len(self.selected_characters) or 2))
-            for idx in range(slot_count):
+            for idx in range(2):
                 control_key = f"player{idx + 1}"
                 controls = dict(
                     custom_controls.get(
@@ -352,8 +357,34 @@ class GameManager:
 
         if self.is_network_game:
             if not self.network or not self.network.connected:
-                self.running = False
+                now = time.time()
+                if self._network_disconnect_started_at is None:
+                    self._network_disconnect_started_at = now
+                    self._network_last_reconnect_attempt_at = 0.0
+                    print(f"[NETWORK] Disconnected at time={self._time_since_start:.1f}s, will attempt reconnect", flush=True)
+
+                disconnect_duration = now - self._network_disconnect_started_at
+
+                if not self._network_reconnect_thread or not self._network_reconnect_thread.is_alive():
+                    self._network_reconnect_thread = threading.Thread(
+                        target=self._start_network_reconnect_worker,
+                        daemon=True,
+                    )
+                    self._network_reconnect_thread.start()
+
+                # Log disconnect duration
+                if int(disconnect_duration) % 5 == 0 and disconnect_duration > 0:
+                    print(f"[NETWORK] Disconnected for {disconnect_duration:.1f}s, status=DISCONNECTED, dt={dt:.1f}ms", flush=True)
+
+                if disconnect_duration > 15.0:
+                    print(f"[NETWORK] Timeout after {disconnect_duration:.1f}s, exiting", flush=True)
+                    self.running = False
                 return
+
+            self._network_disconnect_started_at = None
+            self._network_last_reconnect_attempt_at = 0.0
+            if self._network_reconnect_thread and not self._network_reconnect_thread.is_alive():
+                self._network_reconnect_thread = None
 
             self._process_network_messages()
             if not self.running or not self.network.connected:
@@ -670,8 +701,16 @@ class GameManager:
         latest_world_dynamic_snapshot = None
         latest_match_result = None
         saw_disconnect = False
+        message_count = 0
+        
+        # Diagnostic: Track message arrival
+        debug_msg_types = []
+        
         for message in self.network.get_messages():
+            message_count += 1
             message_type = message.get("type")
+            debug_msg_types.append(message_type)
+            
             if message_type == "disconnect":
                 saw_disconnect = True
                 continue
@@ -686,13 +725,20 @@ class GameManager:
             elif self.is_network_host and message_type == "power_use_request":
                 self._pending_remote_power_uses = min(8, self._pending_remote_power_uses + 1)
             elif (not self.is_network_host) and message_type == "snapshot":
-                latest_snapshot = message.get("state")
+                latest_snapshot = message.get("state") if isinstance(message.get("state"), dict) else message
             elif (not self.is_network_host) and message_type == "world_snapshot":
-                latest_world_snapshot = message.get("state")
+                latest_world_snapshot = message.get("state") if isinstance(message.get("state"), dict) else message
             elif (not self.is_network_host) and message_type == "world_dynamic_snapshot":
-                latest_world_dynamic_snapshot = message.get("state")
+                latest_world_dynamic_snapshot = message.get("state") if isinstance(message.get("state"), dict) else message
             elif (not self.is_network_host) and message_type == "match_result":
-                latest_match_result = message.get("state")
+                latest_match_result = message.get("state") if isinstance(message.get("state"), dict) else message
+        
+        # Diagnostic: Log message batch info
+        if message_count > 0:
+            try:
+                print(f"[DIAG] ProcessMessages: got {message_count} messages, types={set(debug_msg_types)}, snap={latest_snapshot is not None}, world_snap={latest_world_snapshot is not None}", flush=True)
+            except Exception:
+                pass
 
         if latest_snapshot is not None:
             self._apply_network_snapshot(latest_snapshot)
@@ -703,7 +749,13 @@ class GameManager:
         if latest_match_result is not None:
             self._apply_network_match_result(latest_match_result)
         if saw_disconnect:
-            self.running = False
+            now = time.time()
+            if self._network_disconnect_started_at is None:
+                self._network_disconnect_started_at = now
+            try:
+                print("[DEBUG] network disconnect received; entering reconnect grace", flush=True)
+            except Exception:
+                pass
             return
 
     def _build_local_input_state(self, keys) -> dict:
@@ -921,6 +973,13 @@ class GameManager:
         if not isinstance(snapshot, dict):
             return
 
+        # Diagnostic: snapshot receipt timing
+        snapshot_time = float(snapshot.get("time_since_start", -1.0))
+        try:
+            print(f"[SNAPSHOT] Received snap: round_seq={snapshot.get('round_seq')}, time={snapshot_time:.3f}s, players_count={len(snapshot.get('players', []))}, has_hazards={bool(snapshot.get('hazards'))}", flush=True)
+        except Exception:
+            pass
+
         incoming_round_seq = self._parse_round_seq(
             snapshot.get("round_seq", self._last_client_snapshot_round_seq),
             self._last_client_snapshot_round_seq if self._last_client_snapshot_round_seq >= 0 else self._network_round_seq,
@@ -1026,9 +1085,16 @@ class GameManager:
             applied_any = True
         if (
             "pacman_enemies" in snapshot
-            and self.pacman_enemy_manager
             and incoming_time + epsilon >= self._last_client_pacman_snapshot_time
         ):
+            if self.pacman_enemy_manager is None:
+                enemy_states = snapshot.get("pacman_enemies", {}).get("enemies", []) or []
+                spawn_positions = [
+                    (int(round(state.get("x", PLAYER_START_POS[0]))), int(round(state.get("y", PLAYER_START_POS[1]))))
+                    for state in enemy_states
+                    if isinstance(state, dict)
+                ] or [PLAYER_START_POS]
+                self.pacman_enemy_manager = PacmanEnemyManager(spawn_positions)
             self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
             self._last_client_pacman_snapshot_time = incoming_time
             applied_any = True
@@ -2166,17 +2232,61 @@ class GameManager:
 
     def _restart_network_round(self, reset_match: bool = False):
         """Host-authoritative restart path for LAN games."""
+        self._network_round_seq += 1
         self._restart_game(reset_match=reset_match)
         if self.is_network_game and self.is_network_host and self.network and self.network.connected:
             self._snapshot_send_timer = 0.0
             self._world_dynamic_snapshot_send_timer = 0.0
             self._world_snapshot_send_timer = 0.0
+            try:
+                print(f"[NETWORK] Advancing to round_seq={self._network_round_seq} reset_match={reset_match}", flush=True)
+            except Exception:
+                pass
             self.network.send_message("snapshot", state=self._build_network_snapshot())
             self.network.send_message(
                 "world_dynamic_snapshot",
                 state=self._build_network_dynamic_world_snapshot(),
             )
             self.network.send_message("world_snapshot", state=self._build_network_world_snapshot())
+
+    def _start_network_reconnect_worker(self) -> None:
+        if self._network_reconnect_thread and self._network_reconnect_thread.is_alive():
+            return
+
+        def worker() -> None:
+            attempt = 0
+            while self.running and self.is_network_game and self.network and not self.network.connected:
+                base_delay = min(4.0, 0.35 * (2 ** attempt))
+                jitter = random.uniform(0.0, min(0.75, base_delay * 0.4))
+                delay = base_delay + jitter
+                try:
+                    print(f"[NETWORK] Reconnect worker attempt={attempt + 1} sleep={delay:.2f}s", flush=True)
+                except Exception:
+                    pass
+                time.sleep(delay)
+                if not self.running or not self.is_network_game or not self.network or self.network.connected:
+                    break
+                try:
+                    if self.network.reconnect(attempts=1):
+                        try:
+                            print(f"[NETWORK] Reconnected at time={self._time_since_start:.1f}s", flush=True)
+                        except Exception:
+                            pass
+                        self._network_disconnect_started_at = None
+                        self._network_last_reconnect_attempt_at = 0.0
+                        return
+                except Exception as exc:
+                    try:
+                        print(f"[NETWORK] Reconnect attempt failed: {exc}", flush=True)
+                    except Exception:
+                        pass
+                attempt += 1
+
+            try:
+                print("[NETWORK] Reconnect worker exited", flush=True)
+            except Exception:
+                pass
+            self._network_reconnect_thread = None
 
     def _force_safe_spawns(self):
         """Clamp every player to a valid walkable tile and clear fall/drown flags."""
@@ -2474,17 +2584,40 @@ class GameManager:
         return self.selected_characters[-1]
 
     def run(self):
+        frame_count = 0
+        last_diag_time = time.time()
+        
         while self.running:
+            frame_start = time.time()
             dt = self.clock.tick(TARGET_FPS) / 1000.0
+            frame_count += 1
+            
             update_online_status(dt)
             self.handle_events()
             keys = pygame.key.get_pressed()
             self.update(dt, keys)
             self.draw()
+            
+            # Diagnostic: Report frame timing every 30 frames (~0.5s at 60fps)
+            now = time.time()
+            if now - last_diag_time >= 0.5:
+                frame_elapsed = (now - frame_start) * 1000.0
+                try:
+                    if self.is_network_game:
+                        conn_status = "CONNECTED" if (self.network and self.network.connected) else "DISCONNECTED"
+                        queue_depth = len(self.network.incoming_messages) if (self.network and hasattr(self.network, 'incoming_messages')) else 0
+                        print(f"[DIAG] Frame {frame_count}: dt={dt*1000:.1f}ms, elapsed={frame_elapsed:.1f}ms, status={conn_status}, queue_depth={queue_depth}", flush=True)
+                except Exception:
+                    pass
+                last_diag_time = now
 
         if hasattr(self, "audio"):
             self.audio.stop_music()
         if self.network:
+            try:
+                print("[DIAG] Game shutting down, disconnecting network", flush=True)
+            except Exception:
+                pass
             self.network.disconnect()
             
         if getattr(self, "return_to_main_menu", False):
