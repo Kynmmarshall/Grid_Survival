@@ -72,13 +72,17 @@ class MatchStartPayload:
     players: list[NetworkPlayerSetup]
     local_player_index: int
     settings: MatchSettings
+    player_count: int | None = None
 
     def to_message(self) -> dict[str, Any]:
-        return {
+        payload = {
             "players": [player.to_message() for player in self.players],
             "local_player_index": int(self.local_player_index),
             **self.settings.to_message(),
         }
+        if self.player_count is not None:
+            payload["player_count"] = int(self.player_count)
+        return payload
 
 
 def build_player_setup_payload(player: NetworkPlayerSetup) -> dict[str, Any]:
@@ -107,11 +111,11 @@ def parse_game_start_message(message: Any) -> MatchStartPayload | None:
     if not isinstance(message, dict):
         return None
     raw_players = message.get("players")
-    if not isinstance(raw_players, list) or len(raw_players) < 2:
+    if not isinstance(raw_players, list) or len(raw_players) < 1:
         return None
 
     players: list[NetworkPlayerSetup] = []
-    for idx, entry in enumerate(raw_players[:2]):
+    for idx, entry in enumerate(raw_players):
         if not isinstance(entry, dict):
             return None
         players.append(
@@ -128,6 +132,13 @@ def parse_game_start_message(message: Any) -> MatchStartPayload | None:
     except (TypeError, ValueError):
         return None
 
+    player_count = message.get("player_count")
+    if player_count is not None:
+        try:
+            player_count = int(player_count)
+        except (TypeError, ValueError):
+            player_count = None
+
     return MatchStartPayload(
         players=players,
         local_player_index=local_player_index,
@@ -135,4 +146,5 @@ def parse_game_start_message(message: Any) -> MatchStartPayload | None:
             level_id=level_id,
             target_score=target_score,
         ),
+        player_count=player_count,
     )

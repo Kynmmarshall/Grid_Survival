@@ -33,6 +33,7 @@ from .match_flow import (
     parse_player_setup_message,
 )
 from .internet_session import InternetSessionClient
+from .lan_lobby_session import LAN_LOBBY_PORT, LanLobbyClientSession, LanLobbyHostSession
 from .session import NetworkClient, NetworkHost, get_local_ip, get_public_ip
 
 
@@ -45,6 +46,7 @@ class OnlineSessionSelection:
     selected_player_count: int = 2
     selected_characters: list[str] | None = None
     network_player_names: list[str] | None = None
+    lobby_session: Any | None = None
     requires_match_start: bool = True
 
 
@@ -239,6 +241,7 @@ def wait_for_online_match_start(
                         level_id=int(selected_level_id),
                         target_score=int(selected_target_score),
                     ),
+                    player_count=max(2, min(4, int(selected_player_count))),
                 )
                 network.send_message(
                     "game_start",
@@ -292,6 +295,8 @@ def _resolve_host_waiting_screen(
     screen,
     clock,
     network: NetworkHost,
+    expected_player_count: int,
+    lobby_session: Any | None = None,
 ) -> bool:
     host_ip = get_local_ip()
     public_ip_result: list[str | None] = [None]
@@ -318,6 +323,8 @@ def _resolve_host_waiting_screen(
         clock,
         host_ip,
         network,
+        expected_player_count=expected_player_count,
+        lobby_session=lobby_session,
         public_ip=lambda: public_ip_result[0],
         upnp_status=lambda: upnp_result[0],
     )
@@ -507,33 +514,66 @@ def run_online_session_setup(
         return None
 
     if choice == "host":
+        selected_player_count = choose_player_count()
+        if selected_player_count is None:
+            return None
+        selected_player_count = max(2, min(4, int(selected_player_count)))
+
+        lobby_session = LanLobbyHostSession(host_name=player_name, max_players=selected_player_count)
+        if not lobby_session.start():
+            toast(screen, clock, f"LAN lobby failed: {lobby_session.last_error or 'unknown error'}")
+            return None
+
         network = NetworkHost()
         if not network.start_hosting():
+            lobby_session.close()
             toast(screen, clock, "Hosting failed.")
             return None
 
-        ok = _resolve_host_waiting_screen(screen, clock, network)
+        ok = _resolve_host_waiting_screen(
+            screen,
+            clock,
+            network,
+            selected_player_count,
+            lobby_session=lobby_session,
+        )
         if not ok:
             network.disconnect()
+            lobby_session.close()
             toast(screen, clock, "Hosting cancelled.")
             return None
 
-        selected_player_count, selected_level, selected_target_score = _run_host_level_selection(
-            screen,
-            clock,
-            choose_player_count,
-            choose_level,
-            choose_target_score,
-        )
-        if selected_level is None or selected_player_count is None:
+        selected_level = choose_level()
+        if selected_level is None:
             network.disconnect()
+            lobby_session.close()
             return None
+
+        selected_target_score = choose_target_score()
+        if selected_target_score is None:
+            network.disconnect()
+            lobby_session.close()
+            return None
+
+        lobby_session.set_host_config(
+            level_id=int(selected_level.level_id),
+            target_score=int(selected_target_score),
+            player_count=int(selected_player_count),
+        )
+        lobby_state = lobby_session.finalize()
+        network_player_names = [str(member.get("name", f"Player {idx + 1}")) for idx, member in enumerate(lobby_state.get("members", []))]
+        if not network_player_names:
+            network_player_names = [player_name]
+
+        lobby_session.close()
+
         return OnlineSessionSelection(
             network=network,
             local_player_index=0,
             selected_level=selected_level,
             selected_target_score=int(selected_target_score),
             selected_player_count=int(selected_player_count),
+            network_player_names=network_player_names,
         )
 
     if choice == "discover":
@@ -542,21 +582,30 @@ def run_online_session_setup(
             return None
         network = NetworkClient()
         connected = network.connect_to_host(result["address"], result["port"])
+        lobby_host = str(result.get("address", "")).strip() or result["address"]
     else:
         ip = prompt_ip_entry(screen, clock)
         if not ip:
             return None
         network = NetworkClient()
         connected = network.connect_to_host(ip)
+        lobby_host = str(ip)
 
     if not connected:
         toast(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
         return None
 
+    lobby_session = LanLobbyClientSession(player_name=player_name)
+    if not lobby_session.connect(lobby_host, LAN_LOBBY_PORT):
+        toast(screen, clock, f"LAN lobby join failed: {lobby_session.last_error or 'unknown error'}")
+        lobby_session = None
+
     selected_level = resolve_level_option(1)
     if selected_level is None:
         toast(screen, clock, "No levels available.")
         network.disconnect()
+        if lobby_session is not None:
+            lobby_session.close()
         return None
 
     return OnlineSessionSelection(
@@ -565,4 +614,5 @@ def run_online_session_setup(
         selected_level=selected_level,
         selected_target_score=3,
         selected_player_count=2,
+        lobby_session=lobby_session,
     )

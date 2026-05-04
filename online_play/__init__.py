@@ -12,6 +12,7 @@ from .match_flow import (
     parse_game_start_message,
     parse_player_setup_message,
 )
+from .lan_lobby_session import LAN_LOBBY_PORT, LanLobbyClientSession, LanLobbyHostSession, LobbyMember
 from .session import (
     DEFAULT_PORT,
     DISCOVERY_HOST_MAX_AGE,
@@ -33,13 +34,17 @@ __all__ = [
     "DISCOVERY_MAGIC",
     "DISCOVERY_PORT",
     "DiscoveredHost",
+    "LAN_LOBBY_PORT",
     "LATEST_ONLY_MESSAGE_TYPES",
     "LanGameFinder",
+    "LanLobbyClientSession",
+    "LanLobbyHostSession",
     "MatchSettings",
     "MatchStartPayload",
     "NetworkClient",
     "NetworkHost",
     "NetworkManager",
+    "LobbyMember",
     "NetworkPlayerSetup",
     "UNRELIABLE_MESSAGE_TYPES",
     "build_game_start_payload",

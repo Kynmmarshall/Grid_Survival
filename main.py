@@ -320,6 +320,7 @@ def main():
                 selected_player_count = int(online_selection.selected_player_count)
                 network_player_names = online_selection.network_player_names
                 preselected_online_characters = online_selection.selected_characters
+                lobby_session = getattr(online_selection, "lobby_session", None)
                 requires_match_start = bool(online_selection.requires_match_start)
             else:
                 while True:
@@ -370,6 +371,12 @@ def main():
                         break
 
                 if game_mode == MODE_ONLINE_MULTIPLAYER and requires_match_start:
+                    if lobby_session is not None:
+                        try:
+                            lobby_session.set_character(selected_characters[0])
+                            lobby_session.set_ready(True)
+                        except Exception:
+                            pass
                     match_setup = wait_for_online_match_start(
                         screen,
                         clock,
@@ -382,6 +389,11 @@ def main():
                     )
                     if not match_setup:
                         network.disconnect()
+                        if lobby_session is not None:
+                            try:
+                                lobby_session.close()
+                            except Exception:
+                                pass
                         break
                     selected_characters = [
                         str(player.get("character", selected_characters[0]))
@@ -403,6 +415,11 @@ def main():
                         2,
                         min(4, int(match_setup.get("player_count", selected_player_count))),
                     )
+                    if lobby_session is not None:
+                        try:
+                            lobby_session.close()
+                        except Exception:
+                            pass
 
                 get_audio().stop_music(fade_ms=500)
 

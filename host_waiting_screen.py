@@ -66,6 +66,8 @@ def host_waiting_screen(
     clock,
     host_ip: str,
     network,
+    expected_player_count: int = 2,
+    lobby_session=None,
     public_ip=None,
     upnp_status=None,
 ):
@@ -87,8 +89,19 @@ def host_waiting_screen(
     """
     audio_overlay = SceneAudioOverlay()
     port = getattr(network, "port", 5555)
+    expected_player_count = max(2, min(4, int(expected_player_count)))
 
     while True:
+        lobby_member_count = None
+        lobby_members = None
+        if lobby_session is not None:
+            try:
+                lobby_session.poll()
+                lobby_members = list(getattr(lobby_session, "roster", lambda: [])())
+                lobby_member_count = len(lobby_members)
+            except Exception:
+                lobby_member_count = None
+
         connected = network.poll_connection()
 
         # Resolve dynamic values each tick so background-thread results appear
@@ -112,11 +125,16 @@ def host_waiting_screen(
 
         lines = [
             f"LAN IP: {host_ip}",
+            f"Lobby slots: {lobby_member_count if lobby_member_count is not None else (2 if connected else 1)}/{expected_player_count}",
             pub_line,
             hint_line,
             upnp_line,
             "Press ESC to cancel.",
         ]
+
+        if lobby_members:
+            roster_names = ", ".join(member.name for member in lobby_members[:4])
+            lines.insert(2, f"Members: {roster_names}")
 
         _draw_waiting_panel(
             screen,
