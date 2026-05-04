@@ -245,7 +245,6 @@ def wait_for_online_match_start(
                 )
                 network.send_message(
                     "game_start",
-                    player_count=max(2, min(4, int(selected_player_count))),
                     **build_game_start_payload(start_payload),
                 )
                 return {
