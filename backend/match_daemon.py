@@ -7,6 +7,9 @@ import threading
 import time
 from typing import Any
 
+import os
+# On headless servers force SDL to use the dummy audio driver to avoid ALSA errors
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 
 from assets import load_tilemap_surface
@@ -159,6 +162,11 @@ class MatchDaemon:
         t = packet.get("t")
         p = packet.get("p") or {}
 
+        try:
+            print(f"[NET] _handle_data: received type={t} from {addr}", flush=True)
+        except Exception:
+            pass
+
         def touch_addr() -> None:
             now = time.time()
             with self._lock:
@@ -262,6 +270,10 @@ class MatchDaemon:
 
     def _handle_hello(self, addr: tuple[str, int]) -> None:
         """Reply to the client's UDP hello so it can complete the session handshake."""
+        try:
+            print(f"[NET] Hello probe from {addr}", flush=True)
+        except Exception:
+            pass
         seq = self._next_seq()
         self._send_packet(addr, PKT_HELLO_ACK, seq, 0, "", {})
 
