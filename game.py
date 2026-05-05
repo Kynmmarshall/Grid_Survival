@@ -115,6 +115,10 @@ class GameManager:
         self._world_dynamic_snapshot_interval = 1 / 30
         self._world_snapshot_send_timer = 0.0
         self._world_snapshot_interval = 1 / 20
+        if self.is_network_game and len(self.selected_characters) > 2:
+            self._snapshot_interval = 1 / 40
+            self._world_dynamic_snapshot_interval = 1 / 24
+            self._world_snapshot_interval = 1 / 15
         self._network_round_seq = 0
         self._last_client_snapshot_time = -1.0
         self._last_client_world_snapshot_time = -1.0
@@ -125,14 +129,14 @@ class GameManager:
         self._last_client_pacman_snapshot_time = -1.0
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
-        self._client_position_blend = 0.35
-        self._client_local_position_blend = 0.22
+        self._client_position_blend = 0.32
+        self._client_local_position_blend = 0.18
         self._client_local_reconcile_deadzone = 12.0
         self._client_last_local_input = self._empty_network_input_state()
         self._client_snap_distance = 180.0
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
-        self._client_remote_extrapolation_cap = 1 / 16
+        self._client_remote_extrapolation_cap = 1 / 12
         self._network_disconnect_started_at: float | None = None
         self._network_last_reconnect_attempt_at = 0.0
         self._network_reconnect_thread: threading.Thread | None = None
@@ -721,15 +725,9 @@ class GameManager:
         latest_world_dynamic_snapshot = None
         latest_match_result = None
         saw_disconnect = False
-        message_count = 0
-        
-        # Diagnostic: Track message arrival
-        debug_msg_types = []
         
         for message in self.network.get_messages():
-            message_count += 1
             message_type = message.get("type")
-            debug_msg_types.append(message_type)
             
             if message_type == "disconnect":
                 saw_disconnect = True
@@ -798,13 +796,6 @@ class GameManager:
             elif (not self.is_network_host) and message_type == "match_result":
                 latest_match_result = message.get("state") if isinstance(message.get("state"), dict) else message
         
-        # Diagnostic: Log message batch info
-        if message_count > 0:
-            try:
-                print(f"[DIAG] ProcessMessages: got {message_count} messages, types={set(debug_msg_types)}, snap={latest_snapshot is not None}, world_snap={latest_world_snapshot is not None}", flush=True)
-            except Exception:
-                pass
-
         if latest_snapshot is not None:
             self._apply_network_snapshot(latest_snapshot)
         if latest_world_snapshot is not None:
@@ -931,7 +922,7 @@ class GameManager:
         if is_local_player and local_move_intent:
             base_blend *= 0.75
         expected_interval = max(1e-4, float(self._snapshot_interval))
-        gap_ratio = max(0.7, min(1.8, float(self._client_snapshot_gap) / expected_interval))
+        gap_ratio = max(0.85, min(1.35, float(self._client_snapshot_gap) / expected_interval))
         blend = min(0.9, base_blend * gap_ratio)
         if distance > 72.0:
             blend = min(0.95, blend + 0.12)
@@ -1038,13 +1029,6 @@ class GameManager:
         if not isinstance(snapshot, dict):
             return
 
-        # Diagnostic: snapshot receipt timing
-        snapshot_time = float(snapshot.get("time_since_start", -1.0))
-        try:
-            print(f"[SNAPSHOT] Received snap: round_seq={snapshot.get('round_seq')}, time={snapshot_time:.3f}s, players_count={len(snapshot.get('players', []))}, has_hazards={bool(snapshot.get('hazards'))}", flush=True)
-        except Exception:
-            pass
-
         incoming_round_seq = self._parse_round_seq(
             snapshot.get("round_seq", self._last_client_snapshot_round_seq),
             self._last_client_snapshot_round_seq if self._last_client_snapshot_round_seq >= 0 else self._network_round_seq,
@@ -1066,7 +1050,11 @@ class GameManager:
         if previous_time >= 0.0:
             gap = incoming_time - previous_time
             if gap > 0.0:
-                self._client_snapshot_gap = min(0.5, gap)
+                clamped_gap = min(0.5, gap)
+                self._client_snapshot_gap = (
+                    self._client_snapshot_gap * 0.8
+                    + clamped_gap * 0.2
+                )
         self._last_client_snapshot_time = incoming_time
         self._time_since_start = incoming_time
         self.paused = bool(snapshot.get("paused", self.paused))
