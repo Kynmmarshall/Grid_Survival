@@ -128,6 +128,10 @@ class LanLobbyHostSession:
 
             msg_type = str(message.get("type", ""))
             if msg_type == "join":
+                try:
+                    print(f"[LOBBY_HOST_POLL] Received join message from {address}", flush=True)
+                except Exception:
+                    pass
                 self._handle_join(address, message)
                 messages.append({"type": "join", "address": address, **message})
             elif msg_type == "leave":
@@ -205,7 +209,16 @@ class LanLobbyHostSession:
         return state
 
     def _handle_join(self, address: tuple[str, int], message: dict[str, Any]) -> None:
+        try:
+            print(f"[LOBBY_HOST] Join attempt from {address}, current members: {len(self.members)}/{self.max_players}", flush=True)
+        except Exception:
+            pass
+        
         if address not in self.members and len(self.members) >= self.max_players:
+            try:
+                print(f"[LOBBY_HOST] Rejecting join from {address}: Lobby full ({len(self.members)} >= {self.max_players})", flush=True)
+            except Exception:
+                pass
             self._send_join_reject(address, reason="Lobby full")
             return
 
@@ -215,9 +228,17 @@ class LanLobbyHostSession:
         if member is None:
             member = LobbyMember(name=name, address=address, character=character, is_host=False)
             self.members[address] = member
+            try:
+                print(f"[LOBBY_HOST] New member joined: {name} ({address}), now {len(self.members)}/{self.max_players}", flush=True)
+            except Exception:
+                pass
         else:
             member.name = name
             member.character = character
+            try:
+                print(f"[LOBBY_HOST] Updated member: {name} ({address})", flush=True)
+            except Exception:
+                pass
 
         self._send_join_ack(address)
         self.broadcast_state(final=False)
@@ -325,9 +346,18 @@ class LanLobbyClientSession:
 
     def connect(self, host: str, port: int = LAN_LOBBY_PORT) -> bool:
         try:
+            print(f"[LOBBY_CLIENT] Attempting connect to {host}:{port} as {self.player_name}", flush=True)
+        except Exception:
+            pass
+        try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             client_socket.bind(("0.0.0.0", 0))
+            bound_port = client_socket.getsockname()[1]
+            try:
+                print(f"[LOBBY_CLIENT] Socket bound to port {bound_port}", flush=True)
+            except Exception:
+                pass
             client_socket.settimeout(0.05)
             self.socket = client_socket
             self.host_address = (str(host), int(port))
@@ -337,6 +367,10 @@ class LanLobbyClientSession:
             return True
         except (socket.error, OSError) as exc:
             self.last_error = str(exc)
+            try:
+                print(f"[LOBBY_CLIENT] Connect failed: {exc}", flush=True)
+            except Exception:
+                pass
             self.close()
             return False
 
@@ -398,15 +432,30 @@ class LanLobbyClientSession:
                 continue
             msg_type = str(message.get("type", ""))
             if msg_type == "join_ack":
+                member_count = len(message.get("members", [])) if isinstance(message.get("members"), list) else 0
+                try:
+                    print(f"[LOBBY_CLIENT] Received join_ack, members: {member_count}", flush=True)
+                except Exception:
+                    pass
                 self.members = list(message.get("members", [])) if isinstance(message.get("members"), list) else []
                 self.host_config = dict(message.get("host_config", {})) if isinstance(message.get("host_config"), dict) else {}
                 self.connected = True
                 messages.append(message)
             elif msg_type == "join_reject":
-                self.last_error = str(message.get("reason", "Join rejected"))
+                reason = str(message.get("reason", "Join rejected"))
+                self.last_error = reason
                 self.connected = False
+                try:
+                    print(f"[LOBBY_CLIENT] Join rejected: {reason}", flush=True)
+                except Exception:
+                    pass
                 messages.append(message)
             elif msg_type == "lobby_state":
+                member_count = len(message.get("members", [])) if isinstance(message.get("members"), list) else 0
+                try:
+                    print(f"[LOBBY_CLIENT] Received lobby_state update, members: {member_count}", flush=True)
+                except Exception:
+                    pass
                 self.members = list(message.get("members", [])) if isinstance(message.get("members"), list) else []
                 self.host_config = dict(message.get("host_config", {})) if isinstance(message.get("host_config"), dict) else {}
                 self.finalized = bool(message.get("final", False))
@@ -437,7 +486,17 @@ class LanLobbyClientSession:
         return ok
 
     def _send_join(self) -> bool:
-        return self._send({"type": "join", "name": self.player_name, "character": self.character})
+        try:
+            print(f"[LOBBY_CLIENT] Sending join for {self.player_name} to {self.host_address}", flush=True)
+        except Exception:
+            pass
+        ok = self._send({"type": "join", "name": self.player_name, "character": self.character})
+        if not ok:
+            try:
+                print(f"[LOBBY_CLIENT] Join send failed: {self.last_error}", flush=True)
+            except Exception:
+                pass
+        return ok
 
     def _send(self, payload: dict[str, Any]) -> bool:
         if not self.socket or not self.host_address:

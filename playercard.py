@@ -62,6 +62,7 @@ class PlayerCardRenderer:
     ):
         self._font_small = font_small
         self._font_wins = pygame.font.SysFont("consolas", 36, bold=True)
+        self._font_health = pygame.font.SysFont("consolas", 28, bold=True)
         self._draw_panel = panel_drawer
         self._orb_icon_cache: dict[tuple[str, int], pygame.Surface] = {}
         self._portrait_cache: dict[tuple[str, int], pygame.Surface] = {}
@@ -141,7 +142,7 @@ class PlayerCardRenderer:
                 orb_label, orb_timer, orb_infinite, orb_duration = status
         orb_color = self._orb_color_for_label(orb_label)
 
-        accent_rect = pygame.Rect(rect.left + 10, rect.top + 10, rect.width - 20, 6)
+        accent_rect = pygame.Rect(rect.left + 10, rect.top + 10, rect.width - 20, 12)
         self._draw_orb_timer_line(surface, accent_rect, orb_color if orb_label else border_color, orb_label,
                                   orb_timer, orb_infinite, orb_duration)
 
@@ -282,7 +283,7 @@ class PlayerCardRenderer:
             pygame.draw.circle(surface, (255, 105, 180), (icon_left + fallback_radius, rect.centery), fallback_radius)
             count_x = icon_left + fallback_radius * 2 + 8
 
-        count_surf = self._font_small.render(str(max(0, lives)), True, (255, 255, 255))
+        count_surf = self._font_health.render(str(max(0, lives)), True, (255, 255, 255))
         count_rect = count_surf.get_rect(midleft=(count_x, rect.centery))
         surface.blit(count_surf, count_rect)
 

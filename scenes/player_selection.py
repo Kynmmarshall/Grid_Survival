@@ -82,6 +82,18 @@ CHARACTER_METADATA = {
         "icon": "☠️",
         "desc": "Leaves a trail of poison\nImmune to hazard damage",
     },
+    "Chief Goblin": {
+        "color": (200, 100, 220),
+        "ability": "Warlord Smash",
+        "icon": "👑",
+        "desc": "Heavy impact with knockback\nCrushed enemies drop shields",
+    },
+    "Female Goblin": {
+        "color": (255, 100, 150),
+        "ability": "Goblin Swarm",
+        "icon": "🗡️",
+        "desc": "Summon allies for brief time\nTeam boost and damage boost",
+    },
     "Ninja": {
         "color": (100, 220, 255),
         "ability": "Shadow Dash",
