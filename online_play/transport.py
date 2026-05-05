@@ -278,9 +278,17 @@ class NetworkManager:
             chunks.append(frag_bytes)
         return chunks
 
-    def _queue_or_latest_message(self, message: dict[str, Any], seq: int | None = None) -> None:
+    def _queue_or_latest_message(
+        self,
+        message: dict[str, Any],
+        seq: int | None = None,
+        address: tuple[str, int] | None = None,
+    ) -> None:
         msg_type = message.get("type")
         if not isinstance(msg_type, str):
+            return
+        if self.is_host and msg_type == "input_state":
+            self.message_queue.put(message)
             return
         if msg_type in self._LATEST_ONLY_MESSAGES and isinstance(seq, int):
             last = self._last_recv_seq_by_type.get(msg_type)
@@ -451,6 +459,8 @@ class NetworkManager:
             self._seen_reliable[seen_key] = time.time()
             self._send_control(PKT_ACK, address=address, s=seq)
         message = {"type": msg_type, **payload}
+        if self.is_host:
+            message["_from"] = address
         if msg_type == "disconnect":
             if self.is_host:
                 self._drop_host_peer(address, notify=False)
@@ -458,7 +468,7 @@ class NetworkManager:
                 self._queue_or_latest_message({"type": "disconnect"}, seq=seq)
                 self._mark_disconnected(notify=False)
             return
-        self._queue_or_latest_message(message, seq=seq)
+        self._queue_or_latest_message(message, seq=seq, address=address)
 
     def _handle_fragment(self, packet: dict[str, Any], address: tuple[str, int]) -> None:
         seq = packet.get("s")
