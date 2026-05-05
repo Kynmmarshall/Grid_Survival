@@ -3,31 +3,37 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterable
 
 from settings import ASSETS_DIR, CHARACTER_BASE, PLAYER_ANIMATION_PATHS
 
 CHARACTERS_DIR = ASSETS_DIR / "Characters"
 DEFAULT_CHARACTER_NAME = CHARACTER_BASE.name if CHARACTER_BASE else "Caveman"
 
-_STATE_STRUCTURE: Dict[str, Dict[str, tuple[str, ...]]] = {
+_STATE_STRUCTURE: Dict[str, Dict[str, tuple[tuple[str, ...], ...]]] = {
     "idle": {
-        "down": ("idle", "Front - Idle Blinking"),
-        "up": ("idle", "Back - Idle"),
-        "left": ("idle", "Left - Idle Blinking"),
-        "right": ("idle", "Right - Idle Blinking"),
+        # Supports both legacy folder layouts:
+        # - <Character>/idle/<Direction - Idle...>
+        # - <Character>/<Direction - Idle...>
+        "down": (("idle", "Front - Idle Blinking"), ("Front - Idle Blinking",)),
+        "up": (("idle", "Back - Idle"), ("Back - Idle",)),
+        "left": (("idle", "Left - Idle Blinking"), ("Left - Idle Blinking",)),
+        "right": (("idle", "Right - Idle Blinking"), ("Right - Idle Blinking",)),
     },
     "run": {
-        "down": ("running", "Front - Running"),
-        "up": ("running", "Back - Running"),
-        "left": ("running", "Left - Running"),
-        "right": ("running", "Right - Running"),
+        # Supports both legacy folder layouts:
+        # - <Character>/running/<Direction - Running>
+        # - <Character>/<Direction - Running>
+        "down": (("running", "Front - Running"), ("Front - Running",)),
+        "up": (("running", "Back - Running"), ("Back - Running",)),
+        "left": (("running", "Left - Running"), ("Left - Running",)),
+        "right": (("running", "Right - Running"), ("Right - Running",)),
     },
     "death": {
-        "down": ("Dying",),
-        "up": ("Dying",),
-        "left": ("Dying",),
-        "right": ("Dying",),
+        "down": (("Dying",),),
+        "up": (("Dying",),),
+        "left": (("Dying",),),
+        "right": (("Dying",),),
     },
 }
 
@@ -65,11 +71,19 @@ def _collect_paths(base: Path) -> Dict[str, Dict[str, Path]]:
     resolved: Dict[str, Dict[str, Path]] = {}
     for state, direction_map in _STATE_STRUCTURE.items():
         resolved[state] = {}
-        for direction, rel_parts in direction_map.items():
-            path = _resolve_relative(base, rel_parts)
+        for direction, candidates in direction_map.items():
+            path = _resolve_candidates(base, candidates)
             if path is not None:
                 resolved[state][direction] = path
     return resolved
+
+
+def _resolve_candidates(base: Path, candidates: Iterable[tuple[str, ...]]) -> Path | None:
+    for rel_parts in candidates:
+        path = _resolve_relative(base, rel_parts)
+        if path is not None:
+            return path
+    return None
 
 
 def _resolve_relative(base: Path, rel_parts: tuple[str, ...]) -> Path | None:
@@ -97,7 +111,14 @@ def _has_required_dirs(path: Path) -> bool:
         subdirs = {child.name.lower() for child in path.iterdir() if child.is_dir()}
     except FileNotFoundError:
         return False
-    return "idle" in subdirs and "running" in subdirs
+    # Legacy layout: <Character>/idle and <Character>/running
+    if "idle" in subdirs and "running" in subdirs:
+        return True
+
+    # Newer layout (e.g. Dread, Ninja Female): direction folders at root.
+    # Require at least the front-facing idle + running directories.
+    required = {"front - idle blinking", "front - running"}
+    return required.issubset(subdirs)
 
 
 def _clone_default_paths() -> Dict[str, Dict[str, Path]]:

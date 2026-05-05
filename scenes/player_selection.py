@@ -48,16 +48,16 @@ INSTRUCTION_COLOR = (185, 195, 220)
 PREVIEW_COLOR = (150, 210, 255)
 CONFIRMED_COLOR = (120, 240, 170)
 
-CARD_WIDTH = 280
-CARD_HEIGHT = 370  # Taller for description
+CARD_WIDTH = 210
+CARD_HEIGHT = 285
 CARD_RADIUS = 24
-CARD_GUTTER = 40
+CARD_GUTTER = 22
 MAX_COLUMNS = 4
 SUMMARY_PANEL_HEIGHT = 140
 
-PREVIEW_SCALE = 0.45  # Larger sprites
+PREVIEW_SCALE = 0.36
 PREVIEW_FRAME_DURATION = 1 / 18
-PREVIEW_OFFSET_Y = -40  # Move sprite up
+PREVIEW_OFFSET_Y = -28  # Move sprite up
 PLACEHOLDER_SIZE = (128, 128)
 
 BUTTON_WIDTH = 240
@@ -93,7 +93,19 @@ CHARACTER_METADATA = {
         "ability": "Battle Cry",
         "icon": "⚔️",
         "desc": "Stuns nearby enemies\nBoosts movement speed",
-    }
+    },
+    "Dread": {
+        "color": (180, 120, 255),
+        "ability": "Void Step",
+        "icon": "DR",
+        "desc": "Short teleport through danger\nHigh control in tight spaces",
+    },
+    "Ninja Female": {
+        "color": (255, 140, 200),
+        "ability": "Swift Strike",
+        "icon": "NF",
+        "desc": "Quick reposition burst\nReliable escape option",
+    },
 }
 
 MODE_HEADERS = {
@@ -139,12 +151,15 @@ class PlayerSelectionScreen:
         # Background effects
         self.particles = []
         for _ in range(50):
+            radius = random.randint(1, 3)
+            alpha = random.randint(50, 150)
             self.particles.append({
                 "x": random.randint(0, self.width),
                 "y": random.randint(0, self.height),
-                "radius": random.randint(1, 3),
+                "radius": radius,
                 "speed": random.uniform(0.2, 0.8),
-                "alpha": random.randint(50, 150)
+                "alpha": alpha,
+                "surf": self._make_particle_surface(radius, alpha),
             })
         self._bg_gradient = self._create_gradient()
 
@@ -157,9 +172,9 @@ class PlayerSelectionScreen:
         # Buttons
         button_y = self.height - 55
         self._lock_button_rect = pygame.Rect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT)
-        self._lock_button_rect.center = (self.width // 2 + 180, button_y)
+        self._lock_button_rect.midright = (self.width - 80, button_y)
         self._back_button_rect = pygame.Rect(0, 0, BUTTON_WIDTH - 30, BUTTON_HEIGHT - 6)
-        self._back_button_rect.center = (self.width // 2 - 200, button_y)
+        self._back_button_rect.midleft = (80, button_y)
         self._closing = False
 
     # ── card + animation setup ──────────────────────────────────────────
@@ -169,26 +184,32 @@ class PlayerSelectionScreen:
             return
         cols = min(MAX_COLUMNS, max(1, len(self.characters)))
         rows = math.ceil(len(self.characters) / cols)
-        grid_width = cols * CARD_WIDTH + (cols - 1) * CARD_GUTTER
-        start_x = self.width // 2 - grid_width // 2
         start_y = 200  # Lowered to accommodate larger header
 
-        for idx, name in enumerate(self.characters):
-            row = idx // cols
-            col = idx % cols
-            rect = pygame.Rect(
-                start_x + col * (CARD_WIDTH + CARD_GUTTER),
-                start_y + row * (CARD_HEIGHT + CARD_GUTTER),
-                CARD_WIDTH,
-                CARD_HEIGHT,
-            )
-            animations = self._load_preview_animations(name)
-            self.cards.append({
-                "name": name,
-                "rect": rect,
-                "animations": animations,
-                "current_state": "idle",
-            })
+        self.cards = []
+        total = len(self.characters)
+        for row in range(rows):
+            row_start = row * cols
+            row_count = min(cols, total - row_start)
+            row_width = row_count * CARD_WIDTH + (row_count - 1) * CARD_GUTTER
+            row_start_x = self.width // 2 - row_width // 2
+
+            for col in range(row_count):
+                idx = row_start + col
+                name = self.characters[idx]
+                rect = pygame.Rect(
+                    row_start_x + col * (CARD_WIDTH + CARD_GUTTER),
+                    start_y + row * (CARD_HEIGHT + CARD_GUTTER),
+                    CARD_WIDTH,
+                    CARD_HEIGHT,
+                )
+                animations = self._load_preview_animations(name)
+                self.cards.append({
+                    "name": name,
+                    "rect": rect,
+                    "animations": animations,
+                    "current_state": "idle",
+                })
 
     def _load_preview_animations(self, character_name: str) -> dict:
         paths = build_animation_paths(character_name)
@@ -221,10 +242,22 @@ class PlayerSelectionScreen:
     def _placeholder_surface(self, name: str) -> pygame.Surface:
         surface = pygame.Surface(PLACEHOLDER_SIZE, pygame.SRCALPHA)
         base = 80 + (hash(name) % 90)
-        color = (base, 900 + (hash(name[::-1]) % 80), 140 + (hash(name) % 60))
+        color = (base, 80 + (hash(name[::-1]) % 90), 140 + (hash(name) % 60))
         pygame.draw.circle(surface, color, (PLACEHOLDER_SIZE[0] // 2, PLACEHOLDER_SIZE[1] // 2), PLACEHOLDER_SIZE[0] // 2 - 6)
         pygame.draw.circle(surface, (255, 255, 255, 55), (PLACEHOLDER_SIZE[0] // 2, PLACEHOLDER_SIZE[1] // 2 - 8), 14)
         return surface
+
+    @staticmethod
+    def _make_particle_surface(radius: int, alpha: int) -> pygame.Surface:
+        radius = max(1, int(radius))
+        alpha = max(0, min(255, int(alpha)))
+        surf = pygame.Surface((radius * 6, radius * 6), pygame.SRCALPHA)
+        center = (radius * 3, radius * 3)
+        # Core
+        pygame.draw.circle(surf, (180, 220, 255, alpha), center, radius)
+        # Outer glow
+        pygame.draw.circle(surf, (100, 180, 255, alpha // 2), center, radius * 2)
+        return surf
 
     # ── drawing helpers ────────────────────────────────────────────────
 
@@ -259,14 +292,11 @@ class PlayerSelectionScreen:
                 p["x"] = random.randint(0, self.width)
             
             radius = p["radius"]
-            # Draw soft glow
-            surf = pygame.Surface((radius * 6, radius * 6), pygame.SRCALPHA)
-            # Core
-            pygame.draw.circle(surf, (180, 220, 255, p["alpha"]), (radius*3, radius*3), radius)
-            # Outer glow
-            pygame.draw.circle(surf, (100, 180, 255, p["alpha"] // 2), (radius*3, radius*3), radius * 2)
-            
-            self.screen.blit(surf, (p["x"] - radius*3, p["y"] - radius*3), special_flags=pygame.BLEND_ADD)
+            surf = p.get("surf")
+            if surf is None:
+                surf = self._make_particle_surface(radius, p.get("alpha", 120))
+                p["surf"] = surf
+            self.screen.blit(surf, (p["x"] - radius * 3, p["y"] - radius * 3), special_flags=pygame.BLEND_ADD)
 
     def _draw_header(self) -> None:
         # Main Title with Glow
@@ -304,7 +334,7 @@ class PlayerSelectionScreen:
 
         # Hint text
         if self.game_mode == MODE_LOCAL_MULTIPLAYER:
-             hint_text = f"Player {self.current_player + 1}: Click a character to preview their run"
+             hint_text = f"Player {self.current_player + 1}: Select a character"
         else:
              hint_text = self.mode_hint
         
@@ -435,16 +465,6 @@ class PlayerSelectionScreen:
             _draw_rounded_rect(self.screen, badge_rect, badge_bg_color, base_color, 1, 12)
             self.screen.blit(badge_surf, badge_surf.get_rect(center=badge_rect.center))
 
-            # Description (Only show if NOT locked, to avoid clutter)
-            if not locked_slots:
-                desc_y = badge_rect.bottom + 12 * scale
-                desc_lines = meta["desc"].split('\n')
-                for line in desc_lines:
-                    line_surf = self._font_small.render(line, True, (180, 190, 200))
-                    line_rect = line_surf.get_rect(midtop=(draw_rect.centerx, desc_y))
-                    self.screen.blit(line_surf, line_rect)
-                    desc_y += 20 * scale
-
             # 6. Locked Banner / State
             if locked_slots:
                 # Dim background
@@ -481,32 +501,6 @@ class PlayerSelectionScreen:
     def _draw_summary(self) -> None:
         mouse_pos = pygame.mouse.get_pos()
         self._draw_buttons(mouse_pos)
-        
-        # Styled Tooltip Box
-        if self.num_players == 1:
-            instructions = "Click to preview • ENTER to Lock In"
-        else:
-            if self.current_player < self.num_players:
-                instructions = f"Player {self.current_player + 1}: Select your hero"
-            else:
-                 instructions = "Ready to start!"
-
-        text_surf = self._font_small.render(instructions, True, (200, 230, 255))
-        
-        # Background for tooltip
-        bg_width = text_surf.get_width() + 50
-        bg_height = 36
-        bg_rect = pygame.Rect(0, 0, bg_width, bg_height)
-        bg_rect.midbottom = (self.width // 2, self.height - 25)
-        
-        # Translucent dark pill shape
-        s = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
-        pygame.draw.rect(s, (10, 15, 30, 200), s.get_rect(), border_radius=18)
-        # Thin glowing border
-        pygame.draw.rect(s, (60, 100, 140, 150), s.get_rect(), 1, border_radius=18)
-        
-        self.screen.blit(s, bg_rect.topleft)
-        self.screen.blit(text_surf, text_surf.get_rect(center=bg_rect.center))
 
     def _draw_buttons(self, mouse_pos: tuple) -> None:
         # Back Button (simple style)
