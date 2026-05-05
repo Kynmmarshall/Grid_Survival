@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import signal
 import time
 import urllib.parse
 from http import HTTPStatus
@@ -34,6 +35,11 @@ def _parse_port(value: str, default: int = 8000) -> int:
 DB_PATH = Path(_first_env("GRID_SURVIVAL_VPS_DB", "DB_NAME", default="vps_accounts.db"))
 HOST = _first_env("GRID_SURVIVAL_VPS_HOST", "DB_HOST", default="0.0.0.0")
 PORT = _parse_port(_first_env("GRID_SURVIVAL_VPS_PORT", "DB_PORT", default="8000"), default=8000)
+
+
+class SyncApiServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
 
 class RemoteAccountStore:
@@ -462,14 +468,24 @@ class SyncApiHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), SyncApiHandler)
+    server = SyncApiServer((HOST, PORT), SyncApiHandler)
+    stop_requested = threading.Event()
+
+    def _request_stop(*_args: object) -> None:
+        stop_requested.set()
+        try:
+            server.shutdown()
+        except Exception:
+            pass
+
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
     print(f"Grid Survival sync API listening on http://{HOST}:{PORT}")
     print(f"Using DB: {DB_PATH.resolve()}")
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        server.serve_forever(poll_interval=0.5)
     finally:
+        stop_requested.set()
         server.server_close()
 
 

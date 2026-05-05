@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Iterable
 
 import pygame
@@ -37,6 +38,13 @@ _STATUS_PENDING: bool | None = None
 _STATUS_CHECK_RUNNING = False
 _STATUS_CHECK_TIMER = 999.0
 _STATUS_CHECK_INTERVAL = 3.5
+
+_MENU_SYNC_LOCK = threading.Lock()
+_MENU_SYNC_RUNNING = False
+_MENU_SYNC_LAST_OK: bool | None = None
+_MENU_SYNC_SHOW_UNTIL = 0.0
+_MENU_SYNC_LINGER_SECONDS = 2.4
+_MENU_SYNC_LAST_AT = 0.0
 
 
 def set_online_status_service(service: Any | None) -> None:
@@ -110,6 +118,128 @@ def update_online_status(dt: float = 0.0, force: bool = False) -> None:
 def _online_status_snapshot() -> tuple[bool | None, bool]:
     with _STATUS_LOCK:
         return _STATUS_ONLINE, _STATUS_CHECK_RUNNING
+
+
+def set_menu_sync_indicator_running() -> None:
+    """Mark menu sync as in progress for the shared status badge."""
+    global _MENU_SYNC_RUNNING, _MENU_SYNC_LAST_OK, _MENU_SYNC_SHOW_UNTIL, _MENU_SYNC_LAST_AT
+    with _MENU_SYNC_LOCK:
+        _MENU_SYNC_RUNNING = True
+        _MENU_SYNC_LAST_OK = None
+        _MENU_SYNC_SHOW_UNTIL = 0.0
+        _MENU_SYNC_LAST_AT = time.time()
+
+
+def set_menu_sync_indicator_result(success: bool) -> None:
+    """Publish menu sync completion state for a short on-screen badge."""
+    global _MENU_SYNC_RUNNING, _MENU_SYNC_LAST_OK, _MENU_SYNC_SHOW_UNTIL, _MENU_SYNC_LAST_AT
+    completed_at = time.time()
+    with _MENU_SYNC_LOCK:
+        _MENU_SYNC_RUNNING = False
+        _MENU_SYNC_LAST_OK = bool(success)
+        _MENU_SYNC_LAST_AT = completed_at
+        _MENU_SYNC_SHOW_UNTIL = completed_at + _MENU_SYNC_LINGER_SECONDS
+
+
+def _format_sync_clock(ts: float) -> str:
+    if ts <= 0.0:
+        return "--:--:--"
+    try:
+        return time.strftime("%H:%M:%S", time.localtime(ts))
+    except Exception:
+        return "--:--:--"
+
+
+def _menu_sync_indicator_snapshot() -> tuple[str | None, tuple[int, int, int, int], tuple[int, int, int], tuple[int, int, int]]:
+    """Return label/style for menu sync badge, or None when hidden."""
+    with _MENU_SYNC_LOCK:
+        running = bool(_MENU_SYNC_RUNNING)
+        last_ok = _MENU_SYNC_LAST_OK
+        show_until = float(_MENU_SYNC_SHOW_UNTIL)
+        last_at = float(_MENU_SYNC_LAST_AT)
+
+    stamp = _format_sync_clock(last_at)
+
+    now = time.time()
+    if running:
+        return (
+            f"SYNCING... {stamp}",
+            (74, 74, 54, 220),
+            (222, 198, 124),
+            (248, 218, 132),
+        )
+    if last_ok is None or now > show_until:
+        return (None, (0, 0, 0, 0), (0, 0, 0), (0, 0, 0))
+    if last_ok:
+        return (
+            f"SYNCED {stamp}",
+            (34, 78, 52, 220),
+            (128, 224, 174),
+            (130, 244, 178),
+        )
+    return (
+        f"SYNC FAILED {stamp}",
+        (86, 42, 42, 220),
+        (236, 154, 154),
+        (255, 168, 168),
+    )
+
+
+def draw_menu_sync_badge(
+    surface: pygame.Surface,
+    reserved_rects: Iterable[pygame.Rect] | None = None,
+    *,
+    margin: int = 14,
+    preferred_corners: tuple[str, ...] = ("bottom-right", "bottom-left", "top-right", "top-left"),
+) -> None:
+    """Draw compact menu sync status badge while avoiding reserved regions."""
+    label, bg, border, dot = _menu_sync_indicator_snapshot()
+    if not label:
+        return
+
+    font = _load_font(FONT_PATH_SMALL, max(13, FONT_SIZE_SMALL - 3), bold=True)
+    text = font.render(label, True, (244, 248, 255))
+    badge_w = max(138, text.get_width() + 44)
+    badge_h = max(30, text.get_height() + 12)
+
+    sw, sh = surface.get_size()
+    candidates = {
+        "top-left": pygame.Rect(margin, margin, badge_w, badge_h),
+        "top-right": pygame.Rect(sw - margin - badge_w, margin, badge_w, badge_h),
+        "bottom-left": pygame.Rect(margin, sh - margin - badge_h, badge_w, badge_h),
+        "bottom-right": pygame.Rect(sw - margin - badge_w, sh - margin - badge_h, badge_w, badge_h),
+    }
+
+    blocked = [r for r in (reserved_rects or []) if isinstance(r, pygame.Rect)]
+
+    def _overlap_area(rect: pygame.Rect) -> int:
+        area = 0
+        for other in blocked:
+            clip = rect.clip(other)
+            if clip.width > 0 and clip.height > 0:
+                area += clip.width * clip.height
+        return area
+
+    chosen_rect: pygame.Rect | None = None
+    best_area: int | None = None
+    for key in preferred_corners:
+        rect = candidates.get(key)
+        if rect is None:
+            continue
+        area = _overlap_area(rect)
+        if area == 0:
+            chosen_rect = rect
+            break
+        if best_area is None or area < best_area:
+            best_area = area
+            chosen_rect = rect
+
+    if chosen_rect is None:
+        chosen_rect = candidates["bottom-right"]
+
+    _draw_rounded_rect(surface, chosen_rect, bg, border, 2, 10)
+    pygame.draw.circle(surface, dot, (chosen_rect.left + 14, chosen_rect.centery), 5)
+    surface.blit(text, text.get_rect(midleft=(chosen_rect.left + 26, chosen_rect.centery)))
 
 
 def draw_online_status_badge(
@@ -206,16 +336,11 @@ class SceneAudioOverlay:
                 self.audio.toggle_mute()
                 return True
 
-        if event.type == pygame.MOUSEWHEEL:
-            if event.y:
-                self.audio.adjust_volume(event.y * AUDIO_VOLUME_STEP)
-                return True
-
         if event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_PAGEUP, pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_RIGHTBRACKET):
+            if event.key in (pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_RIGHTBRACKET):
                 self.audio.adjust_volume(AUDIO_VOLUME_STEP)
                 return True
-            if event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
+            if event.key in (pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
                 self.audio.adjust_volume(-AUDIO_VOLUME_STEP)
                 return True
 
@@ -258,7 +383,7 @@ class SceneAudioOverlay:
         hint_bg = pygame.Surface(hint_rect.size, pygame.SRCALPHA)
         hint_bg.fill((8, 12, 18, 165))
         surface.blit(hint_bg, hint_rect.topleft)
-        hint = self._font_hint.render("VOL: +/- OR [ ] OR WHEEL", True, (180, 190, 210))
+        hint = self._font_hint.render("VOL: +/- OR [ ]", True, (180, 190, 210))
         surface.blit(hint, hint.get_rect(center=hint_rect.center))
 
         if self._show_online_status:
@@ -267,6 +392,12 @@ class SceneAudioOverlay:
                 reserved_rects=(self.mute_rect, self.volume_rect, hint_rect),
                 preferred_corners=("top-right", "bottom-right", "top-left", "bottom-left"),
             )
+
+        draw_menu_sync_badge(
+            surface,
+            reserved_rects=(self.mute_rect, self.volume_rect, hint_rect),
+            preferred_corners=("bottom-right", "bottom-left", "top-right", "top-left"),
+        )
 
 
 __all__ = [
@@ -277,4 +408,7 @@ __all__ = [
     "set_online_status_hint",
     "update_online_status",
     "draw_online_status_badge",
+    "set_menu_sync_indicator_running",
+    "set_menu_sync_indicator_result",
+    "draw_menu_sync_badge",
 ]

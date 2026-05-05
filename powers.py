@@ -1258,8 +1258,8 @@ def get_power_for_character(character_name: str) -> CharacterPower:
 
 def power_key_for_player(player_index: int) -> int:
     """Return the pygame key constant for the power button of the given player slot."""
-    # Player 1 → Q,  Player 2 → P,  Player 3 → comma,  Player 4 → slash
-    defaults = [pygame.K_q, pygame.K_p, pygame.K_COMMA, pygame.K_SLASH]
+    # Local defaults only define two-player power keys.
+    defaults = [pygame.K_q, pygame.K_p]
     if 0 <= player_index < len(defaults):
         return defaults[player_index]
     return pygame.K_q
