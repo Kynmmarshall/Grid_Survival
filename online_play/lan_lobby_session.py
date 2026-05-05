@@ -346,9 +346,18 @@ class LanLobbyClientSession:
 
     def connect(self, host: str, port: int = LAN_LOBBY_PORT) -> bool:
         try:
+            print(f"[LOBBY_CLIENT] Attempting connect to {host}:{port} as {self.player_name}", flush=True)
+        except Exception:
+            pass
+        try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             client_socket.bind(("0.0.0.0", 0))
+            bound_port = client_socket.getsockname()[1]
+            try:
+                print(f"[LOBBY_CLIENT] Socket bound to port {bound_port}", flush=True)
+            except Exception:
+                pass
             client_socket.settimeout(0.05)
             self.socket = client_socket
             self.host_address = (str(host), int(port))
@@ -358,6 +367,10 @@ class LanLobbyClientSession:
             return True
         except (socket.error, OSError) as exc:
             self.last_error = str(exc)
+            try:
+                print(f"[LOBBY_CLIENT] Connect failed: {exc}", flush=True)
+            except Exception:
+                pass
             self.close()
             return False
 
