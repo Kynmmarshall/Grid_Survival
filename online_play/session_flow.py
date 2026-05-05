@@ -599,18 +599,33 @@ def run_online_session_setup(
         lobby_host = str(ip)
         lobby_port = LAN_LOBBY_PORT
 
-    if not connected:
-        toast(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
-        return None
-
     lobby_session = LanLobbyClientSession(player_name=player_name)
     print(f"[SESSION_FLOW] Client connecting to lobby at {lobby_host}:{lobby_port}", flush=True)
     if not lobby_session.connect(lobby_host, lobby_port):
         print(f"[SESSION_FLOW] Lobby connect failed: {lobby_session.last_error}", flush=True)
+        if not connected:
+            toast(
+                screen,
+                clock,
+                (
+                    "Connection failed: "
+                    f"game={network.last_error or 'unknown error'}, "
+                    f"lobby={lobby_session.last_error or 'unknown error'}"
+                ),
+            )
+            return None
         toast(screen, clock, f"LAN lobby join failed: {lobby_session.last_error or 'unknown error'}")
         lobby_session = None
     else:
         print(f"[SESSION_FLOW] Lobby connect succeeded", flush=True)
+
+    if not connected:
+        toast(
+            screen,
+            clock,
+            "Joined lobby. Gameplay transport will connect when match starts.",
+            color=(245, 210, 120),
+        )
 
     selected_level = resolve_level_option(1)
     if selected_level is None:

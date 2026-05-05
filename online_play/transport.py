@@ -85,7 +85,7 @@ class PlayerState:
 
 
 class NetworkManager:
-    """Base transport manager for a single online-play peer."""
+    """Base transport manager for online-play peers."""
 
     _CRITICAL_MESSAGES = CRITICAL_MESSAGE_TYPES
     _LATEST_ONLY_MESSAGES = LATEST_ONLY_MESSAGE_TYPES
@@ -103,9 +103,9 @@ class NetworkManager:
         self.message_queue: "queue.Queue[dict[str, Any]]" = queue.Queue()
         self._tx_seq = 0
         self._pending_lock = threading.Lock()
-        self._pending_reliable: dict[int, dict[str, Any]] = {}
-        self._seen_reliable: dict[int, float] = {}
-        self._fragment_buffer: dict[int, dict[str, Any]] = {}
+        self._pending_reliable: dict[tuple[int, tuple[str, int]], dict[str, Any]] = {}
+        self._seen_reliable: dict[tuple[tuple[str, int], int], float] = {}
+        self._fragment_buffer: dict[tuple[tuple[str, int], int], dict[str, Any]] = {}
         self._latest_messages: dict[str, dict[str, Any]] = {}
         self._latest_messages_lock = threading.Lock()
         self._last_recv_seq_by_type: dict[str, int] = {}
@@ -113,6 +113,8 @@ class NetworkManager:
         self._latest_outgoing: dict[str, tuple[dict[str, Any], bool]] = {}
         self._latest_outgoing_lock = threading.Lock()
         self.peer_address: Optional[tuple[str, int]] = None
+        self.peer_addresses: set[tuple[str, int]] = set()
+        self._peer_last_recv: dict[tuple[str, int], float] = {}
         self.udp_peer_address: Optional[tuple[str, int]] = None
         self.udp_connected = False
         self._last_recv_time = 0.0
@@ -121,7 +123,11 @@ class NetworkManager:
         self.last_error: Optional[str] = None
 
     def send_message(self, message_type: str, **payload: Any) -> bool:
-        if not self.connected or not self.peer_address:
+        if not self.connected:
+            return False
+        if self.is_host and not self.peer_addresses:
+            return False
+        if not self.is_host and not self.peer_address:
             return False
 
         reliable = message_type not in self._UNRELIABLE_MESSAGES
@@ -182,17 +188,36 @@ class NetworkManager:
         self._tx_seq = (self._tx_seq + 1) & 0xFFFFFFFF
         return self._tx_seq
 
+    def _get_send_targets(self) -> list[tuple[str, int]]:
+        if self.is_host:
+            return list(self.peer_addresses)
+        if self.peer_address is None:
+            return []
+        return [self.peer_address]
+
     def _send_raw_datagram(self, data: bytes, *, address: tuple[str, int] | None = None) -> bool:
         sock = self.socket
-        dest = address or self.peer_address
-        if not sock or not dest:
+        if not sock:
             return False
-        try:
-            sock.sendto(data, dest)
-            return True
-        except (socket.error, OSError) as exc:
-            self.last_error = str(exc)
+        destinations: list[tuple[str, int]]
+        if address is not None:
+            destinations = [address]
+        elif self.is_host:
+            destinations = list(self.peer_addresses)
+        elif self.peer_address is not None:
+            destinations = [self.peer_address]
+        else:
+            destinations = []
+        if not destinations:
             return False
+        sent_any = False
+        for dest in destinations:
+            try:
+                sock.sendto(data, dest)
+                sent_any = True
+            except (socket.error, OSError) as exc:
+                self.last_error = str(exc)
+        return sent_any
 
     def _send_control(self, kind: str, *, address: tuple[str, int] | None = None, **payload: Any) -> bool:
         packet = {"k": kind, **payload}
@@ -268,17 +293,17 @@ class NetworkManager:
         self.message_queue.put(message)
 
     def _cleanup_runtime_state(self, now: float) -> None:
-        stale_seen = [seq for seq, ts in self._seen_reliable.items() if now - ts > 30.0]
-        for seq in stale_seen:
-            self._seen_reliable.pop(seq, None)
+        stale_seen = [key for key, ts in self._seen_reliable.items() if now - ts > 30.0]
+        for key in stale_seen:
+            self._seen_reliable.pop(key, None)
 
         stale_frag = [
-            seq
-            for seq, entry in self._fragment_buffer.items()
+            key
+            for key, entry in self._fragment_buffer.items()
             if now - float(entry.get("created", now)) > FRAGMENT_TTL_SECONDS
         ]
-        for seq in stale_frag:
-            self._fragment_buffer.pop(seq, None)
+        for key in stale_frag:
+            self._fragment_buffer.pop(key, None)
 
         if len(self._fragment_buffer) > MAX_FRAGMENT_MESSAGES:
             ordered = sorted(
@@ -286,29 +311,36 @@ class NetworkManager:
                 key=lambda kv: float(kv[1].get("created", now)),
             )
             to_drop = len(self._fragment_buffer) - MAX_FRAGMENT_MESSAGES
-            for seq, _entry in ordered[:to_drop]:
-                self._fragment_buffer.pop(seq, None)
+            for key, _entry in ordered[:to_drop]:
+                self._fragment_buffer.pop(key, None)
 
     def _resend_reliables(self, now: float) -> None:
         if not self.connected:
             return
         timed_out = False
+        timed_out_peers: set[tuple[str, int]] = set()
         with self._pending_lock:
-            for seq, entry in list(self._pending_reliable.items()):
+            for pending_key, entry in list(self._pending_reliable.items()):
                 last_sent = float(entry.get("last_sent", 0.0))
                 retries = int(entry.get("retries", 0))
                 if now - last_sent < RELIABLE_RESEND_INTERVAL:
                     continue
                 datagrams: list[bytes] = entry.get("datagrams", [])
+                _seq, target = pending_key
                 for dgram in datagrams:
-                    self._send_raw_datagram(dgram)
+                    self._send_raw_datagram(dgram, address=target)
                 retries += 1
                 entry["last_sent"] = now
                 entry["retries"] = retries
                 if retries > RELIABLE_MAX_RETRIES:
-                    self._pending_reliable.pop(seq, None)
-                    timed_out = True
-        if timed_out and self.connected:
+                    self._pending_reliable.pop(pending_key, None)
+                    if self.is_host:
+                        timed_out_peers.add(target)
+                    else:
+                        timed_out = True
+        for peer in timed_out_peers:
+            self._drop_host_peer(peer, notify=True)
+        if timed_out and self.connected and not self.is_host:
             self.last_error = "Reliable UDP delivery timed out"
             self._mark_disconnected(notify=True)
 
@@ -326,8 +358,19 @@ class NetworkManager:
                 payload=payload,
                 reliable=reliable,
             )
-            for dgram in datagrams:
-                self._send_raw_datagram(dgram)
+            targets = self._get_send_targets()
+            for target in targets:
+                for dgram in datagrams:
+                    self._send_raw_datagram(dgram, address=target)
+            if reliable:
+                with self._pending_lock:
+                    for target in targets:
+                        self._pending_reliable[(seq, target)] = {
+                            "datagrams": datagrams,
+                            "last_sent": time.time(),
+                            "retries": 0,
+                            "message_type": msg_type,
+                        }
 
     def _send_keepalive_if_needed(self, now: float) -> None:
         if self.connected and now - self._last_keepalive_sent >= KEEPALIVE_INTERVAL:
@@ -335,6 +378,15 @@ class NetworkManager:
                 self._last_keepalive_sent = now
 
     def _check_connection_timeout(self, now: float) -> None:
+        if self.is_host:
+            stale_peers = [
+                peer
+                for peer, seen_at in self._peer_last_recv.items()
+                if now - seen_at > CONNECTION_TIMEOUT
+            ]
+            for peer in stale_peers:
+                self._drop_host_peer(peer, notify=True)
+            return
         if self.connected and now - self._last_recv_time > CONNECTION_TIMEOUT:
             self.last_error = "Network timeout"
             self._mark_disconnected(notify=True)
@@ -362,24 +414,27 @@ class NetworkManager:
             )
             if not datagrams:
                 continue
-            for dgram in datagrams:
-                self._send_raw_datagram(dgram)
+            targets = self._get_send_targets()
+            for target in targets:
+                for dgram in datagrams:
+                    self._send_raw_datagram(dgram, address=target)
             if reliable:
                 with self._pending_lock:
-                    self._pending_reliable[seq] = {
-                        "datagrams": datagrams,
-                        "last_sent": now,
-                        "retries": 0,
-                        "message_type": msg_type,
-                    }
+                    for target in targets:
+                        self._pending_reliable[(seq, target)] = {
+                            "datagrams": datagrams,
+                            "last_sent": now,
+                            "retries": 0,
+                            "message_type": msg_type,
+                        }
 
-    def _handle_ack(self, packet: dict[str, Any]) -> None:
+    def _handle_ack(self, packet: dict[str, Any], address: tuple[str, int]) -> None:
         seq = packet.get("s")
         if isinstance(seq, int):
             with self._pending_lock:
-                self._pending_reliable.pop(seq, None)
+                self._pending_reliable.pop((seq, address), None)
 
-    def _handle_data_packet(self, packet: dict[str, Any]) -> None:
+    def _handle_data_packet(self, packet: dict[str, Any], address: tuple[str, int]) -> None:
         seq = packet.get("s")
         msg_type = packet.get("t")
         payload = packet.get("p")
@@ -389,19 +444,23 @@ class NetworkManager:
         if not isinstance(payload, dict):
             payload = {}
         if reliable:
-            if seq in self._seen_reliable:
-                self._send_control(PKT_ACK, s=seq)
+            seen_key = (address, seq)
+            if seen_key in self._seen_reliable:
+                self._send_control(PKT_ACK, address=address, s=seq)
                 return
-            self._seen_reliable[seq] = time.time()
-            self._send_control(PKT_ACK, s=seq)
+            self._seen_reliable[seen_key] = time.time()
+            self._send_control(PKT_ACK, address=address, s=seq)
         message = {"type": msg_type, **payload}
         if msg_type == "disconnect":
-            self._queue_or_latest_message({"type": "disconnect"}, seq=seq)
-            self._mark_disconnected(notify=False)
+            if self.is_host:
+                self._drop_host_peer(address, notify=False)
+            else:
+                self._queue_or_latest_message({"type": "disconnect"}, seq=seq)
+                self._mark_disconnected(notify=False)
             return
         self._queue_or_latest_message(message, seq=seq)
 
-    def _handle_fragment(self, packet: dict[str, Any]) -> None:
+    def _handle_fragment(self, packet: dict[str, Any], address: tuple[str, int]) -> None:
         seq = packet.get("s")
         idx = packet.get("i")
         total = packet.get("n")
@@ -411,27 +470,29 @@ class NetworkManager:
             return
         if not isinstance(frag_b64, str) or total <= 0 or idx < 0 or idx >= total:
             return
-        if reliable and seq in self._seen_reliable:
-            self._send_control(PKT_ACK, s=seq)
+        seen_key = (address, seq)
+        if reliable and seen_key in self._seen_reliable:
+            self._send_control(PKT_ACK, address=address, s=seq)
             return
         try:
             chunk = base64.b64decode(frag_b64.encode("ascii"), validate=True)
         except (ValueError, base64.binascii.Error):
             return
-        entry = self._fragment_buffer.get(seq)
+        frag_key = (address, seq)
+        entry = self._fragment_buffer.get(frag_key)
         now = time.time()
         if entry is None:
             entry = {"created": now, "total": total, "reliable": reliable, "parts": {}}
-            self._fragment_buffer[seq] = entry
+            self._fragment_buffer[frag_key] = entry
         if int(entry.get("total", total)) != total:
-            self._fragment_buffer.pop(seq, None)
+            self._fragment_buffer.pop(frag_key, None)
             return
         parts: dict[int, bytes] = entry["parts"]
         if idx not in parts:
             parts[idx] = chunk
         if len(parts) != total:
             return
-        self._fragment_buffer.pop(seq, None)
+        self._fragment_buffer.pop(frag_key, None)
         try:
             assembled = b"".join(parts[i] for i in range(total))
         except KeyError:
@@ -443,13 +504,34 @@ class NetworkManager:
         except (json.JSONDecodeError, UnicodeDecodeError):
             return
         if isinstance(data_packet, dict) and data_packet.get("k") == PKT_DATA:
-            self._handle_data_packet(data_packet)
+            self._handle_data_packet(data_packet, address)
+
+    def _drop_host_peer(self, address: tuple[str, int], *, notify: bool) -> None:
+        if not self.is_host:
+            return
+        if address in self.peer_addresses:
+            self.peer_addresses.discard(address)
+            self._peer_last_recv.pop(address, None)
+            with self._pending_lock:
+                stale_keys = [key for key in self._pending_reliable if key[1] == address]
+                for key in stale_keys:
+                    self._pending_reliable.pop(key, None)
+            if self.peer_address == address:
+                self.peer_address = next(iter(self.peer_addresses), None)
+            self.udp_peer_address = self.peer_address
+        self.connected = bool(self.peer_addresses)
+        self.udp_connected = self.connected
+        if notify and not self.connected and not self._disconnect_notified:
+            self.message_queue.put({"type": "disconnect"})
+            self._disconnect_notified = True
 
     def _mark_disconnected(self, *, notify: bool) -> None:
         was_connected = bool(self.connected)
         self.connected = False
         self.udp_connected = False
         if self.is_host:
+            self.peer_addresses.clear()
+            self._peer_last_recv.clear()
             self.peer_address = None
             self.udp_peer_address = None
         with self._pending_lock:
@@ -463,24 +545,25 @@ class NetworkManager:
             self._disconnect_notified = True
 
     def _address_matches_peer(self, address: tuple[str, int]) -> bool:
+        if self.is_host:
+            return address in self.peer_addresses
         if self.peer_address is None:
             return False
-        if self.is_host:
-            return address == self.peer_address
         return address[0] == self.peer_address[0] and address[1] == self.peer_address[1]
 
     def _handle_hello(self, address: tuple[str, int]) -> None:
         if not self.is_host:
             return
-        if self.connected and self.peer_address and address != self.peer_address:
-            return
-        self.peer_address = address
+        self.peer_addresses.add(address)
+        self.peer_address = self.peer_address or address
         self.udp_peer_address = address
         self.connected = True
         self.udp_connected = True
         self._disconnect_notified = False
-        self._last_recv_time = time.time()
-        self._send_control(PKT_HELLO_ACK, address=address, ts=self._last_recv_time)
+        now = time.time()
+        self._last_recv_time = now
+        self._peer_last_recv[address] = now
+        self._send_control(PKT_HELLO_ACK, address=address, ts=now)
 
     def _handle_hello_ack(self, address: tuple[str, int]) -> None:
         if self.is_host or self.peer_address is None:
@@ -517,22 +600,28 @@ class NetworkManager:
                 continue
             if not self._address_matches_peer(address):
                 continue
-            self._last_recv_time = time.time()
+            now = time.time()
+            self._last_recv_time = now
+            if self.is_host:
+                self._peer_last_recv[address] = now
             if kind == PKT_ACK:
-                self._handle_ack(packet)
+                self._handle_ack(packet, address)
             elif kind == PKT_KEEPALIVE:
                 pass
             elif kind == PKT_DISCONNECT:
-                self._mark_disconnected(notify=True)
+                if self.is_host:
+                    self._drop_host_peer(address, notify=True)
+                else:
+                    self._mark_disconnected(notify=True)
             elif kind == PKT_DATA:
-                self._handle_data_packet(packet)
+                self._handle_data_packet(packet, address)
             elif kind == PKT_FRAGMENT:
-                self._handle_fragment(packet)
+                self._handle_fragment(packet, address)
         if not self.is_host and self.connected:
             self._mark_disconnected(notify=True)
 
     def disconnect(self) -> None:
-        if self.connected and self.socket and self.peer_address:
+        if self.connected and self.socket and (self.peer_address or self.peer_addresses):
             self._send_control(PKT_DISCONNECT)
             self._send_control(PKT_DISCONNECT)
         self.running = False
@@ -555,6 +644,8 @@ class NetworkManager:
         if self._send_thread and self._send_thread.is_alive():
             self._send_thread.join(timeout=1.0)
         self.peer_address = None
+        self.peer_addresses.clear()
+        self._peer_last_recv.clear()
         self.udp_peer_address = None
         with self._pending_lock:
             self._pending_reliable.clear()
