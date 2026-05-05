@@ -108,8 +108,8 @@ def _clamp_difficulty(value: int) -> int:
 class AIPlayer(Player):
     """Versatile AI opponent whose awareness scales with difficulty."""
 
-    def __init__(self, position=None, difficulty: int = AI_DEFAULT_DIFFICULTY):
-        super().__init__(position=position or PLAYER_START_POS)
+    def __init__(self, position=None, difficulty: int = AI_DEFAULT_DIFFICULTY, character_name: str | None = None):
+        super().__init__(position=position or PLAYER_START_POS, character_name=character_name)
         self.is_ai = True
         self.difficulty = _clamp_difficulty(difficulty)
         self.config = DIFFICULTY_PRESETS[self.difficulty]
