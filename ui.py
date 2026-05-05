@@ -158,7 +158,7 @@ class GameHUD:
 
     def _draw_pause_button(self, surface: pygame.Surface, is_paused: bool):
         """Draw a clickable pause toggle button."""
-        label = "PAUSED" if is_paused else "PAUSE"
+        label = "PAUSED" if is_paused else "PAUSE 'P'"
         color = HUD_TIMER_URGENT_COLOR if is_paused else HUD_TIMER_BORDER_COLOR
 
         label_surf = self._font_label.render(label, True, color)

@@ -11,6 +11,7 @@ from backend.account_service import AccountService
 from ai_player import AIPlayer
 from assets import load_background_surface, load_tilemap_surface
 from audio import get_audio
+from character_manager import available_characters
 from collision_manager import CollisionManager
 from player import Player
 from post_match_ui import MatchSummaryScreen, RRGainScreen
@@ -223,7 +224,12 @@ class GameManager:
             )
             if USE_AI_PLAYER:
                 ai_pos = next(spawn_positions, PLAYER_START_POS)
-                self.players.append(AIPlayer(position=ai_pos))
+                all_chars = available_characters()
+                ai_char = primary_char
+                if len(all_chars) > 1:
+                    available_for_ai = [c for c in all_chars if c != primary_char]
+                    ai_char = random.choice(available_for_ai) if available_for_ai else primary_char
+                self.players.append(AIPlayer(position=ai_pos, character_name=ai_char))
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
             custom_controls = load_custom_controls()
             if custom_controls is None:
@@ -317,7 +323,7 @@ class GameManager:
                 if event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
                     self._adjust_audio_volume(-AUDIO_VOLUME_STEP)
                     continue
-                if event.key == pygame.K_TAB:
+                if event.key == pygame.K_p:
                     self._toggle_pause()
                     continue
                 elif event.key == pygame.K_l and not self.is_network_game:
@@ -1237,7 +1243,7 @@ class GameManager:
             text_rect = text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2))
             
             font_small = pygame.font.Font(None, 36)
-            sub_text = font_small.render(f"Press TAB to Resume", True, (200, 200, 220))
+            sub_text = font_small.render(f"Press P to Resume", True, (200, 200, 220))
             sub_rect = sub_text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2 + 50))
             
             menu_text = font_small.render(f"To go to Main Menu, press Left Ctrl", True, (150, 150, 180))
