@@ -153,6 +153,7 @@ class MatchSummaryScreen:
         self._placeholder_frames: list[pygame.Surface] = []
         self._menu_rect = pygame.Rect(0, 0, 190, 48)
         self._continue_rect = pygame.Rect(0, 0, 190, 48)
+        self._credits_rect = pygame.Rect(0, 0, 160, 48)
 
         for row in self.players:
             self._anims.append(self._load_idle_animation(str(row.get("character", "Caveman"))))
@@ -179,6 +180,9 @@ class MatchSummaryScreen:
                         return "menu"
                     if self.allow_continue and self._continue_rect.collidepoint(event.pos):
                         return "continue"
+                    if self._credits_rect.collidepoint(event.pos):
+                        from scenes.credits_screen import CreditsScreen
+                        CreditsScreen(screen, clock).run()
 
             self.draw(screen)
             pygame.display.flip()
@@ -292,16 +296,20 @@ class MatchSummaryScreen:
                 break
 
         self._menu_rect.size = (210, 50)
-        self._menu_rect.center = (panel.centerx + 132, panel.bottom - 52)
+        self._menu_rect.center = (panel.centerx + 222, panel.bottom - 52)
         self._draw_button(screen, self._menu_rect, "MAIN MENU", (135, 85, 80), (245, 210, 205))
+
+        self._credits_rect.size = (160, 50)
+        self._credits_rect.center = (panel.centerx, panel.bottom - 52)
+        self._draw_button(screen, self._credits_rect, "CREDITS", (60, 40, 90), (220, 190, 255))
 
         if self.allow_continue:
             self._continue_rect.size = (210, 50)
-            self._continue_rect.center = (panel.centerx - 132, panel.bottom - 52)
+            self._continue_rect.center = (panel.centerx - 222, panel.bottom - 52)
             self._draw_button(screen, self._continue_rect, "CONTINUE", (76, 124, 86), (208, 240, 215))
         else:
             hint = self._font_small.render("Match complete. Return to menu.", True, (180, 195, 222))
-            screen.blit(hint, hint.get_rect(center=(panel.centerx - 132, panel.bottom - 52)))
+            screen.blit(hint, hint.get_rect(center=(panel.centerx - 222, panel.bottom - 52)))
 
         draw_online_status_badge(
             screen,
