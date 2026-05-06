@@ -824,6 +824,41 @@ class UdpClientTransport(NetworkManager):
                     pass
             return False
 
+    def _setup_udp_socket(self, host: str, port: int = DEFAULT_PORT) -> bool:
+        """Setup UDP socket and threads WITHOUT waiting for hello_ack.
+        
+        Used when TCP auth happens instead of UDP hello handshake.
+        Returns True if socket is ready, False on error.
+        """
+        try:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            client_socket.bind(("0.0.0.0", 0))
+            client_socket.settimeout(0.05)
+            self.socket = client_socket
+            self.udp_socket = client_socket
+            self.peer_address = (host, int(port))
+            self.udp_peer_address = self.peer_address
+            self.last_error = None
+            self._disconnect_notified = False
+            self._last_recv_time = time.time()
+            self._start_threads()
+            try:
+                print(f"[DEBUG] UDP socket ready for {host}:{port} (no hello wait)")
+            except Exception:
+                pass
+            return True
+        except (socket.error, OSError) as exc:
+            self.last_error = str(exc)
+            if self.socket:
+                try:
+                    self.socket.close()
+                except OSError:
+                    pass
+                self.socket = None
+                self.udp_socket = None
+            return False
+
     def connect_to_host(self, host: str, port: int = DEFAULT_PORT) -> bool:
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

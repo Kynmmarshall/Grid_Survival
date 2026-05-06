@@ -123,7 +123,17 @@ class InternetSessionClient(NetworkClient):
                 if "econnrefused" in lower or "connection refused" in lower or "winerror 10061" in lower or "refused" in lower:
                     self._logger.warning("Internet connection refused; triggering LAN fallback")
                     raise InternetFallbackLAN("Internet connect refused; fallback to LAN")
-            return False
+            
+            # If UDP connection failed, try setting up UDP for data only (TCP will handle auth)
+            try:
+                print(f"[DEBUG] UDP hello failed, setting up UDP socket for data only...")
+                if hasattr(self, 'transport') and hasattr(self.transport, '_setup_udp_socket'):
+                    if not self.transport._setup_udp_socket(host, port):
+                        print(f"[DEBUG] UDP socket setup failed: {self.transport.last_error}")
+                        return False
+            except Exception as e:
+                print(f"[DEBUG] UDP socket setup exception: {e}")
+                return False
 
         self.match_endpoint = str(endpoint)
         self.match_token = str(token)
@@ -140,8 +150,13 @@ class InternetSessionClient(NetworkClient):
                 if tcp_auth_success:
                     self.session_id = self.transport.session_id
                     self._last_auth_ok = True
+                    # Mark transport as connected since TCP auth succeeded
+                    # (UDP hello_ack may be blocked but we're authenticated)
+                    self.transport.connected = True
+                    self.transport.udp_connected = True
+                    self.transport._last_recv_time = time.time()
                     try:
-                        print(f"[DEBUG] TCP handshake succeeded, skipping UDP auth")
+                        print(f"[DEBUG] TCP handshake succeeded, marking transport connected")
                     except Exception:
                         pass
         except Exception as e:
@@ -150,7 +165,7 @@ class InternetSessionClient(NetworkClient):
             except Exception:
                 pass
 
-        # If TCP succeeded, return immediately (UDP connection will happen automatically)
+        # If TCP succeeded, return immediately (game will use UDP for snapshots)
         if tcp_auth_success:
             return True
 
