@@ -100,6 +100,39 @@ class InternetSessionClient(NetworkClient):
         except Exception:
             pass
 
+        # Try TCP handshake directly (don't wait for UDP hello which is blocked)
+        tcp_success = False
+        try:
+            if hasattr(self, 'transport') and hasattr(self.transport, '_setup_udp_socket'):
+                print(f"[DEBUG] Setting up UDP socket for data (no hello wait)...")
+                if self.transport._setup_udp_socket(host, port):
+                    print(f"[DEBUG] UDP socket ready, attempting TCP handshake...")
+                    if hasattr(self.transport, '_tcp_handshake'):
+                        if self.transport._tcp_handshake(host, port, token, player_name):
+                            self.session_id = self.transport.session_id
+                            self._last_auth_ok = True
+                            self.transport.connected = True
+                            self.transport.udp_connected = True
+                            self.transport._last_recv_time = time.time()
+                            tcp_success = True
+                            print(f"[DEBUG] TCP handshake SUCCEEDED!")
+        except Exception as e:
+            try:
+                print(f"[DEBUG] TCP path failed: {e}")
+            except Exception:
+                pass
+
+        # If TCP succeeded, we're connected
+        if tcp_success:
+            self.match_endpoint = str(endpoint)
+            self.match_token = str(token)
+            self.player_name = str(player_name)
+            self._last_host = host
+            self._last_port = int(port)
+            return True
+
+        # Fallback: try UDP hello (for backward compatibility with UDP-only servers)
+        print(f"[DEBUG] TCP failed, falling back to UDP hello...")
         connected = False
         connect_attempts = 3
         for attempt in range(1, connect_attempts + 1):
