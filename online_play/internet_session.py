@@ -9,6 +9,8 @@ import time
 import urllib.parse
 
 from .session import DEFAULT_PORT, NetworkClient
+from .log import get_logger
+from .exceptions import InternetFallbackLAN
 
 
 class InternetSessionClient(NetworkClient):
@@ -24,6 +26,7 @@ class InternetSessionClient(NetworkClient):
         self._last_port: int = DEFAULT_PORT
         self._last_auth_ok = False
         self._last_resync_request_at = 0.0
+        self._logger = get_logger("internet_session")
 
     @staticmethod
     def _parse_endpoint(endpoint: str) -> tuple[str, int] | None:
@@ -85,8 +88,15 @@ class InternetSessionClient(NetworkClient):
 
         host, port = parsed
         host = self._normalize_match_host(host)
+        # Use logger instead of prints for debug
         try:
-            print(f"[DEBUG] InternetSessionClient.connect_to_match -> endpoint={endpoint} parsed={host}:{port} token_set={bool(token)} player={player_name}")
+            self._logger.debug(
+                "connect_to_match -> endpoint=%s parsed=%s token_set=%s player=%s",
+                endpoint,
+                f"{host}:{port}",
+                bool(token),
+                player_name,
+            )
         except Exception:
             pass
 
@@ -106,6 +116,13 @@ class InternetSessionClient(NetworkClient):
                 time.sleep(0.35)
 
         if not connected:
+            # If the connection to the Internet endpoint is refused, signal
+            # a LAN fallback to the higher level flow via an exception.
+            if self.last_error is not None:
+                lower = str(self.last_error).lower()
+                if "econnrefused" in lower or "connection refused" in lower or "winerror 10061" in lower or "refused" in lower:
+                    self._logger.warning("Internet connection refused; triggering LAN fallback")
+                    raise InternetFallbackLAN("Internet connect refused; fallback to LAN")
             return False
 
         self.match_endpoint = str(endpoint)

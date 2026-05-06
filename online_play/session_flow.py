@@ -21,6 +21,9 @@ from lan_prompts import (
 )
 from scenes.common import SceneAudioOverlay, _draw_rounded_rect, _load_font
 from scenes import InternetLobbySetup, InternetPartyLobbyScreen
+from .exceptions import InternetFallbackLAN
+from .log import get_logger
+logger = get_logger("session_flow")
 from settings import FONT_PATH_BODY, FONT_PATH_HEADING, WINDOW_SIZE
 
 from .match_flow import (
@@ -447,11 +450,15 @@ def _connect_internet_match(
             continue
 
         internet_network = InternetSessionClient()
-        connected = internet_network.connect_to_match(
-            endpoint=endpoint,
-            token=token,
-            player_name=player_name,
-        )
+        try:
+            connected = internet_network.connect_to_match(
+                endpoint=endpoint,
+                token=token,
+                player_name=player_name,
+            )
+        except InternetFallbackLAN:
+            # Propagate fallback to LAN to the caller so LAN flow can take over
+            raise
         if not connected:
             toast(
                 screen,
@@ -516,7 +523,8 @@ def run_online_session_setup(
         return None
 
     if route == "internet":
-        return _connect_internet_match(
+        try:
+            return _connect_internet_match(
             screen,
             clock,
             online_service=OnlineService.from_env(),
@@ -528,7 +536,12 @@ def run_online_session_setup(
             choose_characters=choose_characters,
             resolve_level_option=resolve_level_option,
             toast=toast,
-        )
+            )
+        except InternetFallbackLAN:
+            # Fallback to LAN route automatically
+            toast(screen, clock, "Internet route unavailable. Falling back to LAN route.")
+            # Fall through to LAN route handling below (prompt_host_or_join branch)
+            pass
 
     choice = prompt_host_or_join(screen, clock)
     if choice is None:

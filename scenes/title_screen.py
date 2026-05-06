@@ -116,6 +116,7 @@ class TitleScreen:
         self._tutorial_button_rect = pygame.Rect(24, self.height - 124, 190, 46)
         self._back_button_rect = pygame.Rect(24, self.height - 68, 150, 46)
         self._controls_button_rect = pygame.Rect(self.width - 134, self.height - 68, 110, 46)
+        self._credits_button_rect = pygame.Rect(self.width - 260, self.height - 68, 116, 46)
 
         # First time playing prompt - only show if not answered yet
         self._show_tutorial_prompt = bool(enable_tutorial_prompt and not _first_time_prompt_answered)
@@ -308,6 +309,7 @@ class TitleScreen:
         self._draw_controls_edit_button()
         self._draw_tutorial_button()
         self._draw_back_button()
+        self._draw_credits_button()
         self._audio_overlay.draw(self.screen)
 
     def _draw_controls_panel(self) -> None:
@@ -679,6 +681,17 @@ class TitleScreen:
         label = self._font_small.render("EDIT", True, (235, 240, 250))
         self.screen.blit(label, label.get_rect(center=self._controls_button_rect.center))
 
+    def _draw_credits_button(self) -> None:
+        mouse_pos = pygame.mouse.get_pos()
+        hovered = self._credits_button_rect.collidepoint(mouse_pos)
+        base_color = (45, 30, 70, 210)
+        hover_color = (85, 55, 130, 230)
+        bg_color = hover_color if hovered else base_color
+        border_color = (180, 130, 255)
+        _draw_rounded_rect(self.screen, self._credits_button_rect, bg_color, border_color, 2, 14)
+        label = self._font_small.render("CREDITS", True, (230, 210, 255))
+        self.screen.blit(label, label.get_rect(center=self._credits_button_rect.center))
+
     def _play_tutorial_video(self) -> None:
         if not TUTORIAL_VIDEO_PATH.exists():
             self.warning_text = "TUTORIAL VIDEO NOT FOUND"
@@ -886,6 +899,10 @@ class TitleScreen:
                         return None
                     if self._controls_button_rect.collidepoint(event.pos):
                         self._customize_controls()
+                        continue
+                    if self._credits_button_rect.collidepoint(event.pos):
+                        from .credits_screen import CreditsScreen
+                        CreditsScreen(self.screen, self.clock).run()
                         continue
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:

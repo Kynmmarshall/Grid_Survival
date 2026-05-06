@@ -1,0 +1,45 @@
+name: CI Python
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 0 * * 0'  # weekly retry
+
+jobs:
+  linux-python:
+    name: Linux Python 3.11
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Run tests
+        run: |
+          pytest -q
+
+  windows-python:
+    name: Windows Python 3.11
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if exist requirements.txt (
+            conda --version >nul 2>&1 || echo "No conda"; # avoid conda complexity
+            pip install -r requirements.txt
+          )
+      - name: Run tests
+        run: |
+          pytest -q
