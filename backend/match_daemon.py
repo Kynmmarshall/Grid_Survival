@@ -237,8 +237,23 @@ class MatchDaemon:
                 self._initialize_session_world(session)
 
             seq = self._next_seq()
-            # reply with ok and session id (reuse token as session id)
-            self._send_packet(addr, PKT_DATA, seq, 0, "internet_auth_ok", {"session_id": token})
+            # Reply with ok and session id (reuse token as session id).
+            # Make this reliable so the client cannot get stuck waiting for the
+            # very first join confirmation.
+            self._send_packet(addr, PKT_DATA, seq, 1, "internet_auth_ok", {"session_id": token})
+            # Bootstrap the client immediately with a state snapshot so the
+            # first match frame is not blank if the regular 10 Hz stream starts
+            # a moment later.
+            bootstrap_snap = self._build_snapshot(session)
+            bootstrap_world = self._build_world_snapshot(session)
+            bootstrap_dynamic = self._build_world_dynamic_snapshot(session)
+            seq = self._next_seq()
+            self._send_packet(addr, PKT_DATA, seq, 1, "snapshot", bootstrap_snap)
+            seq = self._next_seq()
+            self._send_packet(addr, PKT_DATA, seq, 1, "world_snapshot", bootstrap_world)
+            if bootstrap_dynamic is not None:
+                seq = self._next_seq()
+                self._send_packet(addr, PKT_DATA, seq, 1, "world_dynamic_snapshot", bootstrap_dynamic)
             try:
                 if is_new_session:
                     print(f"[SESSION] New session created: match_id={match_id}, player={player}, addr={addr}", flush=True)
