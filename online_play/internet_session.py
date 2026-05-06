@@ -88,7 +88,15 @@ class InternetSessionClient(NetworkClient):
 
         host, port = parsed
         host = self._normalize_match_host(host)
-        # Use logger instead of prints for debug
+        
+        # Store for later use
+        self.match_endpoint = str(endpoint)
+        self.match_token = str(token)
+        self.player_name = str(player_name)
+        self._last_host = host
+        self._last_port = int(port)
+        self._last_auth_ok = False
+        
         try:
             self._logger.debug(
                 "connect_to_match -> endpoint=%s parsed=%s token_set=%s player=%s",
@@ -100,113 +108,65 @@ class InternetSessionClient(NetworkClient):
         except Exception:
             pass
 
-        # Try TCP handshake directly (don't wait for UDP hello which is blocked)
-        tcp_success = False
+        # === PHASE 1: Try TCP handshake (most reliable through firewalls) ===
+        print(f"[DEBUG] [PHASE 1] Attempting TCP handshake to {host}:{port}...")
         try:
-            if hasattr(self, 'transport') and hasattr(self.transport, '_setup_udp_socket'):
-                print(f"[DEBUG] Setting up UDP socket for data (no hello wait)...")
-                if self.transport._setup_udp_socket(host, port):
-                    print(f"[DEBUG] UDP socket ready, attempting TCP handshake...")
-                    if hasattr(self.transport, '_tcp_handshake'):
-                        if self.transport._tcp_handshake(host, port, token, player_name):
-                            self.session_id = self.transport.session_id
-                            self._last_auth_ok = True
+            if hasattr(self, 'transport') and hasattr(self.transport, '_tcp_handshake'):
+                if self.transport._tcp_handshake(host, port, token, player_name):
+                    print(f"[DEBUG] [PHASE 1] TCP auth succeeded!")
+                    self.session_id = self.transport.session_id
+                    self._last_auth_ok = True
+                    
+                    # Now set up UDP socket for game data
+                    # (no need to wait for hello_ack since TCP already authenticated)
+                    print(f"[DEBUG] [PHASE 1] Setting up UDP socket for game data...")
+                    if hasattr(self.transport, '_setup_udp_socket'):
+                        if self.transport._setup_udp_socket(host, port):
                             self.transport.connected = True
                             self.transport.udp_connected = True
                             self.transport._last_recv_time = time.time()
-                            tcp_success = True
-                            print(f"[DEBUG] TCP handshake SUCCEEDED!")
+                            print(f"[DEBUG] [PHASE 1] SUCCESS: Connected via TCP + UDP!")
+                            return True
+                        else:
+                            print(f"[DEBUG] [PHASE 1] UDP setup failed: {self.transport.last_error}")
+                    else:
+                        print(f"[DEBUG] [PHASE 1] _setup_udp_socket not available")
         except Exception as e:
             try:
-                print(f"[DEBUG] TCP path failed: {e}")
+                print(f"[DEBUG] [PHASE 1] TCP auth exception: {e}")
             except Exception:
                 pass
 
-        # If TCP succeeded, we're connected
-        if tcp_success:
-            self.match_endpoint = str(endpoint)
-            self.match_token = str(token)
-            self.player_name = str(player_name)
-            self._last_host = host
-            self._last_port = int(port)
-            return True
-
-        # Fallback: try UDP hello (for backward compatibility with UDP-only servers)
-        print(f"[DEBUG] TCP failed, falling back to UDP hello...")
+        # === PHASE 2: Fallback to UDP hello (backward compatibility) ===
+        print(f"[DEBUG] [PHASE 2] TCP failed, trying UDP hello...")
         connected = False
-        connect_attempts = 3
-        for attempt in range(1, connect_attempts + 1):
+        for attempt in range(1, 4):
+            print(f"[DEBUG] [PHASE 2] UDP hello attempt {attempt}/3...")
             if self.connect_to_host(host, port):
                 connected = True
+                print(f"[DEBUG] [PHASE 2] UDP hello succeeded!")
                 break
-            try:
-                print(
-                    f"[DEBUG] connect_to_host attempt {attempt}/{connect_attempts} failed -> last_error={self.last_error}"
-                )
-            except Exception:
-                pass
-            if attempt < connect_attempts:
+            print(f"[DEBUG] [PHASE 2] Attempt {attempt} failed: {self.last_error}")
+            if attempt < 3:
                 time.sleep(0.35)
 
         if not connected:
-            # If the connection to the Internet endpoint is refused, signal
-            # a LAN fallback to the higher level flow via an exception.
+            # Check if connection was refused (LAN fallback case)
             if self.last_error is not None:
                 lower = str(self.last_error).lower()
-                if "econnrefused" in lower or "connection refused" in lower or "winerror 10061" in lower or "refused" in lower:
+                if any(x in lower for x in ["econnrefused", "connection refused", "winerror 10061", "refused"]):
                     self._logger.warning("Internet connection refused; triggering LAN fallback")
                     raise InternetFallbackLAN("Internet connect refused; fallback to LAN")
             
-            # If UDP connection failed, try setting up UDP for data only (TCP will handle auth)
-            try:
-                print(f"[DEBUG] UDP hello failed, setting up UDP socket for data only...")
-                if hasattr(self, 'transport') and hasattr(self.transport, '_setup_udp_socket'):
-                    if not self.transport._setup_udp_socket(host, port):
-                        print(f"[DEBUG] UDP socket setup failed: {self.transport.last_error}")
-                        return False
-            except Exception as e:
-                print(f"[DEBUG] UDP socket setup exception: {e}")
-                return False
+            self.last_error = "Failed to connect via TCP or UDP"
+            return False
 
-        self.match_endpoint = str(endpoint)
-        self.match_token = str(token)
-        self.player_name = str(player_name)
-        self._last_host = host
-        self._last_port = int(port)
-        self._last_auth_ok = False
-
-        # Try TCP handshake first (more reliable through firewalls)
-        tcp_auth_success = False
-        try:
-            if hasattr(self, 'transport') and hasattr(self.transport, '_tcp_handshake'):
-                tcp_auth_success = self.transport._tcp_handshake(host, port, token, self.player_name)
-                if tcp_auth_success:
-                    self.session_id = self.transport.session_id
-                    self._last_auth_ok = True
-                    # Mark transport as connected since TCP auth succeeded
-                    # (UDP hello_ack may be blocked but we're authenticated)
-                    self.transport.connected = True
-                    self.transport.udp_connected = True
-                    self.transport._last_recv_time = time.time()
-                    try:
-                        print(f"[DEBUG] TCP handshake succeeded, marking transport connected")
-                    except Exception:
-                        pass
-        except Exception as e:
-            try:
-                print(f"[DEBUG] TCP handshake failed, falling back to UDP: {e}")
-            except Exception:
-                pass
-
-        # If TCP succeeded, return immediately (game will use UDP for snapshots)
-        if tcp_auth_success:
-            return True
-
-        # Fallback to UDP-based auth if TCP failed
+        # === PHASE 3: Send internet_auth and wait for confirmation ===
+        print(f"[DEBUG] [PHASE 3] Sending internet_auth...")
         if not self.send_message(
             "internet_auth",
-            token=self.match_token,
-            player=self.player_name,
+            token=token,
+            player=player_name,
             resume=False,
         ):
             self.last_error = "Failed to send internet_auth"
@@ -219,15 +179,18 @@ class InternetSessionClient(NetworkClient):
                 if message.get("type") == "internet_auth_ok":
                     self.session_id = str(message.get("session_id", "")) or None
                     self._last_auth_ok = True
+                    print(f"[DEBUG] [PHASE 3] SUCCESS: internet_auth_ok received!")
                     return True
                 if message.get("type") == "internet_auth_error":
                     self.last_error = str(message.get("error", "auth rejected"))
                     self.disconnect()
+                    print(f"[DEBUG] [PHASE 3] FAILED: {self.last_error}")
                     return False
             time.sleep(0.02)
 
         self.last_error = "Timed out waiting for internet_auth_ok"
         self.disconnect()
+        print(f"[DEBUG] [PHASE 3] FAILED: Timeout")
         return False
 
     def request_resync(self, reason: str = "manual") -> bool:
