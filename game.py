@@ -278,6 +278,7 @@ class GameManager:
             self.players.append(
                 Player(
                     position=next(spawn_positions, PLAYER_START_POS),
+                    controls=dict(DEFAULT_CONTROLS["player1"]),
                     character_name=self._character_choice(0),
                 )
             )
