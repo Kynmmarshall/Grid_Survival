@@ -7,6 +7,9 @@ import threading
 import time
 from typing import Any
 
+import os
+# On headless servers force SDL to use the dummy audio driver to avoid ALSA errors
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 
 from assets import load_tilemap_surface
@@ -137,22 +140,8 @@ class MatchDaemon:
         packet = {"k": kind, "s": int(seq), "r": int(reliable), "t": msg_type, "p": payload}
         try:
             raw = json.dumps(packet, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-            try:
-                self.sock.sendto(raw, addr)
-                try:
-                    print(f"[DEBUG] MatchDaemon.sent -> kind={kind} to={addr} seq={seq} type={msg_type}", flush=True)
-                except Exception:
-                    pass
-            except Exception as e:
-                try:
-                    print(f"[DEBUG] MatchDaemon.sendto failed -> addr={addr} kind={kind} seq={seq} err={e}", flush=True)
-                except Exception:
-                    pass
+            self.sock.sendto(raw, addr)
         except Exception:
-            try:
-                print("[DEBUG] MatchDaemon._send_packet: failed to encode/send packet", flush=True)
-            except Exception:
-                pass
             return
 
     @staticmethod
@@ -172,6 +161,11 @@ class MatchDaemon:
     def _handle_data(self, addr: tuple[str, int], packet: dict[str, Any]) -> None:
         t = packet.get("t")
         p = packet.get("p") or {}
+
+        try:
+            print(f"[NET] _handle_data: received type={t} from {addr}", flush=True)
+        except Exception:
+            pass
 
         def touch_addr() -> None:
             now = time.time()
@@ -276,11 +270,11 @@ class MatchDaemon:
 
     def _handle_hello(self, addr: tuple[str, int]) -> None:
         """Reply to the client's UDP hello so it can complete the session handshake."""
-        seq = self._next_seq()
         try:
-            print(f"[DEBUG] MatchDaemon._handle_hello -> replying hello_ack to {addr}", flush=True)
+            print(f"[NET] Hello probe from {addr}", flush=True)
         except Exception:
             pass
+        seq = self._next_seq()
         self._send_packet(addr, PKT_HELLO_ACK, seq, 0, "", {})
 
         # Track hello reception for client timeout detection
@@ -620,7 +614,7 @@ class MatchDaemon:
                 # continuously.
 
     def _cleanup_stale_sessions(self, now: float) -> None:
-        """Remove sessions with no active players for >90 seconds."""
+        """Remove sessions with no active players for >30 seconds (was 90s)."""
         stale_sessions = []
         with self._lock:
             for session_id, session in list(self._sessions.items()):
@@ -632,10 +626,10 @@ class MatchDaemon:
                         has_active_player = True
                         break
                 
-                # Session is stale if created >90s ago AND no active players
+                # Session is stale if created >30s ago AND no active players
                 created_at = session.get("created_at", now)
                 session_age = now - created_at
-                if session_age > 90.0 and not has_active_player:
+                if session_age > 30.0 and not has_active_player:
                     stale_sessions.append(session_id)
             
             # Remove stale sessions
@@ -691,10 +685,6 @@ class MatchDaemon:
                                 # Skip sending snapshots to stale clients (no activity for >CLIENT_TIMEOUT)
                                 last_seen = entry.get("last_seen", now)
                                 if now - last_seen > self.CLIENT_TIMEOUT:
-                                    try:
-                                        print(f"[DEBUG] MatchDaemon: skipping stale client {addr} (last_seen {now - last_seen:.1f}s ago)", flush=True)
-                                    except Exception:
-                                        pass
                                     continue
 
                                 seq = self._next_seq()
@@ -714,28 +704,13 @@ class MatchDaemon:
                     continue
 
                 try:
-                    try:
-                        print(f"[DEBUG] MatchDaemon.recv from {addr} raw={raw[:200]!r}", flush=True)
-                    except Exception:
-                        pass
                     packet = json.loads(raw.decode("utf-8"))
-                    try:
-                        print(f"[DEBUG] MatchDaemon.recv decoded -> {packet}", flush=True)
-                    except Exception:
-                        pass
                 except Exception:
                     # Some clients/middleboxes may alter probe payload formatting;
                     # still answer hello probes to establish UDP reachability.
                     if self._looks_like_hello_probe(raw):
                         self._handle_hello(addr)
-                        continue
-                    try:
-                        print("[DEBUG] MatchDaemon: failed to decode incoming UDP datagram", flush=True)
-                    except Exception:
-                        pass
                     continue
-
-                if not isinstance(packet, dict):
                     continue
                 kind = packet.get("k")
                 if kind == PKT_HELLO:
@@ -750,6 +725,18 @@ class MatchDaemon:
                     # ignore fragments in this MVP
                     continue
         finally:
+            # Graceful shutdown: signal all sessions to close and wait a bit
+            with self._lock:
+                for session in list(self._sessions.values()):
+                    for pname, entry in session.get("players", {}).items():
+                        addr = entry.get("addr")
+                        if addr:
+                            seq = self._next_seq()
+                            try:
+                                self._send_packet(addr, PKT_DATA, seq, 0, "game_end", {})
+                            except Exception:
+                                pass
+                self._sessions.clear()
             try:
                 s.close()
             except Exception:

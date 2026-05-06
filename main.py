@@ -234,11 +234,11 @@ def main():
 
         player_name = str(account_result.get("player_name") or active_account_username or "Player")
         active_account_username = account_result.get("account_username") or None
-        _sync_account_in_menu(account_service, active_account_username)
+        #_sync_account_in_menu(account_service, active_account_username)
 
         while True:
             break_to_title = False
-            _sync_account_in_menu(account_service, active_account_username)
+            #_sync_account_in_menu(account_service, active_account_username)
             mode_screen = ModeSelectionScreen(screen, clock, player_name)
             game_mode = mode_screen.run()
             if game_mode is None:

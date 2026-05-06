@@ -99,6 +99,7 @@ DEFAULT_CONTROLS = {
         "jump": pygame.K_SPACE,
         "power": pygame.K_q,
         "shoot": pygame.K_e,
+        "pause": pygame.K_p,
     },
     "player2": {
         "up": pygame.K_UP,
@@ -108,6 +109,7 @@ DEFAULT_CONTROLS = {
         "jump": pygame.K_RSHIFT,
         "power": pygame.K_SLASH,
         "shoot": pygame.K_RETURN,
+        "pause": pygame.K_p,
     },
 }
 

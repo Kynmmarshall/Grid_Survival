@@ -11,6 +11,7 @@ from backend.account_service import AccountService
 from ai_player import AIPlayer
 from assets import load_background_surface, load_tilemap_surface
 from audio import get_audio
+from character_manager import available_characters
 from collision_manager import CollisionManager
 from player import Player
 from post_match_ui import MatchSummaryScreen, RRGainScreen
@@ -97,11 +98,18 @@ class GameManager:
             self.game_mode == MODE_ONLINE_MULTIPLAYER and self.network is not None
         )
         self.is_network_host = bool(self.is_network_game and getattr(self.network, "is_host", False))
-        self.local_player_index = 0 if not self.is_network_game else max(0, min(1, local_player_index))
-        self.remote_player_index = 1 - self.local_player_index if self.is_network_game else None
+        network_player_slots = max(2, len(self.selected_characters)) if self.is_network_game else 1
+        self.local_player_index = 0 if not self.is_network_game else max(0, min(network_player_slots - 1, local_player_index))
+        self._remote_player_indexes: list[int] = []
+        if self.is_network_game:
+            self._remote_player_indexes = [
+                idx for idx in range(network_player_slots) if idx != self.local_player_index
+            ]
+        self.remote_player_index = self._remote_player_indexes[0] if self._remote_player_indexes else None
         self._pending_power_press = False
-        self._pending_remote_power_uses = 0
-        self._remote_input_state = self._empty_network_input_state()
+        self._pending_remote_power_uses_by_index: dict[int, int] = {}
+        self._remote_input_states_by_index: dict[int, dict] = {}
+        self._remote_player_index_by_sender: dict[tuple[str, int], int] = {}
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = 1 / 60
         self._snapshot_interval = 1 / 60
@@ -109,6 +117,10 @@ class GameManager:
         self._world_dynamic_snapshot_interval = 1 / 30
         self._world_snapshot_send_timer = 0.0
         self._world_snapshot_interval = 1 / 20
+        if self.is_network_game and len(self.selected_characters) > 2:
+            self._snapshot_interval = 1 / 40
+            self._world_dynamic_snapshot_interval = 1 / 24
+            self._world_snapshot_interval = 1 / 15
         self._network_round_seq = 0
         self._last_client_snapshot_time = -1.0
         self._last_client_world_snapshot_time = -1.0
@@ -119,14 +131,14 @@ class GameManager:
         self._last_client_pacman_snapshot_time = -1.0
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
-        self._client_position_blend = 0.35
-        self._client_local_position_blend = 0.22
+        self._client_position_blend = 0.32
+        self._client_local_position_blend = 0.18
         self._client_local_reconcile_deadzone = 12.0
         self._client_last_local_input = self._empty_network_input_state()
         self._client_snap_distance = 180.0
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
-        self._client_remote_extrapolation_cap = 1 / 16
+        self._client_remote_extrapolation_cap = 1 / 12
         self._network_disconnect_started_at: float | None = None
         self._network_last_reconnect_attempt_at = 0.0
         self._network_reconnect_thread: threading.Thread | None = None
@@ -214,7 +226,12 @@ class GameManager:
             )
             if USE_AI_PLAYER:
                 ai_pos = next(spawn_positions, PLAYER_START_POS)
-                self.players.append(AIPlayer(position=ai_pos))
+                all_chars = available_characters()
+                ai_char = primary_char
+                if len(all_chars) > 1:
+                    available_for_ai = [c for c in all_chars if c != primary_char]
+                    ai_char = random.choice(available_for_ai) if available_for_ai else primary_char
+                self.players.append(AIPlayer(position=ai_pos, character_name=ai_char))
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
             custom_controls = load_custom_controls()
             if custom_controls is None:
@@ -247,7 +264,8 @@ class GameManager:
                 }
             local_controls = custom_controls["player1"]
             remote_controls = custom_controls["player2"]
-            for idx in range(2):
+            online_slots = max(2, len(self.selected_characters))
+            for idx in range(online_slots):
                 controls = local_controls if idx == self.local_player_index else remote_controls
                 self.players.append(
                     Player(
@@ -307,7 +325,7 @@ class GameManager:
                 if event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_LEFTBRACKET):
                     self._adjust_audio_volume(-AUDIO_VOLUME_STEP)
                     continue
-                if event.key == pygame.K_TAB:
+                if event.key == pygame.K_p:
                     self._toggle_pause()
                     continue
                 elif event.key == pygame.K_l and not self.is_network_game:
@@ -338,7 +356,10 @@ class GameManager:
                                 and self.network
                                 and self.network.connected
                             ):
-                                self.network.send_message("power_use_request")
+                                self.network.send_message(
+                                    "power_use_request",
+                                    player_index=int(self.local_player_index),
+                                )
                     else:
                         self._handle_power_key(event.key)
                         self._handle_shoot_key(event.key)
@@ -396,10 +417,12 @@ class GameManager:
             local_input = self._build_local_input_state(keys)
             if self.is_network_host:
                 self._snapshot_send_timer += dt
-                self._authoritative_network_inputs = {
-                    self.local_player_index: local_input,
-                    self.remote_player_index: self._remote_input_state,
-                }
+                self._authoritative_network_inputs = {self.local_player_index: local_input}
+                for remote_idx in self._remote_player_indexes:
+                    self._authoritative_network_inputs[remote_idx] = self._remote_input_states_by_index.get(
+                        remote_idx,
+                        self._empty_network_input_state(),
+                    )
             else:
                 # Rate-limit input messages to 30 Hz and skip identical states.
                 # Previously sent every frame (up to 60 Hz), flooding the host
@@ -407,7 +430,11 @@ class GameManager:
                 self._input_send_timer += dt
                 input_changed = local_input != self._last_sent_input
                 if input_changed or self._input_send_timer >= self._input_send_interval:
-                    self.network.send_message("input_state", input=local_input)
+                    self.network.send_message(
+                        "input_state",
+                        input=local_input,
+                        player_index=int(self.local_player_index),
+                    )
                     self._last_sent_input = dict(local_input)
                     self._input_send_timer = 0.0
                 self._update_client_network_game(dt, local_input)
@@ -496,11 +523,14 @@ class GameManager:
                 if (
                     self.is_network_game
                     and self.is_network_host
-                    and idx == self.remote_player_index
-                    and self._pending_remote_power_uses > 0
+                    and idx in self._remote_player_indexes
+                    and self._pending_remote_power_uses_by_index.get(idx, 0) > 0
                 ):
                     power_requested = True
-                    self._pending_remote_power_uses = max(0, self._pending_remote_power_uses - 1)
+                    self._pending_remote_power_uses_by_index[idx] = max(
+                        0,
+                        int(self._pending_remote_power_uses_by_index.get(idx, 0)) - 1,
+                    )
                 if power_requested:
                     player.try_use_power(self)
                 player.update_from_input_state(
@@ -705,15 +735,9 @@ class GameManager:
         latest_world_dynamic_snapshot = None
         latest_match_result = None
         saw_disconnect = False
-        message_count = 0
-        
-        # Diagnostic: Track message arrival
-        debug_msg_types = []
         
         for message in self.network.get_messages():
-            message_count += 1
             message_type = message.get("type")
-            debug_msg_types.append(message_type)
             
             if message_type == "disconnect":
                 saw_disconnect = True
@@ -725,9 +749,54 @@ class GameManager:
             elif self.is_network_host and message_type == "restart_request":
                 self._restart_network_round(reset_match=bool(message.get("reset_match", False)))
             elif self.is_network_host and message_type == "input_state":
-                self._remote_input_state = self._sanitize_network_input(message.get("input"))
+                incoming_index = message.get("player_index")
+                sender = message.get("_from") if isinstance(message.get("_from"), tuple) else None
+                target_index = None
+                try:
+                    parsed_index = int(incoming_index)
+                except (TypeError, ValueError):
+                    parsed_index = None
+
+                if parsed_index in self._remote_player_indexes:
+                    target_index = parsed_index
+                    if sender is not None:
+                        self._remote_player_index_by_sender[sender] = parsed_index
+                elif sender is not None:
+                    mapped = self._remote_player_index_by_sender.get(sender)
+                    if mapped in self._remote_player_indexes:
+                        target_index = mapped
+                    else:
+                        for idx in self._remote_player_indexes:
+                            if idx not in self._remote_player_index_by_sender.values():
+                                target_index = idx
+                                self._remote_player_index_by_sender[sender] = idx
+                                break
+
+                if target_index in self._remote_player_indexes:
+                    self._remote_input_states_by_index[target_index] = self._sanitize_network_input(message.get("input"))
             elif self.is_network_host and message_type == "power_use_request":
-                self._pending_remote_power_uses = min(8, self._pending_remote_power_uses + 1)
+                incoming_index = message.get("player_index")
+                sender = message.get("_from") if isinstance(message.get("_from"), tuple) else None
+                target_index = None
+                try:
+                    parsed_index = int(incoming_index)
+                except (TypeError, ValueError):
+                    parsed_index = None
+
+                if parsed_index in self._remote_player_indexes:
+                    target_index = parsed_index
+                    if sender is not None:
+                        self._remote_player_index_by_sender[sender] = parsed_index
+                elif sender is not None:
+                    mapped = self._remote_player_index_by_sender.get(sender)
+                    if mapped in self._remote_player_indexes:
+                        target_index = mapped
+
+                if target_index in self._remote_player_indexes:
+                    self._pending_remote_power_uses_by_index[target_index] = min(
+                        8,
+                        int(self._pending_remote_power_uses_by_index.get(target_index, 0)) + 1,
+                    )
             elif (not self.is_network_host) and message_type == "snapshot":
                 latest_snapshot = message.get("state") if isinstance(message.get("state"), dict) else message
             elif (not self.is_network_host) and message_type == "world_snapshot":
@@ -737,13 +806,6 @@ class GameManager:
             elif (not self.is_network_host) and message_type == "match_result":
                 latest_match_result = message.get("state") if isinstance(message.get("state"), dict) else message
         
-        # Diagnostic: Log message batch info
-        if message_count > 0:
-            try:
-                print(f"[DIAG] ProcessMessages: got {message_count} messages, types={set(debug_msg_types)}, snap={latest_snapshot is not None}, world_snap={latest_world_snapshot is not None}", flush=True)
-            except Exception:
-                pass
-
         if latest_snapshot is not None:
             self._apply_network_snapshot(latest_snapshot)
         if latest_world_snapshot is not None:
@@ -870,7 +932,7 @@ class GameManager:
         if is_local_player and local_move_intent:
             base_blend *= 0.75
         expected_interval = max(1e-4, float(self._snapshot_interval))
-        gap_ratio = max(0.7, min(1.8, float(self._client_snapshot_gap) / expected_interval))
+        gap_ratio = max(0.85, min(1.35, float(self._client_snapshot_gap) / expected_interval))
         blend = min(0.9, base_blend * gap_ratio)
         if distance > 72.0:
             blend = min(0.95, blend + 0.12)
@@ -977,13 +1039,6 @@ class GameManager:
         if not isinstance(snapshot, dict):
             return
 
-        # Diagnostic: snapshot receipt timing
-        snapshot_time = float(snapshot.get("time_since_start", -1.0))
-        try:
-            print(f"[SNAPSHOT] Received snap: round_seq={snapshot.get('round_seq')}, time={snapshot_time:.3f}s, players_count={len(snapshot.get('players', []))}, has_hazards={bool(snapshot.get('hazards'))}", flush=True)
-        except Exception:
-            pass
-
         incoming_round_seq = self._parse_round_seq(
             snapshot.get("round_seq", self._last_client_snapshot_round_seq),
             self._last_client_snapshot_round_seq if self._last_client_snapshot_round_seq >= 0 else self._network_round_seq,
@@ -1005,7 +1060,11 @@ class GameManager:
         if previous_time >= 0.0:
             gap = incoming_time - previous_time
             if gap > 0.0:
-                self._client_snapshot_gap = min(0.5, gap)
+                clamped_gap = min(0.5, gap)
+                self._client_snapshot_gap = (
+                    self._client_snapshot_gap * 0.8
+                    + clamped_gap * 0.2
+                )
         self._last_client_snapshot_time = incoming_time
         self._time_since_start = incoming_time
         self.paused = bool(snapshot.get("paused", self.paused))
@@ -1191,7 +1250,7 @@ class GameManager:
             text_rect = text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2))
             
             font_small = pygame.font.Font(None, 36)
-            sub_text = font_small.render(f"Press TAB to Resume", True, (200, 200, 220))
+            sub_text = font_small.render(f"Press P to Resume", True, (200, 200, 220))
             sub_rect = sub_text.get_rect(center=(WINDOW_SIZE[0] // 2, WINDOW_SIZE[1] // 2 + 50))
             
             menu_text = font_small.render(f"To go to Main Menu, press Left Ctrl", True, (150, 150, 180))
@@ -2184,8 +2243,9 @@ class GameManager:
             self._match_player_stats = [self._new_match_stat_row(idx) for idx in range(len(self.players))]
         self.eliminated_players.clear()
         self._pending_power_press = False
-        self._pending_remote_power_uses = 0
-        self._remote_input_state = self._empty_network_input_state()
+        self._pending_remote_power_uses_by_index = {}
+        self._remote_input_states_by_index = {}
+        self._remote_player_index_by_sender = {}
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = self._snapshot_interval
         self._world_dynamic_snapshot_send_timer = 0.0
@@ -2492,7 +2552,7 @@ class GameManager:
 
     def _player_slot_count(self) -> int:
         if self.is_network_game:
-            return 2
+            return max(2, len(self.selected_characters))
         if self.game_mode == MODE_LOCAL_MULTIPLAYER:
             return max(2, len(self.selected_characters))
         if self.game_mode == MODE_CAMPAIGN:

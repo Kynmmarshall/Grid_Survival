@@ -206,6 +206,9 @@ def wait_for_online_match_start(
     selected_player_count: int = 2,
 ) -> dict[str, Any] | None:
     local_setup = NetworkPlayerSetup(name=player_name, character=character_name)
+    expected_players = max(2, min(4, int(selected_player_count)))
+    host_collected_setups: list[NetworkPlayerSetup] = [local_setup]
+    host_collected_names: set[str] = {local_setup.name.strip().lower()}
     audio_overlay = SceneAudioOverlay()
     if not network.send_message("player_setup", **build_player_setup_payload(local_setup)):
         return None
@@ -237,14 +240,22 @@ def wait_for_online_match_start(
                 )
                 if peer_setup is None:
                     continue
+                peer_name_key = peer_setup.name.strip().lower()
+                if peer_name_key not in host_collected_names:
+                    host_collected_setups.append(peer_setup)
+                    host_collected_names.add(peer_name_key)
+
+                if len(host_collected_setups) < expected_players:
+                    continue
+
                 start_payload = MatchStartPayload(
-                    players=[local_setup, peer_setup],
-                    local_player_index=1,
+                    players=host_collected_setups[:expected_players],
+                    local_player_index=0,
                     settings=MatchSettings(
                         level_id=int(selected_level_id),
                         target_score=int(selected_target_score),
                     ),
-                    player_count=max(2, min(4, int(selected_player_count))),
+                    player_count=expected_players,
                 )
                 network.send_message(
                     "game_start",
@@ -258,19 +269,26 @@ def wait_for_online_match_start(
                     "local_player_index": 0,
                     "level_id": int(selected_level_id),
                     "target_score": int(selected_target_score),
-                    "player_count": max(2, min(4, int(selected_player_count))),
+                    "player_count": expected_players,
                 }
 
             if (not network.is_host) and message_type == "game_start":
                 game_start = parse_game_start_message(message)
                 if game_start is None:
                     continue
+                players_payload = [
+                    build_player_setup_payload(player)
+                    for player in game_start.players
+                ]
+                local_player_index = 0
+                player_name_key = player_name.strip().lower()
+                for idx, player in enumerate(players_payload):
+                    if str(player.get("name", "")).strip().lower() == player_name_key:
+                        local_player_index = idx
+                        break
                 return {
-                    "players": [
-                        build_player_setup_payload(player)
-                        for player in game_start.players
-                    ],
-                    "local_player_index": int(game_start.local_player_index),
+                    "players": players_payload,
+                    "local_player_index": int(local_player_index),
                     "level_id": int(game_start.settings.level_id),
                     "target_score": int(game_start.settings.target_score),
                     "player_count": max(2, min(4, int(message.get("player_count", 2)))),
@@ -285,7 +303,11 @@ def wait_for_online_match_start(
             title,
             [
                 f"{local_setup.name} selected {local_setup.character}",
-                peer_line,
+                (
+                    f"Players ready: {len(host_collected_setups)}/{expected_players}"
+                    if network.is_host
+                    else peer_line
+                ),
                 "Press ESC to cancel and go back.",
             ],
             audio_overlay=audio_overlay,
@@ -594,9 +616,14 @@ def run_online_session_setup(
             return None
         game_port = int(result.get("port", 5555))
         lobby_port = int(result.get("lobby_port", LAN_LOBBY_PORT))
-        print(f"[SESSION_FLOW] Client discovering host: {result['address']} game={game_port} lobby={lobby_port}")
+        print(f"[SESSION_FLOW] Client discovering host: {result['address']} game={game_port} lobby={lobby_port}", flush=True)
         network = NetworkClient()
+        print(f"[SESSION_FLOW] Client connecting to game transport at {result['address']}:{game_port}", flush=True)
         connected = network.connect_to_host(result["address"], game_port)
+        if not connected:
+            print(f"[SESSION_FLOW] Game transport connect failed: {network.last_error}", flush=True)
+        else:
+            print(f"[SESSION_FLOW] Game transport connected successfully", flush=True)
         lobby_host = str(result.get("address", "")).strip() or result["address"]
     else:
         ip = prompt_ip_entry(screen, clock)
@@ -607,14 +634,33 @@ def run_online_session_setup(
         lobby_host = str(ip)
         lobby_port = LAN_LOBBY_PORT
 
-    if not connected:
-        toast(screen, clock, f"Connection failed: {network.last_error or 'unknown error'}")
-        return None
-
     lobby_session = LanLobbyClientSession(player_name=player_name)
+    print(f"[SESSION_FLOW] Client connecting to lobby at {lobby_host}:{lobby_port}", flush=True)
     if not lobby_session.connect(lobby_host, lobby_port):
+        print(f"[SESSION_FLOW] Lobby connect failed: {lobby_session.last_error}", flush=True)
+        if not connected:
+            toast(
+                screen,
+                clock,
+                (
+                    "Connection failed: "
+                    f"game={network.last_error or 'unknown error'}, "
+                    f"lobby={lobby_session.last_error or 'unknown error'}"
+                ),
+            )
+            return None
         toast(screen, clock, f"LAN lobby join failed: {lobby_session.last_error or 'unknown error'}")
         lobby_session = None
+    else:
+        print(f"[SESSION_FLOW] Lobby connect succeeded", flush=True)
+
+    if not connected:
+        toast(
+            screen,
+            clock,
+            "Joined lobby. Gameplay transport will connect when match starts.",
+            color=(245, 210, 120),
+        )
 
     selected_level = resolve_level_option(1)
     if selected_level is None:

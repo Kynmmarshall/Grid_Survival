@@ -16,13 +16,32 @@ SOLO OR PLAYER ONE
 - Move: W / A / S / D
 - Jump: SPACE
 - Power Ability: Q (when Power Orbs are charged)
-- Pause / Exit Run: ESC
+- Pause: P
 
 PLAYER TWO (LOCAL MULTIPLAYER)
 - Move: Arrow Keys
 - Jump: Right SHIFT
 - Power Ability: /
-- Pause / Exit Run: ESC (either player)
+- Pause: P (either player)
+
+CUSTOMIZING CONTROLS
+---------------------
+Edit the 'custom_controls.json' file in your Grid Survival config directory to remap keys.
+Default paths:
+  - Windows: %APPDATA%\Grid_Survival\custom_controls.json
+  - Mac/Linux: ~/.grid_survival/custom_controls.json
+
+Example custom_controls.json:
+{
+  "player1": {
+    "up": "w", "down": "s", "left": "a", "right": "d",
+    "jump": "space", "power": "q", "pause": "tab"
+  },
+  "player2": {
+    "up": "up", "down": "down", "left": "left", "right": "right",
+    "jump": "rshift", "power": "slash", "pause": "tab"
+  }
+}
 
 GAMEPLAY ESSENTIALS
 -------------------
