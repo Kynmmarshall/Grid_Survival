@@ -6,6 +6,7 @@ from .internet_party_lobby import InternetLobbySetup, InternetPartyLobbyScreen
 from .level_selection import LevelSelectionScreen
 from .target_score_selection import TargetScoreSelectionScreen
 from .account_portal import AccountPortalScreen
+from .credits_screen import CreditsScreen
 
 __all__ = [
     "TitleScreen",
@@ -17,4 +18,5 @@ __all__ = [
     "LevelSelectionScreen",
     "TargetScoreSelectionScreen",
     "AccountPortalScreen",
+    "CreditsScreen",
 ]
