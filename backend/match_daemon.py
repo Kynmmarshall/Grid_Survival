@@ -107,20 +107,20 @@ class _PlayerProxy:
 class MatchDaemon:
     """Authoritative UDP match daemon for assigned matches.
 
-    Protocol (UDP JSON envelopes):
-    - receives datagrams with JSON packet like {"k":"d","s":seq,"r":0,"t":"internet_auth","p":{...}}
-    - responds with same envelope format for PKT_DATA messages.
-    - supports messages: internet_auth, input_state, resync_request
-    - emits snapshot, world_snapshot periodically.
+    Now supports hybrid TCP+UDP:
+    - TCP (port 5554): Handshake & authentication (hello, hello_ack, internet_auth, internet_auth_ok)
+    - UDP (port 5555): Game state snapshots and player input (faster, stateless)
     """
 
     CLIENT_TIMEOUT = 30.0  # Stop sending snapshots to clients silent for 30 seconds
 
-    def __init__(self, manager: MatchServerManager, bind_addr: str = "0.0.0.0", bind_port: int | None = None):
+    def __init__(self, manager: MatchServerManager, bind_addr: str = "0.0.0.0", bind_port: int | None = None, tcp_port: int | None = None):
         self.manager = manager
         self.bind_addr = bind_addr
         self.bind_port = bind_port or 5555
+        self.tcp_port = tcp_port or 5554  # TCP on port one before UDP
         self.sock: socket.socket | None = None
+        self.tcp_sock: socket.socket | None = None
         self.running = False
         self.eliminated_players: list[_PlayerProxy] = []
         # RLock avoids deadlock when snapshot send paths call _next_seq()
@@ -128,6 +128,7 @@ class MatchDaemon:
         self._lock = threading.RLock()
         self._sessions: dict[str, dict] = {}  # token -> session state
         self._seq = 1
+        self._tcp_addr_to_session: dict[tuple[str, int], str] = {}  # Maps TCP peer addr to session token
 
     def _next_seq(self) -> int:
         with self._lock:
@@ -141,7 +142,16 @@ class MatchDaemon:
         try:
             raw = json.dumps(packet, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
             self.sock.sendto(raw, addr)
-        except Exception:
+            if kind == "ha" or msg_type in {"internet_auth_ok", "snapshot"}:
+                try:
+                    print(f"[SEND] {kind}/{msg_type} -> {addr} (seq={seq}, reliable={reliable}, size={len(raw)})", flush=True)
+                except Exception:
+                    pass
+        except Exception as e:
+            try:
+                print(f"[SEND_ERROR] Failed to send {kind}/{msg_type} to {addr}: {e}", flush=True)
+            except Exception:
+                pass
             return
 
     @staticmethod
@@ -181,6 +191,53 @@ class MatchDaemon:
                             entry["last_seen"] = now
                             return
 
+        # For TCP-authenticated clients sending their first UDP packet,
+        # link their UDP address to their player entry
+        def link_tcp_auth_addr() -> None:
+            now = time.time()
+            with self._lock:
+                for session in self._sessions.values():
+                    for entry in session.get("players", {}).values():
+                        if entry.get("tcp_verified") and entry.get("addr") is None:
+                            # This is a TCP-authenticated player sending their first UDP packet
+                            entry["addr"] = addr
+                            entry["last_seen"] = now
+                            try:
+                                player_name = next((k for k, v in session.get("players", {}).items() if v is entry), "?")
+                                print(f"[TCP_UDP_LINK] Linked TCP auth player {player_name} to UDP addr {addr}", flush=True)
+                            except Exception:
+                                pass
+                            return
+
+        if t == "input_state":
+            # For first packet from TCP-auth client, link the address
+            link_tcp_auth_addr()
+            # Refresh liveness from the packet source address.
+            touch_addr()
+            with self._lock:
+                for session in self._sessions.values():
+                    for entry in session.get("players", {}).values():
+                        if entry.get("addr") != addr:
+                            continue
+                        entry["last_input"] = p.get("input") or {}
+                        break
+            return
+
+        if t == "resync_request":
+            # For first packet from TCP-auth client, link the address
+            link_tcp_auth_addr()
+            touch_addr()
+            player = str(p.get("player") or "")
+            with self._lock:
+                for session in self._sessions.values():
+                    if player in session.get("players", {}):
+                        # send immediate snapshot
+                        snap = self._build_snapshot(session)
+                        seq = self._next_seq()
+                        self._send_packet(addr, PKT_DATA, seq, 0, "snapshot", snap)
+                        break
+            return
+
         if t == "internet_auth":
             token = str(p.get("token") or "").strip()
             player = str(p.get("player") or "").strip()
@@ -189,6 +246,37 @@ class MatchDaemon:
                 seq = self._next_seq()
                 self._send_packet(addr, PKT_DATA, seq, 0, "internet_auth_error", {"error": "missing token/player"})
                 return
+            
+            # Check if this session was already created via TCP handshake
+            with self._lock:
+                session_token_list = [t for t, s in self._sessions.items() if str(s.get("assignment", {}).get("match_id", "")) == token]
+                if session_token_list:
+                    # Session already exists from TCP handshake, just link the UDP address
+                    session_token = session_token_list[0]
+                    session = self._sessions.get(session_token)
+                    if session and player in session.get("players", {}):
+                        entry = session["players"][player]
+                        if entry.get("addr") is None:
+                            entry["addr"] = addr
+                            entry["last_seen"] = time.time()
+                            try:
+                                print(f"[SESSION] UDP address linked for TCP-auth player: {player} -> {addr}", flush=True)
+                            except Exception:
+                                pass
+                    # Send bootstrap snapshots
+                    bootstrap_snap = self._build_snapshot(session)
+                    bootstrap_world = self._build_world_snapshot(session)
+                    bootstrap_dynamic = self._build_world_dynamic_snapshot(session)
+                    seq = self._next_seq()
+                    self._send_packet(addr, PKT_DATA, seq, 1, "snapshot", bootstrap_snap)
+                    seq = self._next_seq()
+                    self._send_packet(addr, PKT_DATA, seq, 1, "world_snapshot", bootstrap_world)
+                    if bootstrap_dynamic is not None:
+                        seq = self._next_seq()
+                        self._send_packet(addr, PKT_DATA, seq, 1, "world_dynamic_snapshot", bootstrap_dynamic)
+                    return
+            
+            # No TCP session exists, handle as new UDP-based auth (fallback)
             assignment = self.manager.consume_assignment(token)
             if not assignment:
                 seq = self._next_seq()
@@ -262,22 +350,6 @@ class MatchDaemon:
             except Exception:
                 pass
             return
-
-        if t == "input_state":
-            # Refresh liveness from the packet source address.
-            touch_addr()
-            with self._lock:
-                for session in self._sessions.values():
-                    for entry in session.get("players", {}).values():
-                        if entry.get("addr") != addr:
-                            continue
-                        entry["last_input"] = p.get("input") or {}
-                        break
-            return
-
-        if t == "resync_request":
-            touch_addr()
-            player = str(p.get("player") or "")
             with self._lock:
                 for session in self._sessions.values():
                     if player in session.get("players", {}):
@@ -335,6 +407,172 @@ class MatchDaemon:
                     )
                 except Exception:
                     pass
+
+    def _handle_tcp_connection(self, client_sock: socket.socket, addr: tuple[str, int]) -> None:
+        """Handle a single TCP client connection for handshake."""
+        client_sock.settimeout(5.0)
+        try:
+            # Receive hello
+            data = client_sock.recv(4096)
+            if not data:
+                return
+            
+            msg = json.loads(data.decode("utf-8").strip())
+            if msg.get("type") != "hello":
+                return
+            
+            # Send hello_ack
+            hello_ack = {"type": "hello_ack"}
+            client_sock.send(json.dumps(hello_ack, separators=(",", ":"), ensure_ascii=True).encode("utf-8") + b"\n")
+            
+            # Receive internet_auth
+            data = client_sock.recv(4096)
+            if not data:
+                return
+            
+            auth_msg = json.loads(data.decode("utf-8").strip())
+            if auth_msg.get("type") != "internet_auth":
+                return
+            
+            token = str(auth_msg.get("token") or "").strip()
+            player = str(auth_msg.get("player") or "").strip()
+            
+            if not token or not player:
+                error_msg = {"type": "internet_auth_error", "error": "missing token/player"}
+                client_sock.send(json.dumps(error_msg, separators=(",", ":"), ensure_ascii=True).encode("utf-8") + b"\n")
+                return
+            
+            assignment = self.manager.consume_assignment(token)
+            if not assignment:
+                error_msg = {"type": "internet_auth_error", "error": "invalid or expired token"}
+                client_sock.send(json.dumps(error_msg, separators=(",", ":"), ensure_ascii=True).encode("utf-8") + b"\n")
+                return
+            
+            # Create or join session
+            match_id = str(assignment.get("match_id"))
+            with self._lock:
+                is_new_session = match_id not in self._sessions
+                session = self._sessions.setdefault(match_id, {
+                    "assignment": assignment,
+                    "players": {},
+                    "bot_names": [],
+                    "bot_profiles": {},
+                    "enemy_manager": None,
+                    "bot_ai_timer": 0.0,
+                    "created_at": time.time(),
+                    "round_seq": 0,
+                    "start_time": time.time(),
+                })
+                session_players = session["players"]
+                spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
+                spawn_y = float(PLAYER_START_POS[1])
+                
+                # Register this client's UDP address (will be filled when UDP data arrives)
+                session_players[player] = {
+                    "addr": None,  # Will be set when first UDP packet arrives
+                    "x": spawn_x,
+                    "y": spawn_y,
+                    "last_input": {},
+                    "last_seen": time.time(),
+                    "tcp_verified": True,  # Mark as TCP-authenticated
+                }
+                
+                # Setup bots if first player
+                bot_entries = assignment.get("payload", {}).get("players", [])
+                if isinstance(bot_entries, list) and not session.get("bot_names"):
+                    for idx, entry in enumerate(bot_entries):
+                        if not isinstance(entry, dict) or not bool(entry.get("bot", False)):
+                            continue
+                        bot_name = str(entry.get("name", f"BOT-{idx + 1}"))
+                        session["bot_names"].append(bot_name)
+                        session["bot_profiles"][bot_name] = str(entry.get("profile", "Bot"))
+                        bot_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(session_players) + len(session["bot_names"]))
+                        bot_y = float(PLAYER_START_POS[1])
+                        session_players[bot_name] = {
+                            "addr": None,
+                            "x": bot_x,
+                            "y": bot_y,
+                            "last_input": {},
+                            "bot": True,
+                            "profile": str(entry.get("profile", "Bot")),
+                        }
+                    if session.get("bot_names"):
+                        enemy_spawns = self._build_enemy_spawns(session)
+                        session["enemy_manager"] = PacmanEnemyManager(enemy_spawns)
+                
+                self._initialize_session_world(session)
+                self._tcp_addr_to_session[addr] = token
+            
+            # Send internet_auth_ok
+            auth_ok_msg = {"type": "internet_auth_ok", "session_id": token}
+            client_sock.send(json.dumps(auth_ok_msg, separators=(",", ":"), ensure_ascii=True).encode("utf-8") + b"\n")
+            
+            try:
+                if is_new_session:
+                    print(f"[TCP] New session created: match_id={match_id}, player={player}, addr={addr}", flush=True)
+                else:
+                    active_count = len([p for p in session_players.values() if p.get("addr")])
+                    print(f"[TCP] Player joined via TCP: match_id={match_id}, player={player}, addr={addr}, active_players={active_count}", flush=True)
+            except Exception:
+                pass
+        
+        except (json.JSONDecodeError, socket.error, OSError) as e:
+            try:
+                print(f"[TCP_ERROR] {e}", flush=True)
+            except Exception:
+                pass
+        finally:
+            try:
+                client_sock.close()
+            except Exception:
+                pass
+
+    def _tcp_accept_loop(self) -> None:
+        """Accept TCP connections on a separate thread."""
+        tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1) if hasattr(socket, 'SO_REUSEPORT') else None
+        
+        try:
+            tcp_sock.bind((self.bind_addr, self.tcp_port))
+            tcp_sock.listen(16)
+            self.tcp_sock = tcp_sock
+            try:
+                print(f"[TCP] MatchDaemon listening on {self.bind_addr}:{self.tcp_port}", flush=True)
+            except Exception:
+                pass
+        except (socket.error, OSError) as e:
+            try:
+                print(f"[TCP_ERROR] Failed to bind TCP socket: {e}", flush=True)
+            except Exception:
+                pass
+            return
+        
+        tcp_sock.settimeout(0.5)
+        
+        while self.running:
+            try:
+                client_sock, addr = tcp_sock.accept()
+                # Handle each client in a new thread to avoid blocking
+                client_thread = threading.Thread(
+                    target=self._handle_tcp_connection,
+                    args=(client_sock, addr),
+                    daemon=True,
+                    name=f"tcp-client-{addr[0]}:{addr[1]}"
+                )
+                client_thread.start()
+            except socket.timeout:
+                continue
+            except (socket.error, OSError):
+                if self.running:
+                    continue
+                else:
+                    break
+        
+        try:
+            tcp_sock.close()
+        except Exception:
+            pass
 
     def _build_snapshot(self, session: dict) -> dict[str, Any]:
         now = time.time()
@@ -672,6 +910,10 @@ class MatchDaemon:
             pass
         s.settimeout(0.05)
         self.sock = s
+
+        # Start TCP server thread for handshakes
+        tcp_thread = threading.Thread(target=self._tcp_accept_loop, daemon=True, name="tcp-accept")
+        tcp_thread.start()
 
         last_snapshot_send = 0.0
         last_cleanup = 0.0

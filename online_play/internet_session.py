@@ -132,6 +132,29 @@ class InternetSessionClient(NetworkClient):
         self._last_port = int(port)
         self._last_auth_ok = False
 
+        # Try TCP handshake first (more reliable through firewalls)
+        tcp_auth_success = False
+        try:
+            if hasattr(self, 'transport') and hasattr(self.transport, '_tcp_handshake'):
+                tcp_auth_success = self.transport._tcp_handshake(host, port, token, self.player_name)
+                if tcp_auth_success:
+                    self.session_id = self.transport.session_id
+                    self._last_auth_ok = True
+                    try:
+                        print(f"[DEBUG] TCP handshake succeeded, skipping UDP auth")
+                    except Exception:
+                        pass
+        except Exception as e:
+            try:
+                print(f"[DEBUG] TCP handshake failed, falling back to UDP: {e}")
+            except Exception:
+                pass
+
+        # If TCP succeeded, return immediately (UDP connection will happen automatically)
+        if tcp_auth_success:
+            return True
+
+        # Fallback to UDP-based auth if TCP failed
         if not self.send_message(
             "internet_auth",
             token=self.match_token,

@@ -19,6 +19,7 @@ from .match_flow import (
 
 
 DEFAULT_PORT = 5555
+DEFAULT_TCP_PORT = 5554  # TCP handshake on port one before UDP
 GAME_UDP_PORT_OFFSET = 0
 
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
@@ -722,6 +723,106 @@ class UdpClientTransport(NetworkManager):
 
     def __init__(self):
         super().__init__(is_host=False)
+        self.tcp_auth_token = None  # Store token from successful TCP auth
+
+    def _tcp_handshake(self, host: str, port: int, token: str, player_name: str, timeout: float = 5.0) -> bool:
+        """Perform authentication handshake via TCP before UDP connection.
+        
+        Returns True if successful, False otherwise.
+        On success, sets self.tcp_auth_token and session_id.
+        """
+        tcp_port = port - 1  # TCP is on port one before UDP
+        tcp_sock = None
+        try:
+            tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp_sock.settimeout(timeout)
+            
+            # Connect to TCP server
+            try:
+                tcp_sock.connect((host, tcp_port))
+            except (socket.error, OSError) as e:
+                self.last_error = f"TCP connection failed: {e}"
+                return False
+            
+            # Send hello via TCP
+            hello_msg = json.dumps({"type": "hello"}, separators=(",", ":"), ensure_ascii=True)
+            try:
+                tcp_sock.send(hello_msg.encode("utf-8") + b"\n")
+            except (socket.error, OSError) as e:
+                self.last_error = f"TCP send hello failed: {e}"
+                tcp_sock.close()
+                return False
+            
+            # Receive hello_ack via TCP
+            try:
+                data = tcp_sock.recv(4096)
+                if not data:
+                    self.last_error = "TCP connection closed unexpectedly"
+                    tcp_sock.close()
+                    return False
+                hello_ack_msg = json.loads(data.decode("utf-8").strip())
+                if hello_ack_msg.get("type") != "hello_ack":
+                    self.last_error = f"Unexpected TCP response: {hello_ack_msg.get('type')}"
+                    tcp_sock.close()
+                    return False
+            except (json.JSONDecodeError, socket.error, OSError) as e:
+                self.last_error = f"TCP receive hello_ack failed: {e}"
+                tcp_sock.close()
+                return False
+            
+            # Send internet_auth via TCP
+            auth_msg = json.dumps({
+                "type": "internet_auth",
+                "token": str(token),
+                "player": str(player_name)
+            }, separators=(",", ":"), ensure_ascii=True)
+            try:
+                tcp_sock.send(auth_msg.encode("utf-8") + b"\n")
+            except (socket.error, OSError) as e:
+                self.last_error = f"TCP send auth failed: {e}"
+                tcp_sock.close()
+                return False
+            
+            # Receive internet_auth_ok via TCP
+            try:
+                data = tcp_sock.recv(4096)
+                if not data:
+                    self.last_error = "TCP connection closed before auth confirmation"
+                    tcp_sock.close()
+                    return False
+                auth_ok_msg = json.loads(data.decode("utf-8").strip())
+                if auth_ok_msg.get("type") != "internet_auth_ok":
+                    if auth_ok_msg.get("type") == "internet_auth_error":
+                        self.last_error = f"Auth error: {auth_ok_msg.get('error', 'unknown')}"
+                    else:
+                        self.last_error = f"Unexpected TCP response: {auth_ok_msg.get('type')}"
+                    tcp_sock.close()
+                    return False
+                
+                # Store session info
+                self.tcp_auth_token = str(token)
+                self.session_id = str(auth_ok_msg.get("session_id", ""))
+                try:
+                    print(f"[DEBUG] TCP handshake successful, session_id={self.session_id}")
+                except Exception:
+                    pass
+                
+            except (json.JSONDecodeError, socket.error, OSError) as e:
+                self.last_error = f"TCP receive auth_ok failed: {e}"
+                tcp_sock.close()
+                return False
+            
+            tcp_sock.close()
+            return True
+            
+        except Exception as e:
+            self.last_error = f"TCP handshake exception: {e}"
+            if tcp_sock:
+                try:
+                    tcp_sock.close()
+                except Exception:
+                    pass
+            return False
 
     def connect_to_host(self, host: str, port: int = DEFAULT_PORT) -> bool:
         try:
