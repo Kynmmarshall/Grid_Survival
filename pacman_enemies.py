@@ -46,6 +46,13 @@ class PacmanEnemy:
         self._float_phase = random.uniform(0.0, math.tau)
         self._feet_mask = None
         self._feet_mask_count = 0
+        self.max_health = 3
+        self.health = self.max_health
+
+    def take_damage(self, amount: int = 1) -> bool:
+        """Reduce health. Returns True when the enemy is dead."""
+        self.health = max(0, self.health - amount)
+        return self.health <= 0
 
     def reset(self):
         self.position = self.spawn_position.copy()
@@ -56,6 +63,7 @@ class PacmanEnemy:
         self._activation_timer = PACMAN_GHOST_ACTIVATION_DELAY
         self._anim_time = 0.0
         self._float_phase = random.uniform(0.0, math.tau)
+        self.health = self.max_health
 
     def update(
         self,
@@ -101,6 +109,23 @@ class PacmanEnemy:
         body = pygame.Surface(draw_rect.size, pygame.SRCALPHA)
         self._draw_body(body)
         surface.blit(body, draw_rect.topleft)
+        self._draw_health_bar(surface, draw_rect)
+
+    def _draw_health_bar(self, surface: pygame.Surface, draw_rect: pygame.Rect) -> None:
+        if self.health >= self.max_health:
+            return
+        bar_w = draw_rect.width
+        bar_h = 5
+        bar_x = draw_rect.left
+        bar_y = draw_rect.top - 10
+        pygame.draw.rect(surface, (50, 10, 10), (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2), border_radius=3)
+        pygame.draw.rect(surface, (40, 40, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=2)
+        fill_w = max(0, int(bar_w * self.health / max(1, self.max_health)))
+        if fill_w > 0:
+            ratio = self.health / max(1, self.max_health)
+            r = int(255 * (1.0 - ratio))
+            g = int(200 * ratio)
+            pygame.draw.rect(surface, (r, g, 20), (bar_x, bar_y, fill_w, bar_h), border_radius=2)
 
     def _draw_body(self, surface: pygame.Surface) -> None:
         width, height = surface.get_size()
@@ -387,6 +412,7 @@ class MonsterEnemy(PacmanEnemy):
         super().reset()
         self.is_dying = False
         self.current_state = "idle"
+        self.health = self.max_health
         for anim in self.animations.values():
             anim.current_index = 0
             anim.time_accumulator = 0.0
