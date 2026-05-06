@@ -143,7 +143,7 @@ class InternetSessionClient(NetworkClient):
             return False
 
         started = time.time()
-        while time.time() - started < 2.5:
+        while time.time() - started < 5.0:
             for message in self.get_messages():
                 if message.get("type") == "internet_auth_ok":
                     self.session_id = str(message.get("session_id", "")) or None
@@ -155,8 +155,9 @@ class InternetSessionClient(NetworkClient):
                     return False
             time.sleep(0.02)
 
-        self.request_resync("initial_join")
-        return True
+        self.last_error = "Timed out waiting for internet_auth_ok"
+        self.disconnect()
+        return False
 
     def request_resync(self, reason: str = "manual") -> bool:
         now = time.time()
