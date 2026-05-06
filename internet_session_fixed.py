@@ -1,85 +1,3 @@
-"""Internet session client built on top of the UDP client transport."""
-
-from __future__ import annotations
-
-import os
-import re
-import random
-import time
-import urllib.parse
-
-from .session import DEFAULT_PORT, NetworkClient
-from .log import get_logger
-from .exceptions import InternetFallbackLAN
-
-
-class InternetSessionClient(NetworkClient):
-    """Internet match session client with reconnect and resync helpers."""
-
-    def __init__(self):
-        super().__init__()
-        self.match_endpoint: str | None = None
-        self.match_token: str | None = None
-        self.player_name: str | None = None
-        self.session_id: str | None = None
-        self._last_host: str | None = None
-        self._last_port: int = DEFAULT_PORT
-        self._last_auth_ok = False
-        self._last_resync_request_at = 0.0
-        self._logger = get_logger("internet_session")
-
-    @staticmethod
-    def _parse_endpoint(endpoint: str) -> tuple[str, int] | None:
-        clean = str(endpoint or "").strip()
-        if not clean:
-            return None
-        if "://" in clean:
-            scheme, rest = clean.split("://", 1)
-            if scheme.lower().strip() not in {"udp", "ws", "wss"}:
-                return None
-            clean = rest
-        if "/" in clean:
-            clean = clean.split("/", 1)[0]
-        if clean.startswith("["):
-            return None
-
-        match = re.match(r"^(?P<host>[^:]+)(:(?P<port>\d+))?$", clean)
-        if not match:
-            return None
-        host = str(match.group("host") or "").strip()
-        port_text = match.group("port")
-        if not host:
-            return None
-        port = DEFAULT_PORT
-        if port_text:
-            try:
-                port = int(port_text)
-            except (TypeError, ValueError):
-                return None
-            if not (1 <= port <= 65535):
-                return None
-        return host, port
-
-    @staticmethod
-    def _fallback_public_host() -> str | None:
-        raw = (
-            os.getenv("GRID_SURVIVAL_ONLINE_API")
-            or os.getenv("GRID_SURVIVAL_CONTROL_PLANE_URL")
-            or ""
-        ).strip()
-        if not raw:
-            return None
-        parsed = urllib.parse.urlparse(raw if "://" in raw else f"http://{raw}")
-        host = (parsed.hostname or "").strip()
-        return host or None
-
-    @staticmethod
-    def _normalize_match_host(host: str) -> str:
-        clean = str(host or "").strip()
-        if clean in {"0.0.0.0", "127.0.0.1", "localhost", "::1", ""}:
-            return InternetSessionClient._fallback_public_host() or clean
-        return clean
-
     def connect_to_match(self, *, endpoint: str, token: str, player_name: str) -> bool:
         parsed = self._parse_endpoint(endpoint)
         if parsed is None:
@@ -123,14 +41,17 @@ class InternetSessionClient(NetworkClient):
                 print(f"[DEBUG] [PHASE 1] TCP auth exception: {e}")
             except Exception:
                 pass
-        
+
+        # If TCP auth succeeded, do UDP hello with shorter timeout (endpoint verified)
         if tcp_auth_ok:
-            print(f"[DEBUG] [PHASE 1] TCP ok, attempting UDP hello...")
+            print(f"[DEBUG] [PHASE 1] TCP ok, now trying UDP hello with shorter timeout...")
+            # Call connect_to_host which creates/manages the socket properly
+            # Note: This will create ONE clean socket with ONE set of threads
             if self.connect_to_host(host, port):
                 print(f"[DEBUG] [PHASE 1] SUCCESS: Connected via TCP auth + UDP hello!")
                 return True
             else:
-                print(f"[DEBUG] [PHASE 1] UDP hello failed: {self.last_error}")
+                print(f"[DEBUG] [PHASE 1] UDP hello failed after TCP auth: {self.last_error}")
         
         # === PHASE 2: Try clean UDP hello from scratch ===
         print(f"[DEBUG] [PHASE 2] Trying fresh UDP hello...")
@@ -186,42 +107,4 @@ class InternetSessionClient(NetworkClient):
         self.last_error = "Timed out waiting for internet_auth_ok"
         self.disconnect()
         print(f"[DEBUG] [PHASE 3] FAILED: Timeout")
-        return False
-
-    def request_resync(self, reason: str = "manual") -> bool:
-        now = time.time()
-        if now - self._last_resync_request_at < 0.35:
-            return False
-        self._last_resync_request_at = now
-        return self.send_message(
-            "resync_request",
-            reason=str(reason),
-            session_id=self.session_id,
-            player=self.player_name,
-        )
-
-    def reconnect(self, attempts: int = 4) -> bool:
-        if not self._last_host or not self.match_token or not self.player_name:
-            self.last_error = "Missing session data for reconnect"
-            return False
-
-        max_attempts = max(1, int(attempts))
-        for attempt in range(max_attempts):
-            if self.connect_to_host(self._last_host, self._last_port):
-                auth_sent = self.send_message(
-                    "internet_auth",
-                    token=self.match_token,
-                    player=self.player_name,
-                    resume=True,
-                    session_id=self.session_id,
-                )
-                if auth_sent:
-                    self.request_resync("reconnect")
-                    self._last_auth_ok = True
-                    return True
-            if attempt < max_attempts - 1:
-                base_delay = min(4.0, 0.35 * (2 ** attempt))
-                jitter = random.uniform(0.0, min(0.75, base_delay * 0.4))
-                time.sleep(base_delay + jitter)
-        self.last_error = self.last_error or "Reconnect failed"
         return False
