@@ -25,6 +25,7 @@ from powers import (
 from water import AnimatedWater
 from tile_system import TMXTileManager, TileState
 from hazards import HazardManager
+from projectiles import ProjectileManager
 from ui import GameHUD, EliminationScreen, VictoryScreen
 from scenes.common import draw_online_status_badge, update_online_status
 from settings import (
@@ -183,6 +184,7 @@ class GameManager:
         self.water = AnimatedWater()
         self.orb_manager = OrbManager()
         self.pacman_enemy_manager = None
+        self.projectile_manager = ProjectileManager()
 
         # Initialize players based on game mode
         self.players = []
@@ -339,6 +341,7 @@ class GameManager:
                                 self.network.send_message("power_use_request")
                     else:
                         self._handle_power_key(event.key)
+                        self._handle_shoot_key(event.key)
 
     def update(self, dt: float, keys):
         self.audio.update()
@@ -560,6 +563,7 @@ class GameManager:
                 self._eliminate_player(victim, "hit by hazard")
 
         self.orb_manager.update(dt, self.walkable_bounds, self.players, self)
+        self.projectile_manager.update(dt, self)
 
         for idx, player in enumerate(self.players):
             if idx >= len(self._match_player_stats):
@@ -1150,6 +1154,9 @@ class GameManager:
 
         # Draw hazards
         self.hazard_manager.draw(self.screen)
+
+        # Draw projectiles
+        self.projectile_manager.draw(self.screen)
 
         # Draw active power visuals
         for player in self.players:
@@ -2212,6 +2219,7 @@ class GameManager:
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
         self.orb_manager.reset()
+        self.projectile_manager.reset()
         self.hud.reset()
         self._spawn_adjusted = False
         self._time_since_start = 0.0
@@ -2393,6 +2401,15 @@ class GameManager:
                     break
                 if player.try_use_power(self):
                     break
+
+    def _handle_shoot_key(self, key: int) -> None:
+        for player in self.players:
+            if player in self.eliminated_players:
+                continue
+            shoot_key = player.controls.get("shoot") if hasattr(player, "controls") else None
+            if shoot_key is not None and shoot_key == key:
+                self.projectile_manager.fire(player)
+                break
 
     def _adjust_audio_volume(self, delta: float):
         self.audio.adjust_volume(delta)
