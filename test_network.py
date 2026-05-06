@@ -43,6 +43,8 @@ from online_play.transport import (
     UdpClientTransport,
     UdpHostTransport,
 )
+from online_play.internet_session import InternetSessionClient
+from online_play.exceptions import InternetFallbackLAN
 
 
 _NEXT_PORT = 55600
@@ -253,3 +255,15 @@ class TestMatchFlowLayer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestInternetFallback(unittest.TestCase):
+    def test_internet_fallback_raised_on_refused_connection(self) -> None:
+        port = _alloc_port()
+        cli = InternetSessionClient()
+        endpoint = f"127.0.0.1:{port}"
+        with mock.patch.object(InternetSessionClient, "connect_to_host", return_value=False):
+            with self.assertRaises(InternetFallbackLAN):
+                cli.connect_to_match(endpoint=endpoint, token="tok", player_name="PlayerX")
+        # Ensure last_error is populated from the failed attempt
+        self.assertIsNotNone(cli.last_error)
