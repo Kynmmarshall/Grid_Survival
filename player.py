@@ -146,6 +146,7 @@ class Player:
             'right': pygame.K_d,
             'jump': pygame.K_SPACE,
             'power': pygame.K_q,
+            'shoot': pygame.K_e,
         }
         self.audio = get_audio()
         self.power = None
