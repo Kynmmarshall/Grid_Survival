@@ -161,11 +161,16 @@ class MatchDaemon:
     def _handle_data(self, addr: tuple[str, int], packet: dict[str, Any]) -> None:
         t = packet.get("t")
         p = packet.get("p") or {}
+        seq = packet.get("s")
+        reliable = bool(packet.get("r", 0))
 
         try:
             print(f"[NET] _handle_data: received type={t} from {addr}", flush=True)
         except Exception:
             pass
+
+        if reliable and isinstance(seq, int):
+            self._send_packet(addr, "a", seq, 0, "", {})
 
         def touch_addr() -> None:
             now = time.time()
