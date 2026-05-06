@@ -303,10 +303,12 @@ class ProjectileManager:
         spread_deg = cfg["spread_deg"]
 
         rect = getattr(owner, "rect", None)
-        origin = pygame.Vector2(
+        center = pygame.Vector2(
             rect.centerx if rect else 0,
             rect.centery if rect else 0,
         )
+        spawn_offset = 26
+        origin = center + direction.normalize() * spawn_offset
 
         base_angle = math.degrees(math.atan2(direction.y, direction.x))
         offsets = (
@@ -375,9 +377,9 @@ class ProjectileManager:
             proj._hit_players.add(id(player))
             if not proj.pierce:
                 proj.alive = False
-            self._apply_hit_to_player(proj, player)
+            self._apply_hit_to_player(proj, player, game)
 
-    def _apply_hit_to_player(self, proj: Projectile, player) -> None:
+    def _apply_hit_to_player(self, proj: Projectile, player, game) -> None:
         if proj.velocity.length_squared() > 0:
             knock_dir = proj.velocity.normalize()
         else:
@@ -398,6 +400,11 @@ class ProjectileManager:
         if proj.freeze_on_hit > 0 and hasattr(player, "apply_freeze"):
             player.apply_freeze(proj.freeze_on_hit)
 
+        if hasattr(player, "take_damage") and player.take_damage(1):
+            eliminate = getattr(game, "_eliminate_player", None)
+            if callable(eliminate):
+                eliminate(player, "hit by projectile")
+
     def _check_monster_collisions(self, proj: Projectile, game) -> None:
         pacman_mgr = getattr(game, "pacman_enemy_manager", None)
         if pacman_mgr is None:
@@ -407,13 +414,17 @@ class ProjectileManager:
             if rect is None:
                 continue
             dist = math.hypot(proj.position.x - rect.centerx, proj.position.y - rect.centery)
-            if dist <= proj.radius + max(rect.width, rect.height) * 0.45:
+            if dist > proj.radius + max(rect.width, rect.height) * 0.45:
+                continue
+            if hasattr(enemy, "take_damage") and enemy.take_damage(1):
+                if hasattr(enemy, "is_dying"):
+                    enemy.is_dying = True
                 try:
                     pacman_mgr.enemies.remove(enemy)
                 except (ValueError, AttributeError):
                     pass
-                proj.alive = False
-                break
+            proj.alive = False
+            break
 
     def draw(self, surface: pygame.Surface) -> None:
         for proj in self._projectiles:
