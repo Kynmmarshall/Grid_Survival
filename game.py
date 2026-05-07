@@ -129,6 +129,7 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._network_world_delta = (0, 0)
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
         self._client_position_blend = 0.32
@@ -1058,6 +1059,7 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._network_world_delta = (0, 0)
 
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
@@ -1069,6 +1071,13 @@ class GameManager:
         self.eliminated_players.clear()
         for player in self.players:
             player._eliminated = False
+
+    def _shift_mask(self, source_mask, dx: int, dy: int):
+        if source_mask is None:
+            return None
+        shifted = pygame.mask.Mask(source_mask.get_size(), fill=False)
+        shifted.draw(source_mask, (int(dx), int(dy)))
+        return shifted
 
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
@@ -1188,9 +1197,28 @@ class GameManager:
                 except Exception:
                     pass
 
+            raw_tiles_snapshot = snapshot.get("tiles") if isinstance(snapshot.get("tiles"), dict) else {}
+            layout_entries = raw_tiles_snapshot.get("layout") or []
+            if layout_entries:
+                first_entry = layout_entries[0]
+                key = (int(first_entry.get("x", -1)), int(first_entry.get("y", -1)))
+                local_tile = self.tile_manager.tiles.get(key)
+                if local_tile is not None:
+                    host_px = int(first_entry.get("pixel_x", local_tile.pixel_x))
+                    host_py = int(first_entry.get("pixel_y", local_tile.pixel_y))
+                    self._network_world_delta = (
+                        host_px - int(local_tile.pixel_x),
+                        host_py - int(local_tile.pixel_y),
+                    )
+
             self.tile_manager.apply_snapshot(snapshot.get("tiles"))
             # Rebuild walkable mask immediately after applying host layout so collision matches visuals
-            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+            shifted_original_mask = self._shift_mask(
+                self.original_walkable_mask,
+                self._network_world_delta[0],
+                self._network_world_delta[1],
+            )
+            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(shifted_original_mask)
             
             # Validate walkable mask alignment with tile positions
             print(f"[NET_DEBUG_VALIDATE] Mask active, tiles count={len(self.tile_manager.tiles) if self.tile_manager.tiles else 0}", flush=True)
@@ -2517,7 +2545,8 @@ class GameManager:
         # and that the background (starry void) is visible where platform tiles are missing.
         
         # 1. Draw static background/bottom layers
-        self.screen.blit(self.map_surface, (0, 0))
+        map_draw_x, map_draw_y = self._network_world_delta
+        self.screen.blit(self.map_surface, (map_draw_x, map_draw_y))
 
         # 2. Draw active platform tiles (destructible)
         self.tile_manager.draw_active_tiles(self.screen)
