@@ -109,39 +109,26 @@ class InternetSessionClient(NetworkClient):
             pass
 
         # === PHASE 1: Try TCP handshake (most reliable through firewalls) ===
-        print(f"[DEBUG] [PHASE 1] Attempting TCP handshake to {host}:{port}...")
         tcp_auth_ok = False
         try:
             if hasattr(self, 'transport') and hasattr(self.transport, '_tcp_handshake'):
                 if self.transport._tcp_handshake(host, port, token, player_name):
-                    print(f"[DEBUG] [PHASE 1] TCP auth succeeded!")
                     self.session_id = self.transport.session_id
                     self._last_auth_ok = True
                     tcp_auth_ok = True
-        except Exception as e:
-            try:
-                print(f"[DEBUG] [PHASE 1] TCP auth exception: {e}")
-            except Exception:
-                pass
+        except Exception:
+            pass
         
         if tcp_auth_ok:
-            print(f"[DEBUG] [PHASE 1] TCP ok, attempting UDP hello...")
             if self.connect_to_host(host, port):
-                print(f"[DEBUG] [PHASE 1] SUCCESS: Connected via TCP auth + UDP hello!")
                 return True
-            else:
-                print(f"[DEBUG] [PHASE 1] UDP hello failed: {self.last_error}")
         
         # === PHASE 2: Try clean UDP hello from scratch ===
-        print(f"[DEBUG] [PHASE 2] Trying fresh UDP hello...")
         connected = False
         for attempt in range(1, 4):
-            print(f"[DEBUG] [PHASE 2] UDP hello attempt {attempt}/3...")
             if self.connect_to_host(host, port):
                 connected = True
-                print(f"[DEBUG] [PHASE 2] UDP hello succeeded!")
                 break
-            print(f"[DEBUG] [PHASE 2] Attempt {attempt} failed: {self.last_error}")
             if attempt < 3:
                 time.sleep(0.35)
 
@@ -157,7 +144,6 @@ class InternetSessionClient(NetworkClient):
             return False
 
         # === PHASE 3: Send internet_auth and wait for confirmation ===
-        print(f"[DEBUG] [PHASE 3] Sending internet_auth...")
         if not self.send_message(
             "internet_auth",
             token=token,
@@ -174,18 +160,15 @@ class InternetSessionClient(NetworkClient):
                 if message.get("type") == "internet_auth_ok":
                     self.session_id = str(message.get("session_id", "")) or None
                     self._last_auth_ok = True
-                    print(f"[DEBUG] [PHASE 3] SUCCESS: internet_auth_ok received!")
                     return True
                 if message.get("type") == "internet_auth_error":
                     self.last_error = str(message.get("error", "auth rejected"))
                     self.disconnect()
-                    print(f"[DEBUG] [PHASE 3] FAILED: {self.last_error}")
                     return False
             time.sleep(0.02)
 
         self.last_error = "Timed out waiting for internet_auth_ok"
         self.disconnect()
-        print(f"[DEBUG] [PHASE 3] FAILED: Timeout")
         return False
 
     def request_resync(self, reason: str = "manual") -> bool:
