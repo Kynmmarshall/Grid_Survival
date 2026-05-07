@@ -504,7 +504,7 @@ class GameManager:
         self.tile_manager.update(dt)
 
         # Update walkable mask with disappeared/crumbling tiles
-        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        self._rebuild_walkable_mask()
 
         self.hazard_manager.update(dt)
         self.hud.update(dt)
@@ -1079,6 +1079,16 @@ class GameManager:
         shifted.draw(source_mask, (int(dx), int(dy)))
         return shifted
 
+    def _rebuild_walkable_mask(self):
+        base_mask = self.original_walkable_mask
+        if self.is_network_game and not self.is_network_host:
+            base_mask = self._shift_mask(
+                self.original_walkable_mask,
+                self._network_world_delta[0],
+                self._network_world_delta[1],
+            )
+        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(base_mask)
+
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
             return
@@ -1213,12 +1223,7 @@ class GameManager:
 
             self.tile_manager.apply_snapshot(snapshot.get("tiles"))
             # Rebuild walkable mask immediately after applying host layout so collision matches visuals
-            shifted_original_mask = self._shift_mask(
-                self.original_walkable_mask,
-                self._network_world_delta[0],
-                self._network_world_delta[1],
-            )
-            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(shifted_original_mask)
+            self._rebuild_walkable_mask()
             
             # Validate walkable mask alignment with tile positions
             print(f"[NET_DEBUG_VALIDATE] Mask active, tiles count={len(self.tile_manager.tiles) if self.tile_manager.tiles else 0}", flush=True)
@@ -1287,46 +1292,56 @@ class GameManager:
         # Draw water
         self.water.draw(self.screen)
 
+        world_surface = self.screen
+        world_offset = (0, 0)
+        if self.is_network_game and not self.is_network_host:
+            world_surface = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+            dx, dy = self._network_world_delta
+            world_offset = (-dx, -dy)
+
         # Determine which players draw behind map
         players_behind = [p for p in self.players if p.draws_behind_map()]
         players_front = [p for p in self.players if not p.draws_behind_map()]
 
         # Draw players behind map
         for player in players_behind:
-            player.draw(self.screen)
+            player.draw(world_surface)
 
         # Draw TMX map with tile disappearance
-        self._draw_tmx_map_with_tiles()
+        self._draw_tmx_map_with_tiles(world_surface)
 
         # Draw warning/crumble overlays and debris particles
-        self.tile_manager.draw_warning_overlays(self.screen)
+        self.tile_manager.draw_warning_overlays(world_surface)
 
         # Draw walkable debug overlay
-        self._draw_walkable_debug()
+        self._draw_walkable_debug(world_surface)
 
         # Draw orbs floating above the arena
-        self.orb_manager.draw(self.screen)
+        self.orb_manager.draw(world_surface)
 
         # Draw pacman-style enemies before the player front layer
         if self.pacman_enemy_manager:
-            self.pacman_enemy_manager.draw(self.screen)
+            self.pacman_enemy_manager.draw(world_surface)
 
         # Draw players in front of map
         for player in players_front:
-            player.draw(self.screen)
+            player.draw(world_surface)
 
         # Draw hazards
-        self.hazard_manager.draw(self.screen)
+        self.hazard_manager.draw(world_surface)
 
         # Draw projectiles
-        self.projectile_manager.draw(self.screen)
+        self.projectile_manager.draw(world_surface)
 
         # Draw active power visuals
         for player in self.players:
             if player in self.eliminated_players:
                 continue
             if player.power:
-                player.power.draw(self.screen, player)
+                player.power.draw(world_surface, player)
+
+        if world_surface is not self.screen:
+            self.screen.blit(world_surface, world_offset)
 
         # Draw HUD
         self.hud.draw(
@@ -1498,7 +1513,7 @@ class GameManager:
             return False
 
         best_tile.reset()
-        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        self._rebuild_walkable_mask()
         return bool(self.walkable_mask)
 
     def _apply_spawn_position(self, player, position: tuple[int, int]):
@@ -1542,7 +1557,7 @@ class GameManager:
 
     def _rescue_player_to_safe_tile(self, player) -> bool:
         if not self.walkable_mask and self.original_walkable_mask:
-            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+            self._rebuild_walkable_mask()
         if not self.walkable_mask:
             return False
 
@@ -2535,8 +2550,10 @@ class GameManager:
             if hasattr(player, "_set_state"):
                 player._set_state("idle", player.facing)
 
-    def _draw_tmx_map_with_tiles(self):
+    def _draw_tmx_map_with_tiles(self, target_surface=None):
         """Draw TMX map layers, letting missing tiles reveal the background."""
+        if target_surface is None:
+            target_surface = self.screen
         if not self.tmx_data or not self.map_surface:
             return
 
@@ -2544,14 +2561,15 @@ class GameManager:
         # We need to ensure that the platform tiles (Top) are drawn by tile_manager
         # and that the background (starry void) is visible where platform tiles are missing.
         
-        # 1. Draw static background/bottom layers
-        map_draw_x, map_draw_y = self._network_world_delta
-        self.screen.blit(self.map_surface, (map_draw_x, map_draw_y))
+        # 1. Draw static background/bottom layers centered as loaded
+        target_surface.blit(self.map_surface, (0, 0))
 
         # 2. Draw active platform tiles (destructible)
-        self.tile_manager.draw_active_tiles(self.screen)
+        self.tile_manager.draw_active_tiles(target_surface)
 
-    def _draw_walkable_debug(self):
+    def _draw_walkable_debug(self, target_surface=None):
+        if target_surface is None:
+            target_surface = self.screen
         if not (DEBUG_VISUALS_ENABLED and DEBUG_DRAW_WALKABLE) or self.walkable_mask is None:
             return
 
@@ -2561,7 +2579,7 @@ class GameManager:
             self.walkable_debug_surface = self.walkable_mask.to_surface(
                 setcolor=color, unsetcolor=(0, 0, 0, 0)
             )
-            self.screen.blit(self.walkable_debug_surface, (0, 0))
+            target_surface.blit(self.walkable_debug_surface, (0, 0))
         except Exception:
             # Fall back to no overlay if mask conversion fails
             pass
@@ -2571,7 +2589,7 @@ class GameManager:
             if getattr(self, 'tile_manager', None):
                 for tile in self.tile_manager.tiles.values():
                     pts = tile.get_diamond_points()
-                    pygame.draw.polygon(self.screen, (255, 64, 64, 180), pts, 1)
+                    pygame.draw.polygon(target_surface, (255, 64, 64, 180), pts, 1)
                     # draw small center marker
                     cx, cy = tile._iso_center()
                     pygame.draw.circle(self.screen, (255, 200, 60), (int(cx), int(cy)), 2)
