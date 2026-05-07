@@ -1172,6 +1172,23 @@ class GameManager:
             self.tile_manager.apply_snapshot(snapshot.get("tiles"))
             # Rebuild walkable mask immediately after applying host layout so collision matches visuals
             self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+            
+            # Validate walkable mask alignment with tile positions
+            # (walkable_mask should cover exactly the same areas as the centered tiles)
+            try:
+                if self.walkable_mask and self.tile_manager.tiles:
+                    mask_bounds = self.walkable_mask.get_bounding_rect()
+                    tile_pixel_xs = [int(t.pixel_x) for t in self.tile_manager.tiles.values()]
+                    tile_pixel_ys = [int(t.pixel_y) for t in self.tile_manager.tiles.values()]
+                    if tile_pixel_xs and tile_pixel_ys:
+                        min_x = min(tile_pixel_xs)
+                        max_x = max(tile_pixel_xs)
+                        min_y = min(tile_pixel_ys)
+                        max_y = max(tile_pixel_ys)
+                        print(f"[NET_DEBUG_VALIDATE] Mask bounds={mask_bounds}, tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
+            except Exception:
+                pass
+            
             self._last_client_tile_snapshot_time = incoming_time
             applied_any = True
         if "hazards" in snapshot and incoming_time + epsilon >= self._last_client_hazard_snapshot_time:

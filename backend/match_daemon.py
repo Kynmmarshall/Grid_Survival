@@ -1052,11 +1052,27 @@ class MatchDaemon:
 
     def _build_world_snapshot(self, session: dict) -> dict[str, Any]:
         tile_manager = session.get("tile_manager")
-        return {
+        snapshot = {
             "time_since_start": float(time.time() - session.get("start_time", time.time())),
             "round_seq": int(session.get("round_seq", 0)),
             "tiles": tile_manager.snapshot_state() if tile_manager is not None else None,
         }
+        
+        # Validate walkable layer positioning on host (log tile bounds for comparison with client)
+        try:
+            if tile_manager is not None and hasattr(tile_manager, 'tiles') and tile_manager.tiles:
+                tile_pixel_xs = [int(t.pixel_x) for t in tile_manager.tiles.values()]
+                tile_pixel_ys = [int(t.pixel_y) for t in tile_manager.tiles.values()]
+                if tile_pixel_xs and tile_pixel_ys:
+                    min_x = min(tile_pixel_xs)
+                    max_x = max(tile_pixel_xs)
+                    min_y = min(tile_pixel_ys)
+                    max_y = max(tile_pixel_ys)
+                    print(f"[NET_DEBUG_HOST_VALIDATE] Tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
+        except Exception:
+            pass
+        
+        return snapshot
 
     def _build_world_dynamic_snapshot(self, session: dict) -> dict[str, Any]:
         hazard_manager = session.get("hazard_manager")
