@@ -1037,6 +1037,10 @@ class MatchDaemon:
         session["original_walkable_mask"] = walkable_mask
         session["walkable_mask"] = walkable_mask
         session["walkable_bounds"] = walkable_bounds
+        # Store map centering parameters so host computes same tile positions as clients
+        session["map_scale_x"] = scale_x
+        session["map_scale_y"] = scale_y
+        session["map_offset"] = map_offset
         enemy_count = self._pacman_enemy_count(session)
         session["enemy_manager"] = (
             PacmanEnemyManager(self._build_enemy_spawns(session, enemy_count))
