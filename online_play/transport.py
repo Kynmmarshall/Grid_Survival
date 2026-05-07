@@ -24,6 +24,8 @@ GAME_UDP_PORT_OFFSET = 0
 
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_UDP_DATAGRAM_BYTES = 1200
+MAX_UDP_RECV_BYTES = 65536
+SOCKET_RECEIVE_BUFFER_BYTES = 1024 * 1024
 FRAGMENT_RAW_CHUNK_BYTES = 480
 MAX_FRAGMENT_MESSAGES = 256
 FRAGMENT_TTL_SECONDS = 2.5
@@ -219,6 +221,13 @@ class NetworkManager:
             except (socket.error, OSError) as exc:
                 self.last_error = str(exc)
         return sent_any
+
+    @staticmethod
+    def _configure_udp_receive_buffer(sock: socket.socket) -> None:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_RECEIVE_BUFFER_BYTES)
+        except (socket.error, OSError):
+            pass
 
     def _send_control(self, kind: str, *, address: tuple[str, int] | None = None, **payload: Any) -> bool:
         packet = {"k": kind, **payload}
@@ -590,7 +599,7 @@ class NetworkManager:
     def _receive_loop(self) -> None:
         while self.running and self.socket:
             try:
-                payload, address = self.socket.recvfrom(MAX_UDP_DATAGRAM_BYTES * 2)
+                payload, address = self.socket.recvfrom(MAX_UDP_RECV_BYTES)
             except socket.timeout:
                 continue
             except (socket.error, OSError) as e:
@@ -601,7 +610,11 @@ class NetworkManager:
                 # or EBADF), treat this as a normal shutdown and stop looping.
                 if not self.running or win_err == 10038 or err_no == errno.EBADF:
                     break
-                raise
+                if win_err == 10040 or err_no == getattr(errno, "EMSGSIZE", None):
+                    self.last_error = f"Dropped oversized UDP datagram: {e}"
+                    continue
+                self.last_error = str(e)
+                continue
             if not payload or len(payload) > MAX_MESSAGE_BYTES:
                 continue
             try:
@@ -689,8 +702,7 @@ class UdpHostTransport(NetworkManager):
         try:
             host_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             host_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Increase recv buffer to handle large datagrams like world_snapshot (2237 bytes)
-            host_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB
+            self._configure_udp_receive_buffer(host_socket)
             host_socket.bind(("0.0.0.0", self.port))
             host_socket.settimeout(0.05)
             self.socket = host_socket
@@ -927,6 +939,7 @@ class UdpClientTransport(NetworkManager):
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._configure_udp_receive_buffer(client_socket)
             client_socket.bind(("0.0.0.0", 0))
             client_socket.settimeout(0.05)
             self.socket = client_socket
@@ -953,8 +966,7 @@ class UdpClientTransport(NetworkManager):
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Increase recv buffer to handle large datagrams like world_snapshot (2237 bytes)
-            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB
+            self._configure_udp_receive_buffer(client_socket)
             client_socket.bind(("0.0.0.0", 0))
             client_socket.settimeout(0.05)
             self.socket = client_socket

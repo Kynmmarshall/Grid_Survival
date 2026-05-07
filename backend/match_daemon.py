@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import math
 import socket
@@ -19,7 +20,16 @@ from level_config import get_level
 from orbs import OrbManager
 from backend.vps_match_server import MatchServerManager
 from pacman_enemies import PacmanEnemyManager
-from network import PKT_DATA, PKT_DISCONNECT, PKT_FRAGMENT, PKT_HELLO, PKT_HELLO_ACK
+from network import (
+    FRAGMENT_RAW_CHUNK_BYTES,
+    MAX_MESSAGE_BYTES,
+    MAX_UDP_DATAGRAM_BYTES,
+    PKT_DATA,
+    PKT_DISCONNECT,
+    PKT_FRAGMENT,
+    PKT_HELLO,
+    PKT_HELLO_ACK,
+)
 from settings import MAP_PATH, PLAYER_START_POS, WINDOW_SIZE
 from tile_system import TMXTileManager
 
@@ -135,16 +145,62 @@ class MatchDaemon:
             self._seq = (self._seq + 1) & 0xFFFFFFFF
             return self._seq
 
+    def _encode_packet_datagrams(
+        self,
+        *,
+        kind: str,
+        seq: int,
+        reliable: int,
+        msg_type: str,
+        payload: dict[str, Any],
+    ) -> tuple[list[bytes], int]:
+        packet = {"k": kind, "s": int(seq), "r": int(reliable), "t": msg_type, "p": payload}
+        raw = json.dumps(packet, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        raw_size = len(raw)
+        if raw_size > MAX_MESSAGE_BYTES:
+            raise ValueError(f"packet too large: {raw_size} bytes")
+        if raw_size <= MAX_UDP_DATAGRAM_BYTES:
+            return [raw], raw_size
+
+        datagrams: list[bytes] = []
+        total = (raw_size + FRAGMENT_RAW_CHUNK_BYTES - 1) // FRAGMENT_RAW_CHUNK_BYTES
+        for idx in range(total):
+            start = idx * FRAGMENT_RAW_CHUNK_BYTES
+            end = min(raw_size, start + FRAGMENT_RAW_CHUNK_BYTES)
+            frag = {
+                "k": PKT_FRAGMENT,
+                "s": int(seq),
+                "r": int(reliable),
+                "i": int(idx),
+                "n": int(total),
+                "x": base64.b64encode(raw[start:end]).decode("ascii"),
+            }
+            frag_raw = json.dumps(frag, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+            if len(frag_raw) > MAX_UDP_DATAGRAM_BYTES:
+                raise ValueError(f"fragment too large: {len(frag_raw)} bytes")
+            datagrams.append(frag_raw)
+        return datagrams, raw_size
+
     def _send_packet(self, addr: tuple[str, int], kind: str, seq: int, reliable: int, msg_type: str, payload: dict[str, Any]) -> None:
         if not self.sock:
             return
-        packet = {"k": kind, "s": int(seq), "r": int(reliable), "t": msg_type, "p": payload}
         try:
-            raw = json.dumps(packet, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-            self.sock.sendto(raw, addr)
+            datagrams, raw_size = self._encode_packet_datagrams(
+                kind=kind,
+                seq=seq,
+                reliable=reliable,
+                msg_type=msg_type,
+                payload=payload,
+            )
+            for datagram in datagrams:
+                self.sock.sendto(datagram, addr)
             if kind == "ha" or msg_type in {"internet_auth_ok", "snapshot"}:
                 try:
-                    print(f"[SEND] {kind}/{msg_type} -> {addr} (seq={seq}, reliable={reliable}, size={len(raw)})", flush=True)
+                    print(
+                        f"[SEND] {kind}/{msg_type} -> {addr} "
+                        f"(seq={seq}, reliable={reliable}, size={raw_size}, packets={len(datagrams)})",
+                        flush=True,
+                    )
                 except Exception:
                     pass
         except Exception as e:
