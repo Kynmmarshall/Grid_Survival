@@ -30,8 +30,25 @@ from network import (
     PKT_HELLO,
     PKT_HELLO_ACK,
 )
-from settings import MAP_PATH, PLAYER_START_POS, WINDOW_SIZE
-from tile_system import TMXTileManager
+from settings import (
+    MAP_PATH,
+    PLAYER_FALL_GRAVITY,
+    PLAYER_FALL_MAX_SPEED,
+    PLAYER_SPEED,
+    PLAYER_START_POS,
+    WINDOW_SIZE,
+)
+from tile_system import TMXTileManager, TileState
+
+
+ONLINE_TILE_GRACE_PERIOD = 5.0
+ONLINE_TILE_BASE_INTERVAL = 4.0
+ONLINE_TILE_MIN_INTERVAL = 1.5
+ONLINE_TILE_SCALE_RATE = 0.97
+ONLINE_INITIAL_TILE_BURST = 1
+ONLINE_PACMAN_ENEMY_COUNT = 2
+ROUND_RESTART_DELAY = 2.0
+MAX_TICK_DT = 0.1
 
 
 class _PlayerProxy:
@@ -43,8 +60,18 @@ class _PlayerProxy:
         self.rect.center = (round(self.position.x), round(self.position.y))
         self._eliminated = bool(entry.get("eliminated", False))
         self.state = str(entry.get("state", "idle"))
+        self.facing = str(entry.get("facing", "down"))
+        self.velocity = pygame.Vector2(
+            float(entry.get("velocity_x", 0.0)),
+            float(entry.get("velocity_y", 0.0)),
+        )
         self.drowning = bool(entry.get("drowning", False))
         self.falling = bool(entry.get("falling", False))
+        self.fall_velocity = float(entry.get("fall_velocity", 0.0))
+        self.jumping = bool(entry.get("jumping", False))
+        self.z = float(entry.get("z", 0.0))
+        self.z_velocity = float(entry.get("z_velocity", 0.0))
+        self.on_ground = bool(entry.get("on_ground", True))
         self._shield_timer = 0.0
         self.bot = bool(bot)
         self._orb_speed_boost = float(entry.get("orb_speed_boost", 1.0))
@@ -53,20 +80,46 @@ class _PlayerProxy:
         self._void_walk_timer = float(entry.get("void_walk_timer", 0.0))
         self._freeze_timer = float(entry.get("freeze_timer", 0.0))
         self._power_orb_charges = int(entry.get("power_orb_charges", 0))
-        self._lives = int(entry.get("lives", 0))
+        self._lives = int(entry.get("extra_lives", entry.get("lives", 0)))
         self._active_orb_label = str(entry.get("active_orb_label", ""))
         self._active_orb_timer = float(entry.get("active_orb_timer", 0.0))
+        self._death_fade_alpha = int(entry.get("death_fade_alpha", 255))
+        self._feet_mask = None
+        self._feet_mask_count = 0
         # CollisionManager expects player.current_animation.image to exist.
         # On the daemon we only need a simple opaque surface for mask checks.
         dummy_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         dummy_surface.fill((255, 255, 255, 255))
-        self.current_animation = type("_Anim", (), {"image": dummy_surface})()
+        self.current_animation = type("_Anim", (), {"image": dummy_surface, "finished": True})()
 
     def get_feet_rect(self):
-        return self.rect
+        width = max(4, int(self.rect.width * 0.03))
+        height = max(4, int(self.rect.height * 0.03))
+        rect = pygame.Rect(0, 0, width, height)
+        rect.center = (
+            round(self.position.x),
+            round(self.position.y + self.rect.height * 0.25),
+        )
+        return rect
+
+    def get_hitbox(self) -> pygame.Rect:
+        return self.rect.inflate(-int(self.rect.width * 0.4), -int(self.rect.height * 0.4))
 
     def has_active_shield(self) -> bool:
         return self._shield_timer > 0.0
+
+    def has_void_walk(self) -> bool:
+        return self._void_walk_timer > 0.0
+
+    def has_extra_life(self) -> bool:
+        return self._lives > 0
+
+    def use_life(self) -> bool:
+        if self._lives <= 0:
+            return False
+        self._lives -= 1
+        self._entry["extra_lives"] = self._lives
+        return True
 
     def add_shield(self, duration: float) -> None:
         self._shield_timer = max(self._shield_timer, float(duration))
@@ -83,7 +136,7 @@ class _PlayerProxy:
 
     def add_life(self) -> None:
         self._lives += 1
-        self._entry["lives"] = self._lives
+        self._entry["extra_lives"] = self._lives
 
     def enable_void_walk(self, duration: float) -> None:
         self._void_walk_timer = max(self._void_walk_timer, float(duration))
@@ -95,13 +148,92 @@ class _PlayerProxy:
         self._entry["active_orb_label"] = self._active_orb_label
         self._entry["active_orb_timer"] = self._active_orb_timer
 
+    def _feet_mask_for_rect(self, rect: pygame.Rect) -> pygame.mask.Mask:
+        size = rect.size
+        if self._feet_mask is None or self._feet_mask.get_size() != size:
+            self._feet_mask = pygame.mask.Mask(size)
+            self._feet_mask.fill()
+            self._feet_mask_count = self._feet_mask.count()
+        return self._feet_mask
+
+    def is_over_platform(self, position: pygame.Vector2, walkable_mask) -> bool:
+        if self.has_void_walk():
+            return True
+        if walkable_mask is None:
+            return True
+        feet_rect = self.get_feet_rect().copy()
+        feet_rect.center = (
+            round(position.x),
+            round(position.y + self.rect.height * 0.25),
+        )
+        feet_mask = self._feet_mask_for_rect(feet_rect)
+        return walkable_mask.overlap_area(feet_mask, feet_rect.topleft) == self._feet_mask_count
+
+    def attempt_move(self, delta: pygame.Vector2, walkable_mask) -> bool:
+        proposed = self.position + delta
+        if self.is_over_platform(proposed, walkable_mask):
+            self.position = proposed
+            return True
+
+        if delta.x:
+            proposed_x = pygame.Vector2(self.position.x + delta.x, self.position.y)
+            if self.is_over_platform(proposed_x, walkable_mask):
+                self.position.x = proposed_x.x
+                return True
+
+        if delta.y:
+            proposed_y = pygame.Vector2(self.position.x, self.position.y + delta.y)
+            if self.is_over_platform(proposed_y, walkable_mask):
+                self.position.y = proposed_y.y
+                return True
+
+        self.position = proposed
+        return False
+
+    def start_fall(self) -> None:
+        if self.falling or self.state == "death":
+            return
+        self.falling = True
+        self.on_ground = False
+        self.fall_velocity = 0.0
+        self.velocity.update(0, 0)
+
+    def update_fall(self, dt: float) -> None:
+        self.fall_velocity = min(
+            self.fall_velocity + PLAYER_FALL_GRAVITY * dt,
+            PLAYER_FALL_MAX_SPEED,
+        )
+        self.position.y += self.fall_velocity * dt
+        self.velocity.update(0.0, self.fall_velocity)
+
+    def die(self) -> None:
+        if self.state == "death":
+            return
+        self.state = "death"
+        self.falling = False
+        self.drowning = False
+        self.jumping = False
+        self.velocity.update(0, 0)
+        self._death_fade_alpha = 255
+
+    def update_death(self, dt: float) -> None:
+        self._death_fade_alpha = max(0, int(self._death_fade_alpha - 220 * dt))
+
     def sync_back(self) -> None:
         self._entry["x"] = float(self.position.x)
         self._entry["y"] = float(self.position.y)
         self._entry["eliminated"] = bool(self._eliminated)
         self._entry["state"] = str(self.state)
+        self._entry["facing"] = str(self.facing)
         self._entry["falling"] = bool(self.falling)
+        self._entry["fall_velocity"] = float(self.fall_velocity)
         self._entry["drowning"] = bool(self.drowning)
+        self._entry["jumping"] = bool(self.jumping)
+        self._entry["z"] = float(self.z)
+        self._entry["z_velocity"] = float(self.z_velocity)
+        self._entry["on_ground"] = bool(self.on_ground)
+        self._entry["velocity_x"] = float(self.velocity.x)
+        self._entry["velocity_y"] = float(self.velocity.y)
         self._entry["bot"] = bool(self.bot)
         self._entry["orb_speed_boost"] = float(self._orb_speed_boost)
         self._entry["orb_speed_timer"] = float(getattr(self, "_orb_speed_timer", 0.0))
@@ -109,9 +241,10 @@ class _PlayerProxy:
         self._entry["void_walk_timer"] = float(getattr(self, "_void_walk_timer", 0.0))
         self._entry["freeze_timer"] = float(getattr(self, "_freeze_timer", 0.0))
         self._entry["power_orb_charges"] = int(getattr(self, "_power_orb_charges", 0))
-        self._entry["lives"] = int(getattr(self, "_lives", 0))
+        self._entry["extra_lives"] = int(getattr(self, "_lives", 0))
         self._entry["active_orb_label"] = str(getattr(self, "_active_orb_label", ""))
         self._entry["active_orb_timer"] = float(getattr(self, "_active_orb_timer", 0.0))
+        self._entry["death_fade_alpha"] = int(getattr(self, "_death_fade_alpha", 255))
 
 
 class MatchDaemon:
@@ -209,6 +342,109 @@ class MatchDaemon:
             except Exception:
                 pass
             return
+
+    def _expected_player_count(self, session: dict) -> int:
+        players = session.get("assignment", {}).get("payload", {}).get("players", [])
+        if isinstance(players, list) and players:
+            return len(players)
+        return max(2, len(session.get("players", {})))
+
+    def _session_ready(self, session: dict) -> bool:
+        assigned_players = session.get("assignment", {}).get("payload", {}).get("players", [])
+        if not isinstance(assigned_players, list) or not assigned_players:
+            return bool(session.get("players"))
+
+        expected_humans = sum(
+            1
+            for player in assigned_players
+            if isinstance(player, dict) and not bool(player.get("bot", False))
+        )
+        registered_humans = sum(
+            1
+            for entry in session.get("players", {}).values()
+            if not bool(entry.get("bot", False))
+        )
+        return registered_humans >= max(1, expected_humans)
+
+    def _ensure_round_wins(self, session: dict) -> list[int]:
+        total = max(self._expected_player_count(session), len(session.get("players", {})))
+        raw_wins = session.get("round_wins")
+        if isinstance(raw_wins, list):
+            wins = [int(max(0, value)) for value in raw_wins[:total]]
+        else:
+            wins = []
+        if len(wins) < total:
+            wins.extend([0] * (total - len(wins)))
+        session["round_wins"] = wins
+        return wins
+
+    @staticmethod
+    def _player_entry_snapshot(entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "x": float(entry.get("x", 0.0)),
+            "y": float(entry.get("y", 0.0)),
+            "facing": str(entry.get("facing", "down")),
+            "state": str(entry.get("state", "death" if entry.get("eliminated") else "idle")),
+            "falling": bool(entry.get("falling", False)),
+            "fall_velocity": float(entry.get("fall_velocity", 0.0)),
+            "drowning": bool(entry.get("drowning", False)),
+            "jumping": bool(entry.get("jumping", False)),
+            "z": float(entry.get("z", 0.0)),
+            "z_velocity": float(entry.get("z_velocity", 0.0)),
+            "on_ground": bool(entry.get("on_ground", True)),
+            "velocity_x": float(entry.get("velocity_x", 0.0)),
+            "velocity_y": float(entry.get("velocity_y", 0.0)),
+            "character_name": str(entry.get("character_name", "Caveman")),
+            "power_orb_charges": int(entry.get("power_orb_charges", 0)),
+            "shield_timer": float(entry.get("shield_timer", 0.0)),
+            "freeze_timer": float(entry.get("freeze_timer", 0.0)),
+            "power_alpha": 255,
+            "power_speed_boost": float(entry.get("power_speed_boost", 1.0)),
+            "power_jump_boost": float(entry.get("power_jump_boost", 1.0)),
+            "orb_speed_boost": float(entry.get("orb_speed_boost", 1.0)),
+            "active_orb_label": entry.get("active_orb_label", ""),
+            "active_orb_timer": float(entry.get("active_orb_timer", 0.0)),
+            "active_orb_indefinite": bool(entry.get("active_orb_indefinite", False)),
+            "active_orb_duration": float(entry.get("active_orb_duration", 0.0)),
+            "eliminated": bool(entry.get("eliminated", False)),
+            "extra_lives": int(entry.get("extra_lives", 0)),
+            "death_fade_alpha": int(entry.get("death_fade_alpha", 255)),
+        }
+
+    def _configure_tile_manager(self, tile_manager: TMXTileManager, level) -> None:
+        tile_manager.grace_period = max(ONLINE_TILE_GRACE_PERIOD, float(level.tile.grace_period))
+        tile_manager.base_disappear_interval = max(
+            ONLINE_TILE_BASE_INTERVAL,
+            float(level.tile.base_interval),
+        )
+        tile_manager.min_disappear_interval = max(
+            ONLINE_TILE_MIN_INTERVAL,
+            float(level.tile.min_interval),
+        )
+        tile_manager.difficulty_scale_rate = max(
+            ONLINE_TILE_SCALE_RATE,
+            float(level.tile.scale_rate),
+        )
+        tile_manager.current_interval = float(tile_manager.base_disappear_interval)
+        tile_manager.simultaneous_tiles = min(
+            ONLINE_INITIAL_TILE_BURST,
+            max(1, int(level.tile.base_simultaneous)),
+        )
+        tile_manager.time_elapsed = 0.0
+        tile_manager.grace_timer = 0.0
+        tile_manager.disappear_timer = 0.0
+
+    def _configure_hazard_manager(self, hazard_manager: HazardManager, level) -> None:
+        hazard_manager.hazard_start_time = float(level.hazard.start_delay)
+        hazard_manager.bullet_spawn_interval = float(level.hazard.bullet_interval)
+        hazard_manager.min_bullet_interval = float(level.hazard.bullet_min_interval)
+        hazard_manager.trap_spawn_interval = float(level.hazard.trap_interval)
+        hazard_manager.min_trap_interval = float(level.hazard.trap_min_interval)
+        hazard_manager.difficulty_scale_rate = float(level.hazard.difficulty_scale_rate)
+        hazard_manager.bullet_spawn_timer = 0.0
+        hazard_manager.trap_spawn_timer = 0.0
+        hazard_manager.hazard_spawn_timer = 0.0
+        hazard_manager.time_elapsed = 0.0
 
     @staticmethod
     def _looks_like_hello_probe(raw: bytes) -> bool:
@@ -351,7 +587,13 @@ class MatchDaemon:
                     "bot_ai_timer": 0.0,
                     "created_at": time.time(),
                     "round_seq": 0,
+                    "round_wins": [],
                     "start_time": time.time(),
+                    "round_finished": False,
+                    "round_restart_at": None,
+                    "game_over": False,
+                    "match_complete": False,
+                    "end_state": None,
                 })
                 session_players = session["players"]
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
@@ -517,7 +759,13 @@ class MatchDaemon:
                     "bot_ai_timer": 0.0,
                     "created_at": time.time(),
                     "round_seq": 0,
+                    "round_wins": [],
                     "start_time": time.time(),
+                    "round_finished": False,
+                    "round_restart_at": None,
+                    "game_over": False,
+                    "match_complete": False,
+                    "end_state": None,
                 })
                 session_players = session["players"]
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
@@ -635,34 +883,94 @@ class MatchDaemon:
         players_list = []
         for name, entry in session.get("players", {}).items():
             players_list.append({
-                "player": {
-                    "x": float(entry.get("x", 0.0)),
-                    "y": float(entry.get("y", 0.0)),
-                    "facing": "right",
-                    "state": "idle",
-                    "falling": False,
-                    "drowning": False,
-                    "eliminated": bool(entry.get("eliminated", False)),
-                },
+                "player": self._player_entry_snapshot(entry),
                 "power": None,
                 "bot": bool(entry.get("bot", False)),
                 "name": name,
             })
+        round_wins = self._ensure_round_wins(session)
+        alive_count = sum(
+            1
+            for entry in session.get("players", {}).values()
+            if not bool(entry.get("eliminated", False))
+        )
+        target_score = int(session.get("assignment", {}).get("payload", {}).get("target_score", 3))
+        elapsed = float(now - session.get("start_time", now))
         snapshot = {
-            "time_since_start": float(now - session.get("start_time", now)),
+            "time_since_start": elapsed,
             "round_seq": int(session.get("round_seq", 0)),
             "paused": False,
-            "game_over": False,
-            "target_score": int(session.get("assignment", {}).get("payload", {}).get("target_score", 3)),
-            "round_wins": [0 for _ in players_list],
-            "match_complete": False,
-            "end_state": None,
+            "game_over": bool(session.get("game_over", False)),
+            "target_score": target_score,
+            "round_wins": round_wins[: len(players_list)] if players_list else round_wins,
+            "match_complete": bool(session.get("match_complete", False)),
+            "end_state": session.get("end_state"),
             "players": players_list,
-            "hud": {},
+            "hud": {
+                "survival_time": elapsed,
+                "score": 0,
+                "players_alive": int(alive_count),
+                "total_players": int(len(players_list)),
+                "round_wins": round_wins[: len(players_list)] if players_list else round_wins,
+                "target_score": target_score,
+            },
         }
         return snapshot
 
-    def _build_enemy_spawns(self, session: dict) -> list[tuple[int, int]]:
+    def _pacman_enemy_count(self, session: dict) -> int:
+        return ONLINE_PACMAN_ENEMY_COUNT if self._expected_player_count(session) >= 2 else 1
+
+    def _tile_center(self, tile: Any) -> tuple[int, int]:
+        try:
+            return tile._iso_center()
+        except Exception:
+            return (
+                int(round(float(getattr(tile, "pixel_x", PLAYER_START_POS[0])) + float(getattr(tile, "tile_width", 0)) * 0.5)),
+                int(round(float(getattr(tile, "pixel_y", PLAYER_START_POS[1])) + float(getattr(tile, "tile_height", 0)) * 0.5)),
+            )
+
+    def _nearest_intact_tile_position(
+        self,
+        session: dict,
+        desired: pygame.Vector2,
+        occupied: set[tuple[int, int]],
+        *,
+        min_player_distance: float = 120.0,
+    ) -> tuple[int, int] | None:
+        tile_manager = session.get("tile_manager")
+        if tile_manager is None:
+            return None
+
+        players = [
+            pygame.Vector2(float(entry.get("x", PLAYER_START_POS[0])), float(entry.get("y", PLAYER_START_POS[1])))
+            for entry in session.get("players", {}).values()
+        ]
+        candidates: list[tuple[float, tuple[int, int]]] = []
+        for tile in getattr(tile_manager, "tiles", {}).values():
+            if getattr(tile, "state", TileState.NORMAL) != TileState.NORMAL:
+                continue
+            pos = self._tile_center(tile)
+            if pos in occupied:
+                continue
+            pos_vec = pygame.Vector2(pos)
+            if players and min(pos_vec.distance_to(player_pos) for player_pos in players) < min_player_distance:
+                continue
+            candidates.append((pos_vec.distance_squared_to(desired), pos))
+
+        if not candidates and min_player_distance > 0.0:
+            return self._nearest_intact_tile_position(
+                session,
+                desired,
+                occupied,
+                min_player_distance=0.0,
+            )
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
+
+    def _build_enemy_spawns(self, session: dict, count: int | None = None) -> list[tuple[int, int]]:
+        enemy_count = max(1, int(count if count is not None else self._pacman_enemy_count(session)))
         players = session.get("players", {})
         if players:
             positions = [
@@ -681,13 +989,24 @@ class MatchDaemon:
             (-140, 0),
         ]
         spawns: list[tuple[int, int]] = []
+        occupied = set(positions)
         for idx, offset in enumerate(offsets):
-            if len(spawns) >= max(1, len(session.get("bot_names", []))):
+            if len(spawns) >= enemy_count:
                 break
-            spawns.append((base_x + offset[0], base_y + offset[1]))
-        while len(spawns) < max(1, len(session.get("bot_names", []))):
+            desired = pygame.Vector2(base_x + offset[0], base_y + offset[1])
+            spawn = self._nearest_intact_tile_position(session, desired, occupied)
+            if spawn is None:
+                spawn = (int(round(desired.x)), int(round(desired.y)))
+            spawns.append(spawn)
+            occupied.add(spawn)
+        while len(spawns) < enemy_count:
             px, py = positions[len(spawns) % len(positions)]
-            spawns.append((px + 120 + len(spawns) * 30, py - 80))
+            desired = pygame.Vector2(px + 120 + len(spawns) * 30, py - 80)
+            spawn = self._nearest_intact_tile_position(session, desired, occupied)
+            if spawn is None:
+                spawn = (int(round(desired.x)), int(round(desired.y)))
+            spawns.append(spawn)
+            occupied.add(spawn)
         return spawns
 
     def _initialize_session_world(self, session: dict) -> None:
@@ -702,27 +1021,11 @@ class MatchDaemon:
         tile_manager = None
         if tmx_data is not None:
             tile_manager = TMXTileManager(tmx_data, scale_x, scale_y, map_offset)
-            tile_manager.grace_period = float(level.tile.grace_period)
-            tile_manager.base_disappear_interval = float(level.tile.base_interval)
-            tile_manager.min_disappear_interval = float(level.tile.min_interval)
-            tile_manager.difficulty_scale_rate = float(level.tile.scale_rate)
-            tile_manager.current_interval = float(level.tile.base_interval)
-            tile_manager.simultaneous_tiles = int(level.tile.base_simultaneous)
-            tile_manager.time_elapsed = 0.0
-            tile_manager.grace_timer = 0.0
-            tile_manager.disappear_timer = 0.0
+            self._configure_tile_manager(tile_manager, level)
 
         collision_manager = CollisionManager()
         hazard_manager = HazardManager(collision_manager)
-        hazard_manager.hazard_start_time = float(level.hazard.start_delay)
-        hazard_manager.bullet_spawn_interval = float(level.hazard.bullet_interval)
-        hazard_manager.min_bullet_interval = float(level.hazard.bullet_min_interval)
-        hazard_manager.trap_spawn_interval = float(level.hazard.trap_interval)
-        hazard_manager.min_trap_interval = float(level.hazard.trap_min_interval)
-        hazard_manager.difficulty_scale_rate = float(level.hazard.difficulty_scale_rate)
-        hazard_manager.bullet_spawn_timer = 0.0
-        hazard_manager.trap_spawn_timer = 0.0
-        hazard_manager.time_elapsed = 0.0
+        self._configure_hazard_manager(hazard_manager, level)
 
         orb_manager = OrbManager(level.number)
 
@@ -731,8 +1034,16 @@ class MatchDaemon:
         session["collision_manager"] = collision_manager
         session["hazard_manager"] = hazard_manager
         session["orb_manager"] = orb_manager
+        session["original_walkable_mask"] = walkable_mask
         session["walkable_mask"] = walkable_mask
         session["walkable_bounds"] = walkable_bounds
+        enemy_count = self._pacman_enemy_count(session)
+        session["enemy_manager"] = (
+            PacmanEnemyManager(self._build_enemy_spawns(session, enemy_count))
+            if enemy_count > 0
+            else None
+        )
+        self._ensure_round_wins(session)
         session["world_initialized"] = True
 
     def _build_world_snapshot(self, session: dict) -> dict[str, Any]:
@@ -766,11 +1077,132 @@ class MatchDaemon:
                 player.position.y = float(PLAYER_START_POS[1])
             if hasattr(player, "rect"):
                 player.rect.center = (int(PLAYER_START_POS[0]), int(PLAYER_START_POS[1]))
+            if hasattr(player, "falling"):
+                player.falling = False
+            if hasattr(player, "fall_velocity"):
+                player.fall_velocity = 0.0
+            if hasattr(player, "velocity"):
+                player.velocity.update(0, 0)
             if hasattr(player, "sync_back"):
                 player.sync_back()
             return True
         except Exception:
             return False
+
+    def _reset_session_round(self, session: dict, *, reset_match: bool = False) -> None:
+        now = time.time()
+        level = session.get("level") or get_level(1)
+        session["round_seq"] = int(session.get("round_seq", 0)) + 1
+        session["start_time"] = now
+        session["round_finished"] = False
+        session["round_restart_at"] = None
+        session["game_over"] = False
+        session["end_state"] = None
+        if reset_match:
+            session["match_complete"] = False
+            session["round_wins"] = [0 for _ in range(max(1, len(session.get("players", {}))))]
+
+        tile_manager = session.get("tile_manager")
+        if tile_manager is not None:
+            self._configure_tile_manager(tile_manager, level)
+            tile_manager.reset()
+            self._configure_tile_manager(tile_manager, level)
+
+        original_mask = session.get("original_walkable_mask")
+        if original_mask is not None:
+            session["walkable_mask"] = (
+                tile_manager.get_updated_walkable_mask(original_mask)
+                if tile_manager is not None
+                else original_mask
+            )
+
+        hazard_manager = session.get("hazard_manager")
+        if hazard_manager is not None:
+            hazard_manager.reset()
+            self._configure_hazard_manager(hazard_manager, level)
+
+        orb_manager = session.get("orb_manager")
+        if orb_manager is not None:
+            orb_manager.reset()
+
+        players = session.get("players", {})
+        for index, entry in enumerate(players.values()):
+            entry["x"] = float(PLAYER_START_POS[0]) + 48.0 * float(index)
+            entry["y"] = float(PLAYER_START_POS[1])
+            entry["velocity_x"] = 0.0
+            entry["velocity_y"] = 0.0
+            entry["falling"] = False
+            entry["fall_velocity"] = 0.0
+            entry["drowning"] = False
+            entry["jumping"] = False
+            entry["z"] = 0.0
+            entry["z_velocity"] = 0.0
+            entry["on_ground"] = True
+            entry["eliminated"] = False
+            entry["state"] = "idle"
+            entry["death_fade_alpha"] = 255
+            entry["last_input"] = {}
+
+        enemy_count = self._pacman_enemy_count(session)
+        session["enemy_manager"] = (
+            PacmanEnemyManager(self._build_enemy_spawns(session, enemy_count))
+            if enemy_count > 0
+            else None
+        )
+        self._ensure_round_wins(session)
+
+    def _eliminate_proxy(self, proxy: _PlayerProxy, reason: str) -> None:
+        if proxy._eliminated:
+            return
+        if reason in {"hit by hazard", "fell off"} and proxy.has_active_shield():
+            return
+        if proxy.has_extra_life() and proxy.use_life():
+            if self._rescue_player_to_safe_tile(proxy):
+                return
+        proxy._eliminated = True
+        proxy.die()
+        proxy.sync_back()
+
+    def _finish_round_if_needed(self, session: dict) -> None:
+        if session.get("round_finished") or session.get("match_complete"):
+            return
+        if not self._session_ready(session):
+            return
+
+        players = list(session.get("players", {}).items())
+        if len(players) < 2:
+            return
+
+        alive = [
+            (index, name, entry)
+            for index, (name, entry) in enumerate(players)
+            if not bool(entry.get("eliminated", False))
+        ]
+        if len(alive) > 1:
+            return
+
+        wins = self._ensure_round_wins(session)
+        target_score = max(1, int(session.get("assignment", {}).get("payload", {}).get("target_score", 3)))
+        session["round_finished"] = True
+
+        if len(alive) == 1:
+            winner_index, winner_name, winner_entry = alive[0]
+            if winner_index >= len(wins):
+                wins.extend([0] * (winner_index + 1 - len(wins)))
+            wins[winner_index] += 1
+            if wins[winner_index] >= target_score:
+                session["pending_end_state"] = {
+                    "type": "victory",
+                    "winner_name": str(winner_name),
+                    "winner_character": str(winner_entry.get("character_name", "Caveman")),
+                    "survival_time": float(time.time() - session.get("start_time", time.time())),
+                }
+                session["game_over"] = False
+                session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
+                return
+
+        session["game_over"] = False
+        session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
 
     def _tick_bots(self, session: dict, dt: float) -> None:
         bot_names = list(session.get("bot_names", []))
@@ -826,18 +1258,54 @@ class MatchDaemon:
             entry["last_input"] = move
 
     def _tick_physics(self, dt: float) -> None:
+        dt = min(MAX_TICK_DT, max(0.0, float(dt)))
+        if dt <= 0.0:
+            return
         with self._lock:
             for session in list(self._sessions.values()):
                 players = session.get("players", {})
                 self._initialize_session_world(session)
+                if not self._session_ready(session):
+                    session["start_time"] = time.time()
+                    continue
+
+                restart_at = session.get("round_restart_at")
+                if restart_at is not None and time.time() >= float(restart_at):
+                    pending_end_state = session.pop("pending_end_state", None)
+                    if isinstance(pending_end_state, dict):
+                        session["match_complete"] = True
+                        session["game_over"] = True
+                        session["end_state"] = pending_end_state
+                        session["round_restart_at"] = None
+                    else:
+                        self._reset_session_round(session)
+                        players = session.get("players", {})
+
+                if session.get("round_finished"):
+                    current_proxies = [
+                        _PlayerProxy(name, entry, bot=bool(entry.get("bot", False)))
+                        for name, entry in players.items()
+                    ]
+                    for proxy in current_proxies:
+                        if proxy._eliminated:
+                            proxy.update_death(dt)
+                        proxy.sync_back()
+                    continue
+
                 self._tick_bots(session, dt)
                 player_proxies: dict[str, _PlayerProxy] = {
                     name: _PlayerProxy(name, entry, bot=bool(entry.get("bot", False)))
                     for name, entry in players.items()
                 }
+                walkable_mask = session.get("walkable_mask")
+                level = session.get("level")
                 for name, entry in players.items():
                     proxy = player_proxies.get(name)
-                    if proxy is None or bool(entry.get("eliminated", False)):
+                    if proxy is None:
+                        continue
+                    if proxy._eliminated:
+                        proxy.update_death(dt)
+                        proxy.sync_back()
                         continue
                     proxy._orb_speed_timer = max(0.0, float(entry.get("orb_speed_timer", 0.0) or 0.0) - dt)
                     proxy._shield_timer = max(0.0, float(entry.get("shield_timer", 0.0) or 0.0) - dt)
@@ -852,54 +1320,85 @@ class MatchDaemon:
                     down = bool(inp.get("down"))
                     left = bool(inp.get("left"))
                     right = bool(inp.get("right"))
-                    speed = 160.0 * float(proxy._orb_speed_boost or 1.0)
+                    if proxy.falling:
+                        proxy.update_fall(dt)
+                        if proxy.position.y > WINDOW_SIZE[1] + 100:
+                            self._eliminate_proxy(proxy, "fell off")
+                        proxy.rect.center = (round(proxy.position.x), round(proxy.position.y))
+                        proxy.sync_back()
+                        continue
+
+                    speed_multiplier = float(proxy._orb_speed_boost or 1.0)
+                    if proxy.bot and level is not None:
+                        speed_multiplier *= float(getattr(level.ai, "speed_multiplier", 1.0))
+                    speed = float(PLAYER_SPEED) * speed_multiplier
                     if proxy._freeze_timer > 0.0:
                         speed *= 0.2
-                    dx = 0.0
-                    dy = 0.0
+                    move_vector = pygame.Vector2(0.0, 0.0)
                     if left:
-                        dx -= speed * dt
+                        move_vector.x -= 1.0
                     if right:
-                        dx += speed * dt
+                        move_vector.x += 1.0
                     if up:
-                        dy -= speed * dt
+                        move_vector.y -= 1.0
                     if down:
-                        dy += speed * dt
+                        move_vector.y += 1.0
 
-                    proxy.position.x = float(entry.get("x", 0.0) + dx)
-                    proxy.position.y = float(entry.get("y", 0.0) + dy)
+                    left_playable = False
+                    if move_vector.length_squared() > 0.0:
+                        move_vector = move_vector.normalize()
+                        proxy.velocity = move_vector * speed
+                        if abs(move_vector.y) >= abs(move_vector.x):
+                            proxy.facing = "down" if move_vector.y > 0 else "up"
+                        else:
+                            proxy.facing = "right" if move_vector.x > 0 else "left"
+                        left_playable = not proxy.attempt_move(proxy.velocity * dt, walkable_mask)
+                        proxy.state = "run"
+                    else:
+                        proxy.velocity.update(0, 0)
+                        proxy.state = "idle"
+                        left_playable = not proxy.is_over_platform(proxy.position, walkable_mask)
+
+                    if left_playable:
+                        proxy.start_fall()
+                        proxy.update_fall(dt)
+                        if proxy.position.y > WINDOW_SIZE[1] + 100:
+                            self._eliminate_proxy(proxy, "fell off")
+
                     proxy.rect.center = (round(proxy.position.x), round(proxy.position.y))
                     proxy.sync_back()
 
                 tile_manager = session.get("tile_manager")
                 if tile_manager is not None:
                     tile_manager.update(dt)
-                    original_mask = session.get("walkable_mask")
+                    original_mask = session.get("original_walkable_mask")
                     if original_mask is not None:
                         session["walkable_mask"] = tile_manager.get_updated_walkable_mask(original_mask)
+                        walkable_mask = session.get("walkable_mask")
 
                 hazard_manager = session.get("hazard_manager")
-                if hazard_manager is not None:
+                if hazard_manager is not None and not session.get("round_finished"):
                     hazard_manager.update(dt)
 
                 enemy_manager = session.get("enemy_manager")
-                if enemy_manager is None and session.get("bot_names"):
-                    enemy_manager = PacmanEnemyManager(self._build_enemy_spawns(session))
+                if enemy_manager is None and not session.get("round_finished"):
+                    enemy_count = self._pacman_enemy_count(session)
+                    enemy_manager = PacmanEnemyManager(self._build_enemy_spawns(session, enemy_count))
                     session["enemy_manager"] = enemy_manager
 
                 current_proxies = list(player_proxies.values())
                 self.eliminated_players = [proxy for proxy in current_proxies if proxy._eliminated]
 
-                if hazard_manager is not None:
+                if hazard_manager is not None and not session.get("round_finished"):
                     for proxy in current_proxies:
                         if proxy._eliminated:
                             continue
                         if hazard_manager.check_player_collision(proxy):
-                            proxy._eliminated = True
-                            proxy.state = "death"
-                            self.eliminated_players.append(proxy)
+                            self._eliminate_proxy(proxy, "hit by hazard")
+                            if proxy._eliminated and proxy not in self.eliminated_players:
+                                self.eliminated_players.append(proxy)
 
-                if enemy_manager is not None:
+                if enemy_manager is not None and not session.get("round_finished"):
                     victims = enemy_manager.update(
                         dt,
                         current_proxies,
@@ -910,17 +1409,18 @@ class MatchDaemon:
                         victim_name = getattr(victim, "name", None)
                         proxy = player_proxies.get(str(victim_name))
                         if proxy is not None:
-                            proxy._eliminated = True
-                            proxy.state = "death"
-                            if proxy not in self.eliminated_players:
+                            self._eliminate_proxy(proxy, "hit by hazard")
+                            if proxy._eliminated and proxy not in self.eliminated_players:
                                 self.eliminated_players.append(proxy)
 
                 orb_manager = session.get("orb_manager")
-                if orb_manager is not None:
+                if orb_manager is not None and not session.get("round_finished"):
                     orb_manager.update(dt, session.get("walkable_bounds"), current_proxies, self)
 
                 for proxy in current_proxies:
                     proxy.sync_back()
+
+                self._finish_round_if_needed(session)
 
                 # Keep round_seq stable during a running match.
                 # The client uses round_seq as a round-transition marker, so

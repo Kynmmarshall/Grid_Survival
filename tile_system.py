@@ -78,14 +78,13 @@ class Asteroid:
         if not self.active:
             return False
         cx, cy = self.target_tile._iso_center()
-        direction = pygame.Vector2(cx - self.pos.x, cy - self.pos.y)
-        if direction.length() > 0:
-            direction = direction.normalize()
-        self.pos += direction * self.speed * dt
+        self.pos.x = float(cx)
+        self.pos.y += self.speed * dt
         self.trail.append(self.pos.copy())
         if len(self.trail) > 6:
             self.trail.pop(0)
-        if self.pos.distance_to((cx, cy)) < 16:
+        if self.pos.y >= cy:
+            self.pos.y = float(cy)
             self.active = False
             return True
         return False

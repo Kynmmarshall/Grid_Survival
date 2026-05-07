@@ -688,6 +688,7 @@ class Player:
             "active_orb_duration": float(orb_duration),
             "eliminated": bool(self._eliminated),
             "extra_lives": int(self._extra_lives),
+            "death_fade_alpha": int(self._death_fade_alpha),
         }
 
     def apply_snapshot_state(self, snapshot: dict[str, Any]):
@@ -719,6 +720,7 @@ class Player:
         self._eliminated = bool(snapshot.get("eliminated", self._eliminated))
         self._active_orb_label = snapshot.get("active_orb_label")
         self._extra_lives = int(snapshot.get("extra_lives", self._extra_lives))
+        self._death_fade_alpha = int(snapshot.get("death_fade_alpha", self._death_fade_alpha))
         self._active_orb_timer = float(snapshot.get("active_orb_timer", self._active_orb_timer))
         self._active_orb_indefinite = bool(
             snapshot.get("active_orb_indefinite", self._active_orb_indefinite)
