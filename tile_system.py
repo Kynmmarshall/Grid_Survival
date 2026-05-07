@@ -556,6 +556,20 @@ class TMXTileManager:
 
     def snapshot_state(self) -> dict:
         """Serialize manager and non-default tile state for LAN sync."""
+        tile_layout = []
+        for tile in self.tiles.values():
+            tile_layout.append(
+                {
+                    "x": tile.grid_x,
+                    "y": tile.grid_y,
+                    "pixel_x": int(tile.pixel_x),
+                    "pixel_y": int(tile.pixel_y),
+                    "tile_width": int(tile.tile_width),
+                    "tile_height": int(tile.tile_height),
+                    "gid": int(tile.gid),
+                }
+            )
+
         tile_states = []
         for tile in self.tiles.values():
             if tile.state == TileState.NORMAL and not tile.particles:
@@ -564,6 +578,10 @@ class TMXTileManager:
                 {
                     "x": tile.grid_x,
                     "y": tile.grid_y,
+                    "pixel_x": int(tile.pixel_x),
+                    "pixel_y": int(tile.pixel_y),
+                    "tile_width": int(tile.tile_width),
+                    "tile_height": int(tile.tile_height),
                     "state": tile.state.value,
                     "warning_timer": float(tile.warning_timer),
                     "crumble_timer": float(tile.crumble_timer),
@@ -598,6 +616,7 @@ class TMXTileManager:
             "disappear_timer": float(self.disappear_timer),
             "simultaneous_tiles": int(self.simultaneous_tiles),
             "grace_timer": float(self.grace_timer),
+            "layout": tile_layout,
             "tiles": tile_states,
             "asteroids": asteroid_states,
         }
@@ -614,6 +633,13 @@ class TMXTileManager:
         self.grace_timer = float(snapshot.get("grace_timer", self.grace_timer))
         self.disappeared_tiles.clear()
 
+        layout_lookup = {}
+        for layout_entry in snapshot.get("layout", []) or []:
+            if not isinstance(layout_entry, dict):
+                continue
+            key = (int(layout_entry.get("x", -1)), int(layout_entry.get("y", -1)))
+            layout_lookup[key] = layout_entry
+
         tile_lookup = {}
         for tile_state in snapshot.get("tiles", []) or []:
             if not isinstance(tile_state, dict):
@@ -622,6 +648,13 @@ class TMXTileManager:
             tile_lookup[key] = tile_state
 
         for key, tile in self.tiles.items():
+            layout_state = layout_lookup.get(key)
+            if layout_state:
+                tile.pixel_x = int(layout_state.get("pixel_x", tile.pixel_x))
+                tile.pixel_y = int(layout_state.get("pixel_y", tile.pixel_y))
+                tile.tile_width = int(layout_state.get("tile_width", tile.tile_width))
+                tile.tile_height = int(layout_state.get("tile_height", tile.tile_height))
+
             state = tile_lookup.get(key)
             tile.particles.clear()
             if not state:
@@ -641,6 +674,10 @@ class TMXTileManager:
             tile.fall_offset_y = float(state.get("fall_offset_y", 0.0))
             tile.shake_timer = float(state.get("shake_timer", 0.0))
             tile.alpha = int(state.get("alpha", 255))
+            tile.pixel_x = int(state.get("pixel_x", tile.pixel_x))
+            tile.pixel_y = int(state.get("pixel_y", tile.pixel_y))
+            tile.tile_width = int(state.get("tile_width", tile.tile_width))
+            tile.tile_height = int(state.get("tile_height", tile.tile_height))
             if tile.state == TileState.DISAPPEARED:
                 self.disappeared_tiles.append(tile)
 

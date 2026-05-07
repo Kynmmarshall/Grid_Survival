@@ -513,7 +513,8 @@ class Player:
         feet_rect = self._feet_rect(position)
         feet_mask = self._feet_mask_for_rect(feet_rect)
         overlap = walkable_mask.overlap_area(feet_mask, feet_rect.topleft)
-        return overlap == self._feet_mask_count
+        required_overlap = max(1, int(self._feet_mask_count * 0.75))
+        return overlap >= required_overlap
 
     def _feet_rect(self, position: pygame.Vector2) -> pygame.Rect:
         width = max(4, int(self.rect.width * 0.03))
