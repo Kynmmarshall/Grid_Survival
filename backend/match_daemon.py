@@ -1024,10 +1024,22 @@ class MatchDaemon:
             self._configure_tile_manager(tile_manager, level)
             # Log initial tile position bounds after load
             if hasattr(tile_manager, 'tiles') and tile_manager.tiles:
-                tile_pixel_xs = [int(t.pixel_x) for t in tile_manager.tiles.values()]
-                tile_pixel_ys = [int(t.pixel_y) for t in tile_manager.tiles.values()]
-                if tile_pixel_xs and tile_pixel_ys:
-                    print(f"[INIT_TILE_BOUNDS] Host initial tile pixel range X=[{min(tile_pixel_xs)}, {max(tile_pixel_xs)}] Y=[{min(tile_pixel_ys)}, {max(tile_pixel_ys)}]", flush=True)
+                min_x = None
+                max_x = None
+                min_y = None
+                max_y = None
+                for tile in tile_manager.tiles.values():
+                    px = int(tile.pixel_x)
+                    py = int(tile.pixel_y)
+                    if min_x is None or px < min_x:
+                        min_x = px
+                    if max_x is None or px > max_x:
+                        max_x = px
+                    if min_y is None or py < min_y:
+                        min_y = py
+                    if max_y is None or py > max_y:
+                        max_y = py
+                print(f"[INIT_TILE_BOUNDS] Host initial tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
 
         collision_manager = CollisionManager()
         hazard_manager = HazardManager(collision_manager)
@@ -1065,18 +1077,23 @@ class MatchDaemon:
         }
         
         # Validate walkable layer positioning on host (log tile bounds for comparison with client)
-        try:
-            if tile_manager is not None and hasattr(tile_manager, 'tiles') and tile_manager.tiles:
-                tile_pixel_xs = [int(t.pixel_x) for t in tile_manager.tiles.values()]
-                tile_pixel_ys = [int(t.pixel_y) for t in tile_manager.tiles.values()]
-                if tile_pixel_xs and tile_pixel_ys:
-                    min_x = min(tile_pixel_xs)
-                    max_x = max(tile_pixel_xs)
-                    min_y = min(tile_pixel_ys)
-                    max_y = max(tile_pixel_ys)
-                    print(f"[NET_DEBUG_HOST_VALIDATE] Tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
-        except Exception:
-            pass
+        if tile_manager is not None and hasattr(tile_manager, 'tiles') and tile_manager.tiles:
+            min_x = None
+            max_x = None
+            min_y = None
+            max_y = None
+            for tile in tile_manager.tiles.values():
+                px = int(tile.pixel_x)
+                py = int(tile.pixel_y)
+                if min_x is None or px < min_x:
+                    min_x = px
+                if max_x is None or px > max_x:
+                    max_x = px
+                if min_y is None or py < min_y:
+                    min_y = py
+                if max_y is None or py > max_y:
+                    max_y = py
+            print(f"[NET_DEBUG_HOST_VALIDATE] Tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
         
         return snapshot
 

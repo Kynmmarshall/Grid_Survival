@@ -193,10 +193,22 @@ class GameManager:
         
         # Log initial tile position bounds after load (ensures walkable layer aligns with tile positions)
         if self.tile_manager and hasattr(self.tile_manager, 'tiles') and self.tile_manager.tiles:
-            tile_pixel_xs = [int(t.pixel_x) for t in self.tile_manager.tiles.values()]
-            tile_pixel_ys = [int(t.pixel_y) for t in self.tile_manager.tiles.values()]
-            if tile_pixel_xs and tile_pixel_ys:
-                print(f"[INIT_TILE_BOUNDS] Client initial tile pixel range X=[{min(tile_pixel_xs)}, {max(tile_pixel_xs)}] Y=[{min(tile_pixel_ys)}, {max(tile_pixel_ys)}]", flush=True)
+            min_x = None
+            max_x = None
+            min_y = None
+            max_y = None
+            for tile in self.tile_manager.tiles.values():
+                px = int(tile.pixel_x)
+                py = int(tile.pixel_y)
+                if min_x is None or px < min_x:
+                    min_x = px
+                if max_x is None or px > max_x:
+                    max_x = px
+                if min_y is None or py < min_y:
+                    min_y = py
+                if max_y is None or py > max_y:
+                    max_y = py
+            print(f"[INIT_TILE_BOUNDS] Client initial tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
         self.collision_manager = CollisionManager()
         self.hazard_manager = HazardManager(self.collision_manager)
         self.hud = GameHUD()
@@ -1181,20 +1193,24 @@ class GameManager:
             self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
             
             # Validate walkable mask alignment with tile positions
-            # (walkable_mask should cover exactly the same areas as the centered tiles)
-            try:
-                if self.walkable_mask and self.tile_manager.tiles:
-                    mask_bounds = self.walkable_mask.get_bounding_rect()
-                    tile_pixel_xs = [int(t.pixel_x) for t in self.tile_manager.tiles.values()]
-                    tile_pixel_ys = [int(t.pixel_y) for t in self.tile_manager.tiles.values()]
-                    if tile_pixel_xs and tile_pixel_ys:
-                        min_x = min(tile_pixel_xs)
-                        max_x = max(tile_pixel_xs)
-                        min_y = min(tile_pixel_ys)
-                        max_y = max(tile_pixel_ys)
-                        print(f"[NET_DEBUG_VALIDATE] Mask bounds={mask_bounds}, tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
-            except Exception:
-                pass
+            print(f"[NET_DEBUG_VALIDATE] Mask active, tiles count={len(self.tile_manager.tiles) if self.tile_manager.tiles else 0}", flush=True)
+            if self.tile_manager.tiles:
+                min_x = None
+                max_x = None
+                min_y = None
+                max_y = None
+                for tile in self.tile_manager.tiles.values():
+                    px = int(tile.pixel_x)
+                    py = int(tile.pixel_y)
+                    if min_x is None or px < min_x:
+                        min_x = px
+                    if max_x is None or px > max_x:
+                        max_x = px
+                    if min_y is None or py < min_y:
+                        min_y = py
+                    if max_y is None or py > max_y:
+                        max_y = py
+                print(f"[NET_DEBUG_VALIDATE] Tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
             
             self._last_client_tile_snapshot_time = incoming_time
             applied_any = True
