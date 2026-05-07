@@ -1022,6 +1022,12 @@ class MatchDaemon:
         if tmx_data is not None:
             tile_manager = TMXTileManager(tmx_data, scale_x, scale_y, map_offset)
             self._configure_tile_manager(tile_manager, level)
+            # Log initial tile position bounds after load
+            if hasattr(tile_manager, 'tiles') and tile_manager.tiles:
+                tile_pixel_xs = [int(t.pixel_x) for t in tile_manager.tiles.values()]
+                tile_pixel_ys = [int(t.pixel_y) for t in tile_manager.tiles.values()]
+                if tile_pixel_xs and tile_pixel_ys:
+                    print(f"[INIT_TILE_BOUNDS] Host initial tile pixel range X=[{min(tile_pixel_xs)}, {max(tile_pixel_xs)}] Y=[{min(tile_pixel_ys)}, {max(tile_pixel_ys)}]", flush=True)
 
         collision_manager = CollisionManager()
         hazard_manager = HazardManager(collision_manager)
