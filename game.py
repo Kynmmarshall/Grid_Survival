@@ -916,28 +916,30 @@ class GameManager:
         if self.is_network_host or not isinstance(player_state, dict):
             return player_state
 
+        translated_state = self._translate_network_world_state(player_state)
+
         try:
             target = pygame.Vector2(
-                float(player_state.get("x", player.position.x)),
-                float(player_state.get("y", player.position.y)),
+                float(translated_state.get("x", player.position.x)),
+                float(translated_state.get("y", player.position.y)),
             )
         except (TypeError, ValueError):
-            return player_state
+            return translated_state
 
         # Snap immediately during major state transitions to avoid desync artifacts.
-        if bool(player_state.get("falling", False)) != bool(getattr(player, "falling", False)):
-            return player_state
-        if bool(player_state.get("drowning", False)) != bool(getattr(player, "drowning", False)):
-            return player_state
-        if bool(player_state.get("eliminated", False)) != bool(getattr(player, "_eliminated", False)):
-            return player_state
-        if str(player_state.get("state", "")) == "death":
-            return player_state
+        if bool(translated_state.get("falling", False)) != bool(getattr(player, "falling", False)):
+            return translated_state
+        if bool(translated_state.get("drowning", False)) != bool(getattr(player, "drowning", False)):
+            return translated_state
+        if bool(translated_state.get("eliminated", False)) != bool(getattr(player, "_eliminated", False)):
+            return translated_state
+        if str(translated_state.get("state", "")) == "death":
+            return translated_state
 
         current = pygame.Vector2(player.position)
         distance = current.distance_to(target)
         if distance > self._client_snap_distance:
-            return player_state
+            return translated_state
 
         local_player = self._local_network_player()
         is_local_player = player is local_player
@@ -954,7 +956,7 @@ class GameManager:
         )
 
         if is_local_player and local_move_intent and distance <= self._client_local_reconcile_deadzone:
-            blended = dict(player_state)
+            blended = dict(translated_state)
             blended["x"] = current.x
             blended["y"] = current.y
             return blended
@@ -973,10 +975,25 @@ class GameManager:
             blend = min(0.95, blend + 0.12)
         if distance < 3.0 and not (is_local_player and local_move_intent):
             blend = 1.0
-        blended = dict(player_state)
+        blended = dict(translated_state)
         blended["x"] = current.x + (target.x - current.x) * blend
         blended["y"] = current.y + (target.y - current.y) * blend
         return blended
+
+    def _translate_network_world_state(self, state: dict) -> dict:
+        if self.is_network_host or not isinstance(state, dict):
+            return state
+        dx, dy = self._network_world_delta
+        if dx == 0 and dy == 0:
+            return dict(state)
+
+        translated = dict(state)
+        try:
+            translated["x"] = float(state.get("x", 0.0)) + float(dx)
+            translated["y"] = float(state.get("y", 0.0)) + float(dy)
+        except (TypeError, ValueError):
+            return dict(state)
+        return translated
 
     def _build_network_snapshot(self) -> dict:
         end_state = None
@@ -1188,6 +1205,8 @@ class GameManager:
         epsilon = 1e-6
         applied_any = False
 
+        self._sync_network_world_delta(snapshot)
+
         if "tiles" in snapshot and incoming_time + epsilon >= self._last_client_tile_snapshot_time:
             # Log map/scaling info and a brief sample of the incoming tile layout
             try:
@@ -1268,6 +1287,39 @@ class GameManager:
                     self._last_client_world_dynamic_snapshot_time,
                     incoming_time,
                 )
+
+        def _sync_network_world_delta(self, snapshot: dict) -> None:
+            if not self.is_network_game or self.is_network_host:
+                self._network_world_delta = (0, 0)
+                return
+            tiles_blob = snapshot.get("tiles") if isinstance(snapshot, dict) else None
+            layout_entries = (tiles_blob.get("layout") if isinstance(tiles_blob, dict) else None) or []
+            if not layout_entries or not getattr(self.tile_manager, "tiles", None):
+                return
+
+            first_entry = None
+            for entry in layout_entries:
+                if isinstance(entry, dict):
+                    first_entry = entry
+                    break
+            if first_entry is None:
+                return
+
+            key = (int(first_entry.get("x", -1)), int(first_entry.get("y", -1)))
+            local_tile = self.tile_manager.tiles.get(key)
+            if local_tile is None:
+                return
+
+            try:
+                host_px = int(first_entry.get("pixel_x", local_tile.pixel_x))
+                host_py = int(first_entry.get("pixel_y", local_tile.pixel_y))
+            except (TypeError, ValueError):
+                return
+
+            self._network_world_delta = (
+                int(local_tile.pixel_x) - host_px,
+                int(local_tile.pixel_y) - host_py,
+            )
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
