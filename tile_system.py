@@ -536,8 +536,10 @@ class TMXTileManager:
                 erased_tiles.append((tile.grid_x, tile.grid_y, tile.state.value, int(tile.pixel_x), int(tile.pixel_y)))
         
         if erase_count > 0 and erase_count < 10:
-            print(f"[MASK_ERASE] Erased {erase_count} tiles: {erased_tiles}", flush=True)
 
+            print(f"[MASK_ERASE] Erased {erase_count} tiles: {erased_tiles}", flush=True)
+        elif erase_count >= 10:
+            print(f"[MASK_ERASE] Erased {erase_count} tiles (suppressing individual details)", flush=True)
         return updated_mask
 
     def should_render_tile(self, grid_x: int, grid_y: int) -> bool:
