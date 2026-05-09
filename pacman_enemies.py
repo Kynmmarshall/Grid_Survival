@@ -109,23 +109,35 @@ class PacmanEnemy:
         body = pygame.Surface(draw_rect.size, pygame.SRCALPHA)
         self._draw_body(body)
         surface.blit(body, draw_rect.topleft)
-        self._draw_health_bar(surface, draw_rect)
+        self._draw_health_dots(surface, draw_rect)
 
-    def _draw_health_bar(self, surface: pygame.Surface, draw_rect: pygame.Rect) -> None:
-        if self.health >= self.max_health:
-            return
-        bar_w = draw_rect.width
-        bar_h = 5
-        bar_x = draw_rect.left
-        bar_y = draw_rect.top - 10
-        pygame.draw.rect(surface, (50, 10, 10), (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2), border_radius=3)
-        pygame.draw.rect(surface, (40, 40, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=2)
-        fill_w = max(0, int(bar_w * self.health / max(1, self.max_health)))
-        if fill_w > 0:
-            ratio = self.health / max(1, self.max_health)
-            r = int(255 * (1.0 - ratio))
-            g = int(200 * ratio)
-            pygame.draw.rect(surface, (r, g, 20), (bar_x, bar_y, fill_w, bar_h), border_radius=2)
+    def _draw_health_dots(self, surface: pygame.Surface, draw_rect: pygame.Rect) -> None:
+        dot_count = max(1, int(self.max_health))
+        dot_radius = 6
+        spacing = 16
+        total_width = (dot_count - 1) * spacing
+        start_x = draw_rect.centerx - total_width // 2
+        dot_y = draw_rect.top - 16
+
+        plate_w = total_width + dot_radius * 4
+        plate_h = dot_radius * 2 + 8
+        plate_rect = pygame.Rect(0, 0, plate_w, plate_h)
+        plate_rect.center = (draw_rect.centerx, dot_y)
+        pygame.draw.rect(surface, (10, 10, 16, 210), plate_rect, border_radius=plate_h // 2)
+        pygame.draw.rect(surface, (220, 220, 235), plate_rect, 1, border_radius=plate_h // 2)
+
+        for idx in range(dot_count):
+            active = idx < self.health
+            if active:
+                fill = (255, 238, 92)
+                outline = (92, 72, 12)
+            else:
+                fill = (92, 92, 102)
+                outline = (28, 28, 36)
+            dot_x = start_x + idx * spacing
+            pygame.draw.circle(surface, (0, 0, 0), (dot_x + 1, dot_y + 1), dot_radius + 2)
+            pygame.draw.circle(surface, outline, (dot_x, dot_y), dot_radius + 2)
+            pygame.draw.circle(surface, fill, (dot_x, dot_y), dot_radius)
 
     def _draw_body(self, surface: pygame.Surface) -> None:
         width, height = surface.get_size()
@@ -369,6 +381,11 @@ class PacmanEnemy:
 MONSTER_DIR = ASSETS_DIR / "Monsters"
 _monster_frames = {}
 
+def _preload_monster_frames() -> None:
+    """Pre-cache all monster frames at startup to prevent freeze during spawn."""
+    for monster_type in range(1, 6):
+        get_monster_frames(monster_type)
+
 def get_monster_frames(monster_type: int) -> dict[str, list[pygame.Surface]]:
     if monster_type in _monster_frames:
         return _monster_frames[monster_type]
@@ -385,10 +402,14 @@ def get_monster_frames(monster_type: int) -> dict[str, list[pygame.Surface]]:
     _monster_frames[monster_type] = frames_dict
     return frames_dict
 
+_preload_monster_frames()
+
 class MonsterEnemy(PacmanEnemy):
     """Sprite-based enemy using Monster assets."""
     def __init__(self, position, monster_type: int, speed: float = PACMAN_GHOST_SPEED):
         super().__init__(position, (255, 255, 255), speed)
+        self.max_health = 2
+        self.health = self.max_health
         self.monster_type = monster_type
         
         frames_dict = get_monster_frames(monster_type)
@@ -470,6 +491,7 @@ class MonsterEnemy(PacmanEnemy):
         bob = math.sin(self._anim_time * 5.0 + self._float_phase) * 3.0
         draw_rect = draw_frame.get_rect(center=(round(self.position.x), round(self.position.y + bob)))
         surface.blit(draw_frame, draw_rect)
+        self._draw_health_dots(surface, draw_rect)
 
 class PacmanEnemyManager:
     """Container for one or more pacman-style chasers."""

@@ -149,7 +149,8 @@ class PlayerCardRenderer:
         portrait = self._headshot_surface(player, 68, border_color)
         portrait_rect = portrait.get_rect()
         portrait_rect.topleft = (rect.left + 14, rect.top + 16)
-        surface.blit(portrait, portrait_rect)
+        charge_ratio = self._projectile_charge_ratio(player)
+        self._draw_projectile_charge_portrait(surface, portrait, portrait_rect, charge_ratio)
 
         if orb_label:
             orb_icon_center = (portrait_rect.centerx, portrait_rect.bottom + 25)
@@ -267,6 +268,38 @@ class PlayerCardRenderer:
         portrait.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         pygame.draw.circle(portrait, border_color, (size // 2, size // 2), size // 2, 2)
         return portrait
+
+    def _projectile_charge_ratio(self, player) -> float:
+        total = float(getattr(player, "projectile_cooldown_total", 0.0) or 0.0)
+        remaining = float(getattr(player, "projectile_cooldown_remaining", 0.0) or 0.0)
+        if total <= 1e-6:
+            return 1.0
+        ratio = 1.0 - (remaining / total)
+        return max(0.0, min(1.0, ratio))
+
+    def _draw_projectile_charge_portrait(
+        self,
+        surface: pygame.Surface,
+        portrait: pygame.Surface,
+        portrait_rect: pygame.Rect,
+        charge_ratio: float,
+    ) -> None:
+        surface.blit(portrait, portrait_rect)
+        ratio = max(0.0, min(1.0, float(charge_ratio)))
+        if ratio >= 1.0:
+            return
+
+        dark_overlay = pygame.Surface(portrait_rect.size, pygame.SRCALPHA)
+        dark_overlay.fill((0, 0, 0, 210))
+
+        if ratio > 0.0:
+            reveal_h = int(round(portrait_rect.height * ratio))
+            reveal_h = max(0, min(portrait_rect.height, reveal_h))
+            if reveal_h > 0:
+                clear_rect = pygame.Rect(0, portrait_rect.height - reveal_h, portrait_rect.width, reveal_h)
+                pygame.draw.rect(dark_overlay, (0, 0, 0, 0), clear_rect)
+
+        surface.blit(dark_overlay, portrait_rect.topleft)
 
     def _draw_power_icon(self, surface: pygame.Surface, center: tuple[int, int], color: tuple) -> None:
         icon = self._orb_icon_surface("power", 34)

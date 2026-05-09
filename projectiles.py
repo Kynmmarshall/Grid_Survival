@@ -36,25 +36,25 @@ _KIND_SETTINGS: dict[ProjectileKind, dict] = {
     ProjectileKind.ROCK: {
         "speed": 220, "radius": 12, "color": (160, 120, 70),
         "glow": (210, 170, 110), "knockback": 360,
-        "cooldown": 2.2, "lifetime": 2.0, "pierce": False,
+        "cooldown": 1.0, "lifetime": 2.0, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
     },
     ProjectileKind.BOULDER: {
         "speed": 160, "radius": 18, "color": (130, 100, 60),
         "glow": (180, 140, 90), "knockback": 500,
-        "cooldown": 3.0, "lifetime": 2.5, "pierce": False,
+        "cooldown": 2.0, "lifetime": 2.0, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
     },
     ProjectileKind.SHURIKEN: {
-        "speed": 520, "radius": 7, "color": (190, 200, 220),
+        "speed": 320, "radius": 7, "color": (190, 200, 220),
         "glow": (140, 200, 255), "knockback": 180,
-        "cooldown": 1.6, "lifetime": 1.2, "pierce": False,
+        "cooldown": 3.5, "lifetime": 1.2, "pierce": False,
         "spread_count": 2, "spread_deg": 14,
     },
     ProjectileKind.AXE: {
         "speed": 320, "radius": 10, "color": (200, 170, 80),
         "glow": (255, 220, 100), "knockback": 320,
-        "cooldown": 2.0, "lifetime": 1.8, "pierce": False,
+        "cooldown": 2.0, "lifetime": 1.2, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
     },
     ProjectileKind.ENERGY_BOLT: {
@@ -73,7 +73,7 @@ _KIND_SETTINGS: dict[ProjectileKind, dict] = {
     ProjectileKind.ENERGY_BULLET: {
         "speed": 580, "radius": 5, "color": (60, 230, 180),
         "glow": (100, 255, 220), "knockback": 160,
-        "cooldown": 1.1, "lifetime": 1.0, "pierce": False,
+        "cooldown": 1.0, "lifetime": 1.0, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
     },
     ProjectileKind.SWORD_WAVE: {
@@ -274,7 +274,23 @@ class ProjectileManager:
     def __init__(self) -> None:
         self._projectiles: list[Projectile] = []
         self._shoot_cooldowns: dict[int, float] = {}
+        self._cooldown_owners: dict[int, object] = {}
         self._audio = get_audio()
+
+    @staticmethod
+    def _effective_cooldown(cfg: dict) -> float:
+        cooldown = float(cfg.get("cooldown", 0.0))
+        if int(cfg.get("spread_count", 1)) == 2:
+            cooldown *= 2.0
+        return max(0.0, cooldown)
+
+    @staticmethod
+    def _set_owner_projectile_charge(owner, remaining: float, total: float) -> None:
+        try:
+            setattr(owner, "projectile_cooldown_remaining", max(0.0, float(remaining)))
+            setattr(owner, "projectile_cooldown_total", max(0.0, float(total)))
+        except Exception:
+            pass
 
     def fire(self, owner, direction: pygame.Vector2 | None = None) -> bool:
         """Fire projectile(s) from owner in their facing direction.
@@ -297,10 +313,12 @@ class ProjectileManager:
         character_name = getattr(owner, "character_name", "")
         kind = _get_kind_for_character(character_name)
         cfg = _KIND_SETTINGS[kind]
-        self._shoot_cooldowns[owner_id] = cfg["cooldown"]
-
         count = cfg["spread_count"]
         spread_deg = cfg["spread_deg"]
+        cooldown = self._effective_cooldown(cfg)
+        self._shoot_cooldowns[owner_id] = cooldown
+        self._cooldown_owners[owner_id] = owner
+        self._set_owner_projectile_charge(owner, cooldown, cooldown)
 
         rect = getattr(owner, "rect", None)
         center = pygame.Vector2(
@@ -332,8 +350,13 @@ class ProjectileManager:
     def update(self, dt: float, game) -> None:
         """Update all projectiles and resolve collisions."""
         for owner_id in list(self._shoot_cooldowns):
-            self._shoot_cooldowns[owner_id] = max(0.0, self._shoot_cooldowns[owner_id] - dt)
-            if self._shoot_cooldowns[owner_id] == 0.0:
+            remaining = max(0.0, self._shoot_cooldowns[owner_id] - dt)
+            self._shoot_cooldowns[owner_id] = remaining
+            owner = self._cooldown_owners.get(owner_id)
+            if owner is not None:
+                total = getattr(owner, "projectile_cooldown_total", 0.0)
+                self._set_owner_projectile_charge(owner, remaining, total)
+            if remaining == 0.0:
                 del self._shoot_cooldowns[owner_id]
 
         disp = pygame.display.get_surface()
@@ -347,8 +370,8 @@ class ProjectileManager:
             if not proj.alive:
                 continue
             if (
-                proj.position.x < -120 or proj.position.x > w + 120
-                or proj.position.y < -120 or proj.position.y > h + 120
+                proj.position.x < -60 or proj.position.x > w + 60
+                or proj.position.y < -60 or proj.position.y > h + 60
             ):
                 proj.alive = False
                 continue
@@ -367,11 +390,12 @@ class ProjectileManager:
                 continue
             if getattr(player, "has_active_shield", lambda: False)():
                 continue
-            rect = getattr(player, "rect", None)
+            hitbox = getattr(player, "get_hitbox", None)
+            rect = hitbox() if callable(hitbox) else getattr(player, "rect", None)
             if rect is None:
                 continue
             dist = math.hypot(proj.position.x - rect.centerx, proj.position.y - rect.centery)
-            if dist > proj.radius + max(rect.width, rect.height) * 0.55:
+            if dist > proj.radius + max(rect.width, rect.height) * 0.42:
                 continue
 
             proj._hit_players.add(id(player))
@@ -436,12 +460,15 @@ class ProjectileManager:
         if remaining <= 0:
             return 0.0
         kind = _get_kind_for_character(getattr(owner, "character_name", ""))
-        total = _KIND_SETTINGS[kind]["cooldown"]
+        total = self._effective_cooldown(_KIND_SETTINGS[kind])
         return min(1.0, remaining / total) if total > 0 else 0.0
 
     def reset(self) -> None:
+        for owner in self._cooldown_owners.values():
+            self._set_owner_projectile_charge(owner, 0.0, 0.0)
         self._projectiles.clear()
         self._shoot_cooldowns.clear()
+        self._cooldown_owners.clear()
 
 
 __all__ = ["Projectile", "ProjectileKind", "ProjectileManager"]

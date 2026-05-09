@@ -170,7 +170,7 @@ class Player:
         self._active_orb_indefinite = False
         self._active_orb_duration = 0.0
         self._extra_lives = 0  # Extra lives from LIFE orbs
-        self.max_health = 3
+        self.max_health = 4
         self.health = self.max_health
         self._hit_flash_timer = 0.0
 
