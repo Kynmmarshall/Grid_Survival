@@ -669,6 +669,30 @@ class MatchDaemon:
                     if session.get("bot_names"):
                         enemy_spawns = self._build_enemy_spawns(session)
                         session["enemy_manager"] = PacmanEnemyManager(enemy_spawns)
+                # Ensure we have the desired number of players (fill with bots if assignment requests more)
+                try:
+                    desired_count = int(assignment.get("payload", {}).get("player_count", 0) or 0)
+                except Exception:
+                    desired_count = 0
+                if desired_count and len(session_players) < desired_count:
+                    idx = 1
+                    # pick increasing BOT-n names until we reach desired_count
+                    while len(session_players) < desired_count:
+                        bot_name = f"BOT-{idx}"
+                        if bot_name in session_players:
+                            idx += 1
+                            continue
+                        bot_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(session_players) + 1)
+                        bot_y = float(PLAYER_START_POS[1])
+                        session_players[bot_name] = {
+                            "addr": None,
+                            "x": bot_x,
+                            "y": bot_y,
+                            "last_input": {},
+                            "bot": True,
+                            "profile": "Bot",
+                        }
+                        idx += 1
                 self._initialize_session_world(session)
 
             seq = self._next_seq()
