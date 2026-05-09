@@ -132,14 +132,15 @@ class GameManager:
         self._network_world_delta = (0, 0)
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
-        self._client_position_blend = 0.24
-        self._client_local_position_blend = 0.14
-        self._client_local_reconcile_deadzone = 18.0
+        self._client_position_blend = 0.22
+        self._client_local_position_blend = 0.1
+        self._client_local_reconcile_deadzone = 24.0
         self._client_last_local_input = self._empty_network_input_state()
-        self._client_snap_distance = 240.0
+        self._client_snap_distance = 280.0
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
-        self._client_remote_extrapolation_cap = 1 / 8
+        self._client_remote_extrapolation_cap = 1 / 6
+        self._net_quality_font = pygame.font.Font(None, 20)
         self._network_disconnect_started_at: float | None = None
         self._network_last_reconnect_attempt_at = 0.0
         self._network_reconnect_thread: threading.Thread | None = None
@@ -957,6 +958,21 @@ class GameManager:
             blended["y"] = current.y
             return blended
 
+        if is_local_player and local_move_intent and isinstance(local_input, dict) and distance <= 120.0:
+            move_vector = pygame.Vector2(
+                float(bool(local_input.get("right", False))) - float(bool(local_input.get("left", False))),
+                float(bool(local_input.get("down", False))) - float(bool(local_input.get("up", False))),
+            )
+            if move_vector.length_squared() > 0.0:
+                input_dir = move_vector.normalize()
+                correction = target - current
+                backward_component = correction.dot(input_dir)
+                if backward_component < 0.0:
+                    # Keep side-corrections while removing backward pull against active input.
+                    correction -= input_dir * backward_component
+                    target = current + correction
+                    distance = current.distance_to(target)
+
         base_blend = (
             self._client_local_position_blend
             if is_local_player
@@ -1460,8 +1476,77 @@ class GameManager:
             reserved_rects=reserved,
             preferred_corners=("bottom-right", "top-right", "bottom-left", "top-left"),
         )
+        self._draw_network_quality_badge(self.screen, reserved)
 
         pygame.display.flip()
+
+    def _draw_network_quality_badge(self, surface: pygame.Surface, reserved_rects: list[pygame.Rect]) -> None:
+        if not self.is_network_game:
+            return
+
+        metrics = None
+        if self.network and hasattr(self.network, "get_connection_metrics"):
+            try:
+                metrics = self.network.get_connection_metrics()
+            except Exception:
+                metrics = None
+        if not isinstance(metrics, dict):
+            return
+
+        connected = bool(metrics.get("connected", False))
+        quality = str(metrics.get("quality", "UNKNOWN"))
+        ping_ms = metrics.get("ping_ms")
+        last_recv_ms = metrics.get("last_recv_ms")
+
+        if connected:
+            ping_label = f"{int(ping_ms)}ms" if isinstance(ping_ms, int) else "--"
+            freshness = f" RX {int(last_recv_ms)}ms" if isinstance(last_recv_ms, int) else ""
+            label = f"NET {quality} {ping_label}{freshness}"
+            if quality == "EXCELLENT":
+                bg = (34, 78, 52, 220)
+                border = (128, 224, 174)
+            elif quality == "GOOD":
+                bg = (30, 70, 88, 220)
+                border = (120, 194, 232)
+            elif quality == "FAIR":
+                bg = (84, 74, 38, 220)
+                border = (224, 198, 124)
+            else:
+                bg = (90, 48, 44, 220)
+                border = (236, 154, 154)
+        else:
+            label = "NET DISCONNECTED"
+            bg = (90, 48, 44, 220)
+            border = (236, 154, 154)
+
+        text = self._net_quality_font.render(label, True, (245, 248, 255))
+        badge_w = max(184, text.get_width() + 28)
+        badge_h = max(28, text.get_height() + 10)
+        margin = 14
+        sw, sh = surface.get_size()
+        candidates = (
+            pygame.Rect(margin, margin, badge_w, badge_h),
+            pygame.Rect(sw - margin - badge_w, margin, badge_w, badge_h),
+            pygame.Rect(margin, sh - margin - badge_h, badge_w, badge_h),
+            pygame.Rect(sw - margin - badge_w, sh - margin - badge_h, badge_w, badge_h),
+        )
+
+        def overlap_area(rect: pygame.Rect) -> int:
+            area = 0
+            for other in reserved_rects:
+                if not isinstance(other, pygame.Rect):
+                    continue
+                clip = rect.clip(other)
+                if clip.width > 0 and clip.height > 0:
+                    area += clip.width * clip.height
+            return area
+
+        chosen = min(candidates, key=overlap_area)
+        badge = pygame.Surface(chosen.size, pygame.SRCALPHA)
+        pygame.draw.rect(badge, bg, badge.get_rect(), border_radius=10)
+        surface.blit(badge, chosen.topleft)
+        pygame.draw.rect(surface, border, chosen, 2, border_radius=10)
+        surface.blit(text, text.get_rect(center=chosen.center))
 
     def _ensure_players_on_walkable_surface(self):
         """Make sure every player spawn point is on a valid tile before play starts."""

@@ -124,6 +124,50 @@ class NetworkManager:
         self._last_keepalive_sent = 0.0
         self._disconnect_notified = False
         self.last_error: Optional[str] = None
+        self._rtt_ema_ms: Optional[float] = None
+        self._rtt_last_ms: Optional[float] = None
+        self._rtt_samples = 0
+
+    def get_connection_metrics(self) -> dict[str, Any]:
+        now = time.time()
+        if not self.connected:
+            return {
+                "connected": False,
+                "ping_ms": None,
+                "last_recv_ms": None,
+                "quality": "DISCONNECTED",
+            }
+
+        if self.is_host:
+            if self._peer_last_recv:
+                deltas = [max(0.0, (now - ts) * 1000.0) for ts in self._peer_last_recv.values()]
+                last_recv_ms = sum(deltas) / max(1, len(deltas))
+            else:
+                last_recv_ms = None
+        else:
+            last_recv_ms = max(0.0, (now - self._last_recv_time) * 1000.0) if self._last_recv_time > 0 else None
+
+        ping_ms = self._rtt_ema_ms if self._rtt_ema_ms is not None else last_recv_ms
+        if ping_ms is None:
+            quality = "UNKNOWN"
+        elif ping_ms <= 70.0:
+            quality = "EXCELLENT"
+        elif ping_ms <= 130.0:
+            quality = "GOOD"
+        elif ping_ms <= 220.0:
+            quality = "FAIR"
+        else:
+            quality = "POOR"
+
+        if last_recv_ms is not None and last_recv_ms > 1200.0:
+            quality = "POOR"
+
+        return {
+            "connected": True,
+            "ping_ms": None if ping_ms is None else int(round(ping_ms)),
+            "last_recv_ms": None if last_recv_ms is None else int(round(last_recv_ms)),
+            "quality": quality,
+        }
 
     def send_message(self, message_type: str, **payload: Any) -> bool:
         if not self.connected:
@@ -450,7 +494,19 @@ class NetworkManager:
         seq = packet.get("s")
         if isinstance(seq, int):
             with self._pending_lock:
-                self._pending_reliable.pop((seq, address), None)
+                entry = self._pending_reliable.pop((seq, address), None)
+            if isinstance(entry, dict):
+                try:
+                    sample_ms = max(0.0, (time.time() - float(entry.get("last_sent", time.time()))) * 1000.0)
+                except (TypeError, ValueError):
+                    sample_ms = None
+                if sample_ms is not None and sample_ms < 5000.0:
+                    self._rtt_last_ms = sample_ms
+                    if self._rtt_ema_ms is None:
+                        self._rtt_ema_ms = sample_ms
+                    else:
+                        self._rtt_ema_ms = self._rtt_ema_ms * 0.8 + sample_ms * 0.2
+                    self._rtt_samples += 1
 
     def _handle_data_packet(self, packet: dict[str, Any], address: tuple[str, int]) -> None:
         seq = packet.get("s")
