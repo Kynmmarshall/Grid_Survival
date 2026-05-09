@@ -246,11 +246,7 @@ class GameManager:
             )
             if USE_AI_PLAYER:
                 ai_pos = next(spawn_positions, PLAYER_START_POS)
-                all_chars = available_characters()
-                ai_char = primary_char
-                if len(all_chars) > 1:
-                    available_for_ai = [c for c in all_chars if c != primary_char]
-                    ai_char = random.choice(available_for_ai) if available_for_ai else primary_char
+                ai_char = self._choose_ai_character(self.selected_characters or [primary_char])
                 self.players.append(AIPlayer(position=ai_pos, character_name=ai_char))
         elif self.game_mode == MODE_LOCAL_MULTIPLAYER:
             custom_controls = load_custom_controls()
@@ -2860,6 +2856,21 @@ class GameManager:
         if 0 <= index < len(self.selected_characters):
             return self.selected_characters[index]
         return self.selected_characters[-1]
+
+    def _choose_ai_character(self, excluded_names: list[str] | None = None) -> str:
+        used = {
+            str(name).strip()
+            for name in (excluded_names or [])
+            if str(name).strip()
+        }
+        pool = [name for name in available_characters() if name not in used]
+        if pool:
+            return random.choice(pool)
+
+        fallback_pool = available_characters()
+        if fallback_pool:
+            return random.choice(fallback_pool)
+        return self._character_choice(0) or "Caveman"
 
     def run(self):
         frame_count = 0

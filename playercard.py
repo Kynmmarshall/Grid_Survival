@@ -165,9 +165,8 @@ class PlayerCardRenderer:
         surface.blit(name_surf, (label_bg.right + 8, text_y))
 
         if getattr(player, "is_ai", False):
-            ai_text = "AI"
-            ai_rect = pygame.Rect(rect.right - 48, rect.top + 14, 34, 18)
-            self._draw_badge(surface, ai_rect, (34, 52, 84, 230), (110, 150, 210), ai_text, (235, 245, 255))
+            bot_rect = pygame.Rect(rect.left + 14, rect.top + 92, 44, 18)
+            self._draw_badge(surface, bot_rect, (34, 52, 84, 230), (110, 150, 210), "BOT", (235, 245, 255))
 
         power = getattr(player, "power", None)
         power_name = getattr(power, "NAME", None) or "NONE"

@@ -587,6 +587,17 @@ class Player:
                 flash.fill((255, 30, 30, flash_alpha))
                 surface.blit(flash, draw_rect.topleft)
 
+        if self.is_ai:
+            bot_font = pygame.font.Font(None, 18)
+            bot_text = bot_font.render("BOT", True, (255, 255, 255))
+            bot_bg = pygame.Rect(0, 0, bot_text.get_width() + 14, bot_text.get_height() + 8)
+            bot_bg.midbottom = (draw_rect.centerx, draw_rect.top - 28)
+            bot_panel = pygame.Surface(bot_bg.size, pygame.SRCALPHA)
+            pygame.draw.rect(bot_panel, (34, 52, 84, 230), bot_panel.get_rect(), border_radius=8)
+            pygame.draw.rect(bot_panel, (110, 150, 210, 255), bot_panel.get_rect(), 1, border_radius=8)
+            surface.blit(bot_panel, bot_bg.topleft)
+            surface.blit(bot_text, bot_text.get_rect(center=bot_bg.center))
+
         death_opacity = death_alpha / 255.0
         if self._has_speed_orb_glow():
             self._draw_speed_orb_glow(surface, draw_rect, death_opacity)
