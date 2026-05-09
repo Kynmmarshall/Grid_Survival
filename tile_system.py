@@ -519,6 +519,8 @@ class TMXTileManager:
             return None
 
         updated_mask = original_mask.copy()
+        erase_count = 0
+        erased_tiles = []
 
         for tile in self.tiles.values():
             if tile.state in (TileState.DISAPPEARED, TileState.CRUMBLING, TileState.FALLING):
@@ -529,7 +531,12 @@ class TMXTileManager:
                 ]
                 pygame.draw.polygon(tile_surface, (255, 255, 255, 255), points)
                 tile_mask = pygame.mask.from_surface(tile_surface)
-                updated_mask.erase(tile_mask, (tile.pixel_x, tile.pixel_y))
+                updated_mask.erase(tile_mask, (int(tile.pixel_x), int(tile.pixel_y)))
+                erase_count += 1
+                erased_tiles.append((tile.grid_x, tile.grid_y, tile.state.value, int(tile.pixel_x), int(tile.pixel_y)))
+        
+        if erase_count > 0 and erase_count < 10:
+            print(f"[MASK_ERASE] Erased {erase_count} tiles: {erased_tiles}", flush=True)
 
         return updated_mask
 
