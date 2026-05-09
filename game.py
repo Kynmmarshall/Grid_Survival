@@ -1288,38 +1288,38 @@ class GameManager:
                     incoming_time,
                 )
 
-        def _sync_network_world_delta(self, snapshot: dict) -> None:
-            if not self.is_network_game or self.is_network_host:
-                self._network_world_delta = (0, 0)
-                return
-            tiles_blob = snapshot.get("tiles") if isinstance(snapshot, dict) else None
-            layout_entries = (tiles_blob.get("layout") if isinstance(tiles_blob, dict) else None) or []
-            if not layout_entries or not getattr(self.tile_manager, "tiles", None):
-                return
+    def _sync_network_world_delta(self, snapshot: dict) -> None:
+        if not self.is_network_game or self.is_network_host:
+            self._network_world_delta = (0, 0)
+            return
+        tiles_blob = snapshot.get("tiles") if isinstance(snapshot, dict) else None
+        layout_entries = (tiles_blob.get("layout") if isinstance(tiles_blob, dict) else None) or []
+        if not layout_entries or not getattr(self.tile_manager, "tiles", None):
+            return
 
-            first_entry = None
-            for entry in layout_entries:
-                if isinstance(entry, dict):
-                    first_entry = entry
-                    break
-            if first_entry is None:
-                return
+        first_entry = None
+        for entry in layout_entries:
+            if isinstance(entry, dict):
+                first_entry = entry
+                break
+        if first_entry is None:
+            return
 
-            key = (int(first_entry.get("x", -1)), int(first_entry.get("y", -1)))
-            local_tile = self.tile_manager.tiles.get(key)
-            if local_tile is None:
-                return
+        key = (int(first_entry.get("x", -1)), int(first_entry.get("y", -1)))
+        local_tile = self.tile_manager.tiles.get(key)
+        if local_tile is None:
+            return
 
-            try:
-                host_px = int(first_entry.get("pixel_x", local_tile.pixel_x))
-                host_py = int(first_entry.get("pixel_y", local_tile.pixel_y))
-            except (TypeError, ValueError):
-                return
+        try:
+            host_px = int(first_entry.get("pixel_x", local_tile.pixel_x))
+            host_py = int(first_entry.get("pixel_y", local_tile.pixel_y))
+        except (TypeError, ValueError):
+            return
 
-            self._network_world_delta = (
-                int(local_tile.pixel_x) - host_px,
-                int(local_tile.pixel_y) - host_py,
-            )
+        self._network_world_delta = (
+            int(local_tile.pixel_x) - host_px,
+            int(local_tile.pixel_y) - host_py,
+        )
 
     def draw(self):
         self.screen.fill(BACKGROUND_COLOR)
