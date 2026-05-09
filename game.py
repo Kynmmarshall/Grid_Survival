@@ -991,6 +991,43 @@ class GameManager:
             return dict(state)
         return translated
 
+    def _translate_network_world_blob(self, blob: Any) -> Any:
+        if self.is_network_host or self._network_world_delta == (0, 0):
+            return blob
+
+        dx, dy = self._network_world_delta
+        position_keys = {"x", "y", "start_x", "start_y", "end_x", "end_y"}
+
+        def _translate(value: Any, parent_key: str | None = None) -> Any:
+            if isinstance(value, dict):
+                translated = {}
+                for key, child in value.items():
+                    if key in position_keys:
+                        try:
+                            offset = dx if key.endswith("x") else dy
+                            translated[key] = float(child) + float(offset)
+                            continue
+                        except (TypeError, ValueError):
+                            pass
+                    if key == "patrol_points" and isinstance(child, list):
+                        translated[key] = [
+                            _translate(point, "patrol_point")
+                            for point in child
+                        ]
+                        continue
+                    translated[key] = _translate(child, key)
+                return translated
+            if isinstance(value, list):
+                return [_translate(item, parent_key) for item in value]
+            if parent_key == "patrol_point" and isinstance(value, (list, tuple)) and len(value) >= 2:
+                try:
+                    return [float(value[0]) + float(dx), float(value[1]) + float(dy)]
+                except (TypeError, ValueError):
+                    return list(value)
+            return value
+
+        return _translate(blob)
+
     def _build_network_snapshot(self) -> dict:
         end_state = None
         if self.game_over_state == "victory" and self.victory_screen:
@@ -1250,11 +1287,11 @@ class GameManager:
             self._last_client_tile_snapshot_time = incoming_time
             applied_any = True
         if "hazards" in snapshot and incoming_time + epsilon >= self._last_client_hazard_snapshot_time:
-            self.hazard_manager.apply_snapshot(snapshot.get("hazards"))
+            self.hazard_manager.apply_snapshot(self._translate_network_world_blob(snapshot.get("hazards")))
             self._last_client_hazard_snapshot_time = incoming_time
             applied_any = True
         if "orbs" in snapshot and incoming_time + epsilon >= self._last_client_orb_snapshot_time:
-            self.orb_manager.apply_snapshot(snapshot.get("orbs"))
+            self.orb_manager.apply_snapshot(self._translate_network_world_blob(snapshot.get("orbs")))
             self._last_client_orb_snapshot_time = incoming_time
             applied_any = True
         if (
@@ -1262,14 +1299,14 @@ class GameManager:
             and incoming_time + epsilon >= self._last_client_pacman_snapshot_time
         ):
             if self.pacman_enemy_manager is None:
-                enemy_states = snapshot.get("pacman_enemies", {}).get("enemies", []) or []
+                enemy_states = self._translate_network_world_blob(snapshot.get("pacman_enemies", {})).get("enemies", []) or []
                 spawn_positions = [
                     (int(round(state.get("x", PLAYER_START_POS[0]))), int(round(state.get("y", PLAYER_START_POS[1]))))
                     for state in enemy_states
                     if isinstance(state, dict)
                 ] or [PLAYER_START_POS]
                 self.pacman_enemy_manager = PacmanEnemyManager(spawn_positions)
-            self.pacman_enemy_manager.apply_snapshot(snapshot.get("pacman_enemies"))
+            self.pacman_enemy_manager.apply_snapshot(self._translate_network_world_blob(snapshot.get("pacman_enemies")))
             self._last_client_pacman_snapshot_time = incoming_time
             applied_any = True
 
