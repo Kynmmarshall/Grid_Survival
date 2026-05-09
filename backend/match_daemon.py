@@ -50,6 +50,11 @@ ONLINE_INITIAL_TILE_BURST = 1
 ONLINE_PACMAN_ENEMY_COUNT = 2
 ROUND_RESTART_DELAY = 2.0
 MAX_TICK_DT = 0.1
+ONLINE_HAZARD_START_DELAY_BONUS = 6.0
+ONLINE_HAZARD_INTERVAL_MULTIPLIER = 1.45
+ONLINE_HAZARD_SCALE_RATE = 0.992
+ONLINE_HAZARD_MIN_BULLET_INTERVAL = 1.5
+ONLINE_HAZARD_MIN_TRAP_INTERVAL = 6.5
 
 BOT_ROAM_RETARGET_SECONDS = 2.8
 BOT_LOOKAHEAD_DISTANCE = 54.0
@@ -463,12 +468,24 @@ class MatchDaemon:
         tile_manager.disappear_timer = 0.0
 
     def _configure_hazard_manager(self, hazard_manager: HazardManager, level) -> None:
-        hazard_manager.hazard_start_time = float(level.hazard.start_delay)
-        hazard_manager.bullet_spawn_interval = float(level.hazard.bullet_interval)
-        hazard_manager.min_bullet_interval = float(level.hazard.bullet_min_interval)
-        hazard_manager.trap_spawn_interval = float(level.hazard.trap_interval)
-        hazard_manager.min_trap_interval = float(level.hazard.trap_min_interval)
-        hazard_manager.difficulty_scale_rate = float(level.hazard.difficulty_scale_rate)
+        hazard_manager.hazard_start_time = max(
+            float(level.hazard.start_delay),
+            float(level.hazard.start_delay) + ONLINE_HAZARD_START_DELAY_BONUS,
+        )
+        hazard_manager.bullet_spawn_interval = float(level.hazard.bullet_interval) * ONLINE_HAZARD_INTERVAL_MULTIPLIER
+        hazard_manager.min_bullet_interval = max(
+            float(level.hazard.bullet_min_interval),
+            ONLINE_HAZARD_MIN_BULLET_INTERVAL,
+        )
+        hazard_manager.trap_spawn_interval = float(level.hazard.trap_interval) * ONLINE_HAZARD_INTERVAL_MULTIPLIER
+        hazard_manager.min_trap_interval = max(
+            float(level.hazard.trap_min_interval),
+            ONLINE_HAZARD_MIN_TRAP_INTERVAL,
+        )
+        hazard_manager.difficulty_scale_rate = max(
+            float(level.hazard.difficulty_scale_rate),
+            ONLINE_HAZARD_SCALE_RATE,
+        )
         hazard_manager.bullet_spawn_timer = 0.0
         hazard_manager.trap_spawn_timer = 0.0
         hazard_manager.hazard_spawn_timer = 0.0

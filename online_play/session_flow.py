@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 import sys
 import threading
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from scenes.common import SceneAudioOverlay, _draw_rounded_rect, _load_font
 from scenes import InternetLobbySetup, InternetPartyLobbyScreen
 from .exceptions import InternetFallbackLAN
 from .log import get_logger
+from character_manager import available_characters
 logger = get_logger("session_flow")
 from settings import FONT_PATH_BODY, FONT_PATH_HEADING, WINDOW_SIZE
 
@@ -470,18 +472,42 @@ def _connect_internet_match(
         assigned_players = internet_match.get("players") if isinstance(internet_match.get("players"), list) else []
         network_player_names: list[str] = []
         selected_chars_for_match: list[str] = []
+        available_roster = available_characters() or [str(selected_characters[0])]
+        used_characters: list[str] = []
         local_player_index = 0
+        bot_slots: list[int] = []
         for idx, payload in enumerate(assigned_players[:2]):
             if not isinstance(payload, dict):
                 payload = {}
             name = str(payload.get("name", f"Player {idx + 1}"))
             network_player_names.append(name)
-            selected_chars_for_match.append(str(payload.get("character", selected_characters[0])))
+            if bool(payload.get("bot", False)):
+                bot_slots.append(idx)
+                selected_chars_for_match.append("")
+            else:
+                chosen_character = str(payload.get("character", selected_characters[0])).strip() or str(selected_characters[0])
+                selected_chars_for_match.append(chosen_character)
+                used_characters.append(chosen_character)
             if name == player_name:
                 local_player_index = idx
 
+        def _pick_unique_bot_character() -> str:
+            for candidate in available_roster:
+                if candidate not in used_characters:
+                    used_characters.append(candidate)
+                    return candidate
+            if available_roster:
+                choice = random.choice(available_roster)
+                used_characters.append(choice)
+                return choice
+            return str(selected_characters[0])
+
+        for bot_index in bot_slots:
+            if bot_index < len(selected_chars_for_match):
+                selected_chars_for_match[bot_index] = _pick_unique_bot_character()
+
         while len(selected_chars_for_match) < 2:
-            selected_chars_for_match.append(str(selected_characters[0]))
+            selected_chars_for_match.append(_pick_unique_bot_character())
         while len(network_player_names) < 2:
             network_player_names.append(f"Player {len(network_player_names) + 1}")
 
