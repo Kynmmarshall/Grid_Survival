@@ -20,6 +20,7 @@ from hazards import HazardManager
 from level_config import get_level
 from orbs import OrbManager
 from backend.vps_match_server import MatchServerManager
+from backend.vps_sync_server import DB_PATH as VPS_ACCOUNT_DB_PATH, RemoteAccountStore
 from pacman_enemies import PacmanEnemyManager
 from network import (
     FRAGMENT_RAW_CHUNK_BYTES,
@@ -303,6 +304,14 @@ class MatchDaemon:
         self.tcp_sock: socket.socket | None = None
         self.running = False
         self.eliminated_players: list[_PlayerProxy] = []
+        self.account_store = None
+        try:
+            self.account_store = RemoteAccountStore(VPS_ACCOUNT_DB_PATH)
+        except Exception as exc:
+            try:
+                print(f"[ACCOUNT] Failed to open VPS account store: {exc}", flush=True)
+            except Exception:
+                pass
         # RLock avoids deadlock when snapshot send paths call _next_seq()
         # while already inside a lock-protected section.
         self._lock = threading.RLock()
@@ -1775,6 +1784,94 @@ class MatchDaemon:
             move["right"] = True
         return move
 
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, float(value)))
+
+    def _share(self, value: float, total: float, neutral: float = 0.5) -> float:
+        if total <= 0:
+            return float(neutral)
+        return self._clamp01(float(value) / float(total))
+
+    def _match_performance_score(
+        self,
+        match_stats: list[dict[str, Any]],
+        local_index: int,
+        winner_index: int | None,
+        mvp_index: int,
+        is_draw: bool = False,
+    ) -> float:
+        if local_index < 0 or local_index >= len(match_stats):
+            return 0.5
+
+        row = match_stats[local_index]
+        total_rounds_won = sum(max(0, int(r.get("rounds_won", 0))) for r in match_stats)
+        total_eliminations = sum(max(0, int(r.get("eliminations", 0))) for r in match_stats)
+        total_damage_dealt = sum(max(0, int(r.get("damage_dealt", 0))) for r in match_stats)
+        total_damage_taken = sum(max(0, int(r.get("damage_taken", 0))) for r in match_stats)
+        total_survival = sum(max(0.0, float(r.get("survival_time", 0.0))) for r in match_stats)
+        total_deaths = sum(max(0, int(r.get("deaths", 0))) for r in match_stats)
+
+        rounds_share = self._share(max(0, int(row.get("rounds_won", 0))), total_rounds_won)
+        elimination_share = self._share(max(0, int(row.get("eliminations", 0))), total_eliminations)
+        dealt_share = self._share(max(0, int(row.get("damage_dealt", 0))), total_damage_dealt)
+        taken_efficiency = 1.0 - self._share(max(0, int(row.get("damage_taken", 0))), total_damage_taken)
+        survival_share = self._share(max(0.0, float(row.get("survival_time", 0.0))), total_survival)
+        death_efficiency = 1.0 - self._share(max(0, int(row.get("deaths", 0))), total_deaths)
+
+        base_score = (
+            0.24 * rounds_share
+            + 0.17 * elimination_share
+            + 0.17 * dealt_share
+            + 0.14 * taken_efficiency
+            + 0.14 * survival_share
+            + 0.14 * death_efficiency
+        )
+        win_bonus = 0.12 if (winner_index is not None and local_index == winner_index) else 0.0
+        mvp_bonus = 0.08 if local_index == mvp_index else 0.0
+        draw_bonus = 0.03 if is_draw else 0.0
+        return self._clamp01(base_score + win_bonus + mvp_bonus + draw_bonus)
+
+    def _rr_caps_for_target_score(self, target_score: int | None = None) -> tuple[int, int]:
+        score_to_win = int(target_score if target_score is not None else 3)
+        min_target = 3
+        max_target = 20
+        min_win_cap = 12
+        max_win_cap = 45
+        min_lose_cap = 8
+        max_lose_cap = 40
+
+        if max_target <= min_target:
+            return max_win_cap, max_lose_cap
+
+        t = (score_to_win - min_target) / float(max_target - min_target)
+        t = max(0.0, min(1.0, t))
+        win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
+        lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+        return win_cap, lose_cap
+
+    def _compute_rr_delta(
+        self,
+        match_stats: list[dict[str, Any]],
+        local_index: int,
+        winner_index: int | None,
+        mvp_index: int,
+        target_score: int,
+        is_draw: bool = False,
+    ) -> int:
+        if is_draw:
+            return 0
+
+        max_gain, max_loss = self._rr_caps_for_target_score(target_score)
+        score = self._match_performance_score(match_stats, local_index, winner_index, mvp_index, is_draw=is_draw)
+        won_match = winner_index is not None and local_index == winner_index
+        if won_match:
+            gain = int(round(score * float(max_gain)))
+            return max(0, min(max_gain, gain))
+
+        loss = int(round((1.0 - score) * float(max_loss)))
+        return -max(0, min(max_loss, loss))
+
     def _tick_physics(self, dt: float) -> None:
         dt = min(MAX_TICK_DT, max(0.0, float(dt)))
         if dt <= 0.0:
@@ -1820,6 +1917,122 @@ class MatchDaemon:
                         session["game_over"] = True
                         session["end_state"] = pending_end_state
                         session["round_restart_at"] = None
+                        try:
+                            players = session.get("players", {})
+                            player_items = list(players.items())
+                            round_wins = self._ensure_round_wins(session)
+                            target_score = max(1, int(session.get("assignment", {}).get("payload", {}).get("target_score", 3)))
+                            mode = str(session.get("assignment", {}).get("payload", {}).get("mode", "ranked")).strip().lower()
+                            ranked_mode = mode != "unranked"
+                            match_stats: list[dict[str, Any]] = []
+                            for idx, (pname, pentry) in enumerate(player_items):
+                                match_stats.append(
+                                    {
+                                        "username": str(pname),
+                                        "character": str(pentry.get("character_name", "Caveman")),
+                                        "rounds_played": int(max(0, round_wins[idx] if idx < len(round_wins) else 0)),
+                                        "rounds_won": int(max(0, round_wins[idx] if idx < len(round_wins) else 0)),
+                                        "eliminations": int(max(0, pentry.get("eliminations", 0))),
+                                        "deaths": int(max(0, pentry.get("deaths", 0))),
+                                        "damage_dealt": int(max(0, pentry.get("damage_dealt", 0))),
+                                        "damage_taken": int(max(0, pentry.get("damage_taken", 0))),
+                                        "survival_time": float(max(0.0, time.time() - float(session.get("start_time", time.time())))),
+                                    }
+                                )
+
+                            winner_name = str(pending_end_state.get("winner_name") or "")
+                            winner_index = None
+                            if winner_name:
+                                for idx, (pname, _) in enumerate(player_items):
+                                    if pname == winner_name:
+                                        winner_index = idx
+                                        break
+                            mvp_index = 0
+                            if match_stats:
+                                mvp_index = 0
+                                best_score = -1.0
+                                for idx in range(len(match_stats)):
+                                    score = self._match_performance_score(match_stats, idx, winner_index, mvp_index, is_draw=False)
+                                    if score > best_score:
+                                        best_score = score
+                                        mvp_index = idx
+
+                            rr_results: dict[str, dict[str, Any]] = {}
+                            for idx, (pname, pentry) in enumerate(player_items):
+                                if bool(pentry.get("bot", False)):
+                                    continue
+                                if not isinstance(pname, str) or not pname.strip():
+                                    continue
+                                rr_before = 1000
+                                rr_after = 1000
+                                rr_delta = self._compute_rr_delta(match_stats, idx, winner_index, mvp_index, target_score, is_draw=False) if ranked_mode else 0
+                                if ranked_mode and self.account_store is not None:
+                                    try:
+                                        profile = self.account_store.get_profile(pname)
+                                        if profile is not None:
+                                            rr_before = int(profile.rr)
+                                        update_result = self.account_store.apply_sync_event(
+                                            {
+                                                "username": pname,
+                                                "event_type": "stat_delta",
+                                                "payload": {
+                                                    "ranked": True,
+                                                    "rr_delta": int(rr_delta),
+                                                    "rr_after": max(0, int(rr_before + rr_delta)),
+                                                    "damage_dealt": 0,
+                                                    "damage_taken": 0,
+                                                    "eliminations": 0,
+                                                    "deaths": 0,
+                                                    "rounds_played": int(max(0, match_stats[idx].get("rounds_played", 0))),
+                                                    "rounds_won": int(max(0, match_stats[idx].get("rounds_won", 0))),
+                                                    "matches_played": 1,
+                                                    "matches_won": 1 if winner_index is not None and idx == winner_index else 0,
+                                                    "mvp_count": 1 if idx == mvp_index else 0,
+                                                    "updated_at": time.time(),
+                                                },
+                                            }
+                                        )
+                                        profile_after = update_result.get("profile") if isinstance(update_result, dict) else None
+                                        if profile_after is not None:
+                                            rr_after = int(getattr(profile_after, "rr", rr_after))
+                                        else:
+                                            rr_after = max(0, rr_before + rr_delta)
+                                    except Exception:
+                                        rr_after = max(0, rr_before + rr_delta)
+                                elif ranked_mode:
+                                    rr_after = max(0, rr_before + rr_delta)
+                                rr_results[pname] = {
+                                    "rr_before": int(rr_before),
+                                    "rr_after": int(rr_after),
+                                    "rr_delta": int(rr_delta if ranked_mode else 0),
+                                }
+
+                            result_id = f"match_result_server_{int(time.time() * 1000)}"
+                            match_result = {
+                                "result_id": result_id,
+                                "winner_index": int(winner_index) if winner_index is not None else -1,
+                                "mvp_index": int(mvp_index),
+                                "is_draw": False,
+                                "match_complete": True,
+                                "ranked_mode": bool(ranked_mode),
+                                "target_score": int(target_score),
+                                "round_wins": [int(v) for v in round_wins],
+                                "match_stats": match_stats,
+                                "rr_results": rr_results,
+                                "winner_name": winner_name,
+                            }
+                            for _, pentry in player_items:
+                                addr = pentry.get("addr")
+                                if not addr:
+                                    continue
+                                seq = self._next_seq()
+                                try:
+                                    self._send_packet(addr, PKT_DATA, seq, 1, "match_result", match_result)
+                                except Exception:
+                                    pass
+                            session["match_result_sent"] = True
+                        except Exception:
+                            pass
                     else:
                         self._reset_session_round(session)
                         players = session.get("players", {})

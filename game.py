@@ -93,6 +93,7 @@ class GameManager:
             if profile is not None:
                 self._guest_rr = int(profile.rr)
         self._match_rr_start = int(self._guest_rr)
+        self._network_authoritative_rr_results: dict[str, dict[str, int]] = {}
         self.network = network
         self.is_network_game = (
             self.game_mode == MODE_ONLINE_MULTIPLAYER and self.network is not None
@@ -2327,6 +2328,21 @@ class GameManager:
         if result_id and result_id == self._last_applied_match_result_id:
             return
 
+        rr_results = state.get("rr_results")
+        authoritative_rr_results: dict[str, dict[str, int]] = {}
+        if isinstance(rr_results, dict):
+            for key, value in rr_results.items():
+                if not isinstance(value, dict):
+                    continue
+                try:
+                    authoritative_rr_results[str(key)] = {
+                        "rr_before": int(value.get("rr_before", self._guest_rr)),
+                        "rr_after": int(value.get("rr_after", self._guest_rr)),
+                        "rr_delta": int(value.get("rr_delta", 0)),
+                    }
+                except (TypeError, ValueError):
+                    continue
+        self._network_authoritative_rr_results = authoritative_rr_results
         ranked_mode_override = state.get("ranked_mode") if isinstance(state.get("ranked_mode"), bool) else None
         is_draw = bool(state.get("is_draw", False))
         self._match_complete = bool(state.get("match_complete", self._match_complete))
@@ -2435,6 +2451,21 @@ class GameManager:
 
         if local_index is None:
             return local_label, rr_before, rr_after, rr_delta
+
+        if self.is_network_game:
+            authoritative = self._network_authoritative_rr_results.get(local_label) or self._network_authoritative_rr_results.get(self.account_username or "")
+            if isinstance(authoritative, dict) and authoritative:
+                try:
+                    rr_before = int(authoritative.get("rr_before", rr_before))
+                except (TypeError, ValueError):
+                    rr_before = int(self._guest_rr)
+                try:
+                    rr_after = int(authoritative.get("rr_after", rr_before))
+                except (TypeError, ValueError):
+                    rr_after = rr_before
+                rr_delta = rr_after - rr_before
+                self._guest_rr = rr_after
+                return local_label, rr_before, rr_after, rr_delta
 
         ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
         rr_delta = self._compute_rr_delta(
@@ -2588,6 +2619,7 @@ class GameManager:
         self._client_snapshot_gap = self._snapshot_interval
         if reset_match:
             self._last_applied_match_result_id = None
+            self._network_authoritative_rr_results = {}
         if self.account_service and self.account_username:
             profile = self.account_service.get_profile(self.account_username)
             if profile is not None:
