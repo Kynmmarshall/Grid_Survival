@@ -125,6 +125,7 @@ class Projectile:
         direction: pygame.Vector2,
         kind: ProjectileKind,
         owner,
+        replica: bool = False,
     ):
         cfg = _KIND_SETTINGS[kind]
         self.position = position.copy()
@@ -142,6 +143,7 @@ class Projectile:
         self.alive = True
         self._spin = 0.0
         self._hit_players: set[int] = set()
+        self.replica = bool(replica)
 
     def update(self, dt: float) -> None:
         if not self.alive:
@@ -152,6 +154,27 @@ class Projectile:
             return
         self._spin += dt * 540
         self.position += self.velocity * dt
+
+    @classmethod
+    def from_snapshot(cls, data: dict) -> "Projectile":
+        """Create a visual-only projectile from a snapshot dict.
+
+        Expected keys: x, y, vx, vy, kind, age, lifetime
+        """
+        kind_name = str(data.get("kind", "ROCK"))
+        try:
+            kind = ProjectileKind[kind_name]
+        except Exception:
+            kind = ProjectileKind.ROCK
+        pos = pygame.Vector2(float(data.get("x", 0.0)), float(data.get("y", 0.0)))
+        vel = pygame.Vector2(float(data.get("vx", 0.0)), float(data.get("vy", 0.0)))
+        # Build a dummy direction vector from velocity (magnitude not important)
+        dir_vec = vel.normalize() if vel.length_squared() > 0 else pygame.Vector2(1, 0)
+        proj = cls(pos, dir_vec, kind, owner=None, replica=True)
+        proj.velocity = vel
+        proj.age = float(data.get("age", 0.0))
+        proj.lifetime = float(data.get("lifetime", proj.lifetime))
+        return proj
 
     def draw(self, surface: pygame.Surface) -> None:
         if not self.alive:
@@ -375,8 +398,11 @@ class ProjectileManager:
             ):
                 proj.alive = False
                 continue
-            self._check_player_collisions(proj, game)
-            self._check_monster_collisions(proj, game)
+            # If this projectile is a network-replicated visual-only copy,
+            # skip authoritative collision resolution on clients.
+            if not getattr(proj, "replica", False):
+                self._check_player_collisions(proj, game)
+                self._check_monster_collisions(proj, game)
 
         self._projectiles = [p for p in self._projectiles if p.alive]
 
@@ -453,6 +479,23 @@ class ProjectileManager:
     def draw(self, surface: pygame.Surface) -> None:
         for proj in self._projectiles:
             proj.draw(surface)
+
+    def apply_snapshot(self, snapshot: list) -> None:
+        """Replace visual projectiles with server snapshot (client-side only).
+
+        Snapshot is a list of dicts with keys 'x','y','vx','vy','kind','age','lifetime','owner'.
+        """
+        if not isinstance(snapshot, list):
+            return
+        visual: list[Projectile] = []
+        for entry in snapshot:
+            try:
+                proj = Projectile.from_snapshot(entry if isinstance(entry, dict) else {})
+                visual.append(proj)
+            except Exception:
+                continue
+        # Replace client-side projectiles with visual-only set
+        self._projectiles = visual
 
     def get_shoot_cooldown_fraction(self, owner) -> float:
         """Return 0.0 if ready to shoot, 1.0 if just fired."""

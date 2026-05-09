@@ -39,6 +39,10 @@ from settings import (
     PLAYER_START_POS,
     WINDOW_SIZE,
 )
+
+from projectiles import ProjectileManager
+
+QUEUE_FILL_TIMEOUT = 12.0  # seconds to wait in queue before filling with bots
 from tile_system import TMXTileManager, TileState
 
 
@@ -1110,6 +1114,11 @@ class MatchDaemon:
             if enemy_count > 0
             else None
         )
+        # Projectile manager (authoritative simulation)
+        try:
+            session["projectile_manager"] = ProjectileManager()
+        except Exception:
+            session["projectile_manager"] = None
         self._ensure_round_wins(session)
         session["world_initialized"] = True
 
@@ -1146,12 +1155,33 @@ class MatchDaemon:
         hazard_manager = session.get("hazard_manager")
         orb_manager = session.get("orb_manager")
         enemy_manager = session.get("enemy_manager")
+        proj_mgr = session.get("projectile_manager")
+        proj_list = None
+        if proj_mgr is not None:
+            try:
+                proj_list = [
+                    {
+                        "x": float(p.position.x),
+                        "y": float(p.position.y),
+                        "vx": float(p.velocity.x),
+                        "vy": float(p.velocity.y),
+                        "kind": p.kind.name if getattr(p, "kind", None) is not None else "ROCK",
+                        "age": float(getattr(p, "age", 0.0)),
+                        "lifetime": float(getattr(p, "lifetime", 0.0)),
+                        "owner": str(getattr(p.owner, "name", "")) if getattr(p, "owner", None) is not None else "",
+                    }
+                    for p in getattr(proj_mgr, "_projectiles", [])
+                    if getattr(p, "alive", False)
+                ]
+            except Exception:
+                proj_list = None
         return {
             "time_since_start": float(time.time() - session.get("start_time", time.time())),
             "round_seq": int(session.get("round_seq", 0)),
             "hazards": hazard_manager.snapshot_state() if hazard_manager is not None else None,
             "orbs": orb_manager.snapshot_state() if orb_manager is not None else None,
             "pacman_enemies": enemy_manager.snapshot_state() if enemy_manager is not None else None,
+            "projectiles": proj_list,
         }
 
     def _rescue_player_to_safe_tile(self, player: Any) -> bool:
@@ -1729,6 +1759,31 @@ class MatchDaemon:
             for session in list(self._sessions.values()):
                 players = session.get("players", {})
                 self._initialize_session_world(session)
+                # If waiting for players and queue timeout elapsed, fill remaining
+                # slots with bots up to the requested player_count.
+                try:
+                    payload = session.get("assignment", {}).get("payload", {}) or {}
+                    desired_count = int(payload.get("player_count", 0) or 0)
+                except Exception:
+                    desired_count = 0
+                if desired_count and not self._session_ready(session):
+                    created_at = float(session.get("created_at", session.get("start_time", time.time())))
+                    if time.time() - created_at >= QUEUE_FILL_TIMEOUT:
+                        # Count currently registered human players (addr present)
+                        humans = [e for e in players.values() if not bool(e.get("bot", False)) and e.get("addr")]
+                        missing = max(0, desired_count - max(1, len(players)))
+                        # If there are fewer humans than expected, add bots to reach desired_count
+                        if len(humans) < desired_count:
+                            idx = 1
+                            while len([k for k in players.keys() if k.startswith("BOT-")]) < (desired_count - len(humans)):
+                                bot_name = f"BOT-{idx}"
+                                if bot_name in players:
+                                    idx += 1
+                                    continue
+                                spawn_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(players) + 1)
+                                spawn_y = float(PLAYER_START_POS[1])
+                                players[bot_name] = {"addr": None, "x": spawn_x, "y": spawn_y, "last_input": {}, "bot": True, "profile": "Bot"}
+                                idx += 1
                 if not self._session_ready(session):
                     session["start_time"] = time.time()
                     continue
@@ -1830,6 +1885,28 @@ class MatchDaemon:
                             self._eliminate_proxy(proxy, "fell off")
 
                     proxy.rect.center = (round(proxy.position.x), round(proxy.position.y))
+                    # Handle shoot input edge (spawn projectiles on press)
+                    inp = entry.get("last_input") or {}
+                    try:
+                        shoot_now = bool(inp.get("shoot", False))
+                    except Exception:
+                        shoot_now = False
+                    prev_shoot = bool(entry.get("_last_shoot", False))
+                    if shoot_now and not prev_shoot:
+                        # Determine direction from directional input if present
+                        try:
+                            dx = float(bool(inp.get("right"))) - float(bool(inp.get("left")))
+                            dy = float(bool(inp.get("down"))) - float(bool(inp.get("up")))
+                            direction = pygame.Vector2(dx, dy) if (dx != 0.0 or dy != 0.0) else None
+                        except Exception:
+                            direction = None
+                        proj_mgr = session.get("projectile_manager")
+                        if proj_mgr is not None:
+                            try:
+                                proj_mgr.fire(proxy, direction)
+                            except Exception:
+                                pass
+                    entry["_last_shoot"] = shoot_now
                     proxy.sync_back()
 
                 tile_manager = session.get("tile_manager")
@@ -1852,6 +1929,28 @@ class MatchDaemon:
 
                 current_proxies = list(player_proxies.values())
                 self.eliminated_players = [proxy for proxy in current_proxies if proxy._eliminated]
+
+                # Advance authoritative projectile simulation
+                proj_mgr = session.get("projectile_manager")
+                if proj_mgr is not None:
+                    try:
+                        class _GameLike:
+                            pass
+
+                        g = _GameLike()
+                        g.players = current_proxies
+                        g.eliminated_players = self.eliminated_players
+                        g.pacman_enemy_manager = session.get("enemy_manager")
+                        # Provide _eliminate_player hook expected by projectiles
+                        def _elim(p, reason=""):
+                            try:
+                                self._eliminate_proxy(p, reason)
+                            except Exception:
+                                pass
+                        g._eliminate_player = _elim
+                        proj_mgr.update(dt, g)
+                    except Exception:
+                        pass
 
                 if hazard_manager is not None and not session.get("round_finished"):
                     for proxy in current_proxies:

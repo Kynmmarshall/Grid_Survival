@@ -871,6 +871,7 @@ class GameManager:
             "right": bool(keys[controls.get("right", pygame.K_d)]),
             "jump": bool(keys[controls.get("jump", pygame.K_SPACE)]),
             "power_pressed": bool(self._pending_power_press),
+            "shoot": bool(keys[controls.get("shoot", pygame.K_e)]),
         }
 
     def _empty_network_input_state(self) -> dict:
@@ -881,6 +882,7 @@ class GameManager:
             "right": False,
             "jump": False,
             "power_pressed": False,
+            "shoot": False,
         }
 
     def _sanitize_network_input(self, payload) -> dict:
@@ -992,9 +994,19 @@ class GameManager:
             blend = min(0.95, blend + 0.12)
         if distance < 3.0 and not (is_local_player and local_move_intent):
             blend = 1.0
+        # If local player is actively jumping, prefer local vertical motion
+        # to avoid snapping the jump arc; still blend horizontal position.
         blended = dict(translated_state)
         blended["x"] = current.x + (target.x - current.x) * blend
-        blended["y"] = current.y + (target.y - current.y) * blend
+        if is_local_player and local_move_intent and isinstance(local_input, dict) and local_input.get("jump") and bool(translated_state.get("jumping", False)):
+            # Only accept large vertical corrections from host (landing mismatch), ignore small ones
+            vy_diff = abs(target.y - current.y)
+            if vy_diff < 40.0:
+                blended["y"] = current.y
+            else:
+                blended["y"] = current.y + (target.y - current.y) * blend
+        else:
+            blended["y"] = current.y + (target.y - current.y) * blend
         return blended
 
     def _translate_network_world_state(self, state: dict) -> dict:
@@ -1314,6 +1326,18 @@ class GameManager:
         if "orbs" in snapshot and incoming_time + epsilon >= self._last_client_orb_snapshot_time:
             self.orb_manager.apply_snapshot(self._translate_network_world_blob(snapshot.get("orbs")))
             self._last_client_orb_snapshot_time = incoming_time
+            applied_any = True
+        if "projectiles" in snapshot and incoming_time + epsilon >= getattr(self, "_last_client_projectile_snapshot_time", -1.0):
+            try:
+                proj_blob = self._translate_network_world_blob(snapshot.get("projectiles"))
+                # Replace client-side projectiles with server visual replicas
+                try:
+                    self.projectile_manager.apply_snapshot(proj_blob or [])
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            self._last_client_projectile_snapshot_time = incoming_time
             applied_any = True
         if (
             "pacman_enemies" in snapshot
