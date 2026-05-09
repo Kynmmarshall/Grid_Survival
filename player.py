@@ -172,6 +172,7 @@ class Player:
         self._extra_lives = 0  # Extra lives from LIFE orbs
         self.max_health = 3
         self.health = self.max_health
+        self._hit_flash_timer = 0.0
 
     def _load_animations(self):
         animations = {}
@@ -266,6 +267,7 @@ class Player:
         if self._immune_to_hazards or self.has_active_shield():
             return False
         self.health = max(0, self.health - amount)
+        self._hit_flash_timer = 0.35
         return self.health <= 0
 
     def apply_freeze(self, duration: float):
@@ -299,6 +301,8 @@ class Player:
             self._active_orb_indefinite = False
             self._active_orb_duration = 0.0
         self._status_flash_timer += dt
+        if self._hit_flash_timer > 0:
+            self._hit_flash_timer = max(0.0, self._hit_flash_timer - dt)
 
     def _speed_multiplier(self) -> float:
         """Combine all speed buffs into a single multiplier."""
@@ -574,8 +578,13 @@ class Player:
         for wing_surface, wing_pos in wing_blits_front:
             surface.blit(wing_surface, wing_pos)
 
-        if self.state != "death" and self.health < self.max_health:
+        if self.state != "death":
             self._draw_health_bar(surface, draw_rect)
+            if self._hit_flash_timer > 0:
+                flash_alpha = int(160 * self._hit_flash_timer / 0.35)
+                flash = pygame.Surface(draw_rect.size, pygame.SRCALPHA)
+                flash.fill((255, 30, 30, flash_alpha))
+                surface.blit(flash, draw_rect.topleft)
 
         death_opacity = death_alpha / 255.0
         if self._has_speed_orb_glow():
@@ -608,18 +617,21 @@ class Player:
                 )
 
     def _draw_health_bar(self, surface: pygame.Surface, draw_rect: pygame.Rect) -> None:
-        bar_w = max(30, draw_rect.width - 4)
-        bar_h = 6
+        bar_w = max(34, draw_rect.width - 2)
+        bar_h = 7
         bar_x = draw_rect.centerx - bar_w // 2
-        bar_y = draw_rect.top - 12
-        pygame.draw.rect(surface, (60, 10, 10), (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2), border_radius=3)
-        pygame.draw.rect(surface, (40, 40, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=2)
+        bar_y = draw_rect.top - 14
+        pygame.draw.rect(surface, (0, 0, 0, 180), (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2), border_radius=4)
+        pygame.draw.rect(surface, (55, 20, 20), (bar_x, bar_y, bar_w, bar_h), border_radius=3)
         fill_w = max(0, int(bar_w * self.health / max(1, self.max_health)))
         if fill_w > 0:
             ratio = self.health / max(1, self.max_health)
             r = int(255 * (1.0 - ratio))
             g = int(220 * ratio)
-            pygame.draw.rect(surface, (r, g, 30), (bar_x, bar_y, fill_w, bar_h), border_radius=2)
+            pygame.draw.rect(surface, (r, g, 30), (bar_x, bar_y, fill_w, bar_h), border_radius=3)
+        for i in range(1, self.max_health):
+            tick_x = bar_x + int(bar_w * i / self.max_health)
+            pygame.draw.line(surface, (0, 0, 0), (tick_x, bar_y), (tick_x, bar_y + bar_h), 1)
 
     def reset(self):
         self._eliminated = False
@@ -656,6 +668,7 @@ class Player:
         self.clear_active_orb()
         self._extra_lives = 0
         self.health = self.max_health
+        self._hit_flash_timer = 0.0
         self._refresh_collision_shape(force=True)
 
     def snapshot_state(self) -> dict[str, Any]:

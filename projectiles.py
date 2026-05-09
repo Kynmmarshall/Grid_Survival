@@ -371,7 +371,7 @@ class ProjectileManager:
             if rect is None:
                 continue
             dist = math.hypot(proj.position.x - rect.centerx, proj.position.y - rect.centery)
-            if dist > proj.radius + max(rect.width, rect.height) * 0.38:
+            if dist > proj.radius + max(rect.width, rect.height) * 0.55:
                 continue
 
             proj._hit_players.add(id(player))
@@ -414,7 +414,7 @@ class ProjectileManager:
             if rect is None:
                 continue
             dist = math.hypot(proj.position.x - rect.centerx, proj.position.y - rect.centery)
-            if dist > proj.radius + max(rect.width, rect.height) * 0.45:
+            if dist > proj.radius + max(rect.width, rect.height) * 0.60:
                 continue
             if hasattr(enemy, "take_damage") and enemy.take_damage(1):
                 if hasattr(enemy, "is_dying"):

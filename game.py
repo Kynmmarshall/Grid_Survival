@@ -215,7 +215,7 @@ class GameManager:
                     "player1": dict(DEFAULT_CONTROLS["player1"]),
                     "player2": dict(DEFAULT_CONTROLS["player2"]),
                 }
-            player1_controls = dict(custom_controls.get("player1", DEFAULT_CONTROLS["player1"]))
+            player1_controls = {**DEFAULT_CONTROLS["player1"], **dict(custom_controls.get("player1", DEFAULT_CONTROLS["player1"]))}
             primary_char = self._character_choice(0)
             self.players.append(
                 Player(
@@ -2464,13 +2464,19 @@ class GameManager:
                     break
 
     def _handle_shoot_key(self, key: int) -> None:
+        keys = pygame.key.get_pressed()
         for player in self.players:
             if player in self.eliminated_players:
                 continue
-            shoot_key = player.controls.get("shoot") if hasattr(player, "controls") else None
-            if shoot_key is not None and shoot_key == key:
-                self.projectile_manager.fire(player)
-                break
+            controls = getattr(player, "controls", {})
+            shoot_key = controls.get("shoot")
+            if shoot_key is None or shoot_key != key:
+                continue
+            dx = (1.0 if keys[controls.get("right", -1)] else 0.0) - (1.0 if keys[controls.get("left", -1)] else 0.0)
+            dy = (1.0 if keys[controls.get("down", -1)] else 0.0) - (1.0 if keys[controls.get("up", -1)] else 0.0)
+            direction = pygame.Vector2(dx, dy) if (dx != 0 or dy != 0) else None
+            self.projectile_manager.fire(player, direction)
+            break
 
     def _adjust_audio_volume(self, delta: float):
         self.audio.adjust_volume(delta)
