@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import math
+import random
 import socket
 import threading
 import time
@@ -49,6 +50,18 @@ ONLINE_INITIAL_TILE_BURST = 1
 ONLINE_PACMAN_ENEMY_COUNT = 2
 ROUND_RESTART_DELAY = 2.0
 MAX_TICK_DT = 0.1
+
+BOT_CANDIDATE_DIRECTIONS = (
+    pygame.Vector2(0, 0),
+    pygame.Vector2(1, 0),
+    pygame.Vector2(-1, 0),
+    pygame.Vector2(0, 1),
+    pygame.Vector2(0, -1),
+    pygame.Vector2(1, 1).normalize(),
+    pygame.Vector2(-1, 1).normalize(),
+    pygame.Vector2(1, -1).normalize(),
+    pygame.Vector2(-1, -1).normalize(),
+)
 
 
 class _PlayerProxy:
@@ -1253,10 +1266,9 @@ class MatchDaemon:
             return
 
         players = session.get("players", {})
-        humans = [name for name, entry in players.items() if not bool(entry.get("bot", False)) and not bool(entry.get("eliminated", False))]
-        if not humans:
-            return
-
+        walkable_mask = session.get("walkable_mask")
+        walkable_bounds = session.get("walkable_bounds")
+        bot_ai_state = session.setdefault("bot_ai_state", {})
         session["bot_ai_timer"] = float(session.get("bot_ai_timer", 0.0) + dt)
         choose_new_input = session["bot_ai_timer"] >= 0.18
         if choose_new_input:
@@ -1270,35 +1282,101 @@ class MatchDaemon:
                 continue
 
             bot_pos = pygame.Vector2(float(entry.get("x", 0.0)), float(entry.get("y", 0.0)))
-            nearest_human = None
-            nearest_dist = float("inf")
-            for human_name in humans:
-                human_entry = players.get(human_name)
-                if not human_entry:
-                    continue
-                human_pos = pygame.Vector2(float(human_entry.get("x", 0.0)), float(human_entry.get("y", 0.0)))
-                dist = bot_pos.distance_to(human_pos)
-                if dist < nearest_dist:
-                    nearest_dist = dist
-                    nearest_human = human_pos
+            bot_state = bot_ai_state.setdefault(bot_name, {"direction": pygame.Vector2(0, 0)})
+            best_dir = self._choose_bot_direction(bot_pos, walkable_mask, walkable_bounds, bot_state)
+            bot_state["direction"] = pygame.Vector2(best_dir)
+            entry["last_input"] = self._direction_to_input(best_dir)
 
-            if nearest_human is None:
-                continue
+    def _choose_bot_direction(
+        self,
+        bot_pos: pygame.Vector2,
+        walkable_mask,
+        walkable_bounds,
+        bot_state: dict[str, Any],
+    ) -> pygame.Vector2:
+        current_direction = pygame.Vector2(bot_state.get("direction", pygame.Vector2(0, 0)))
+        best_dir = pygame.Vector2(0, 0)
+        best_score = float("-inf")
 
-            delta = nearest_human - bot_pos
-            move = {"up": False, "down": False, "left": False, "right": False}
-            if abs(delta.x) > 8.0:
-                move["right"] = delta.x > 0
-                move["left"] = delta.x < 0
-            if abs(delta.y) > 8.0:
-                move["down"] = delta.y > 0
-                move["up"] = delta.y < 0
+        for direction in BOT_CANDIDATE_DIRECTIONS:
+            score = self._score_bot_direction(
+                bot_pos,
+                direction,
+                walkable_mask,
+                walkable_bounds,
+                current_direction,
+            )
+            if score > best_score:
+                best_score = score
+                best_dir = pygame.Vector2(direction)
 
-            # Nudge bots to keep moving even when already near the target.
-            if not any(move.values()):
-                move["right"] = True
+        if best_dir.length_squared() == 0:
+            if current_direction.length_squared() > 0:
+                best_dir = current_direction
+            else:
+                best_dir = pygame.Vector2(random.choice(BOT_CANDIDATE_DIRECTIONS[1:]))
 
-            entry["last_input"] = move
+        return best_dir
+
+    def _score_bot_direction(
+        self,
+        bot_pos: pygame.Vector2,
+        direction: pygame.Vector2,
+        walkable_mask,
+        walkable_bounds,
+        current_direction: pygame.Vector2,
+    ) -> float:
+        if direction.length_squared() == 0:
+            return -0.25 + random.uniform(-0.25, 0.25)
+
+        direction = pygame.Vector2(direction).normalize()
+        probe = _PlayerProxy("bot-probe", {"x": bot_pos.x, "y": bot_pos.y}, bot=True)
+        distance = self._bot_walkable_distance(probe, direction, walkable_mask)
+        distance_score = distance / 220.0
+
+        center_score = 0.0
+        if walkable_bounds is not None and getattr(walkable_bounds, "width", 0) > 0 and getattr(walkable_bounds, "height", 0) > 0:
+            center = pygame.Vector2(walkable_bounds.center)
+            to_center = center - bot_pos
+            if to_center.length_squared() > 0:
+                center_score = direction.dot(to_center.normalize()) * 0.35
+
+        momentum = max(0.0, direction.dot(current_direction)) * 0.25
+        jitter = random.uniform(-0.18, 0.18)
+        return distance_score + center_score + momentum + jitter
+
+    def _bot_walkable_distance(self, proxy: _PlayerProxy, direction: pygame.Vector2, walkable_mask) -> float:
+        if walkable_mask is None:
+            return 220.0
+
+        step = 12.0
+        max_distance = 220.0
+        sampled = 0.0
+        probe = pygame.Vector2(proxy.position)
+        while sampled < max_distance:
+            probe += direction * step
+            sampled += step
+            if not proxy.is_over_platform(probe, walkable_mask):
+                break
+        return sampled
+
+    def _direction_to_input(self, direction: pygame.Vector2) -> dict[str, bool]:
+        move = {"up": False, "down": False, "left": False, "right": False}
+        if direction.length_squared() == 0:
+            return move
+
+        normalized = pygame.Vector2(direction)
+        if normalized.length_squared() > 0:
+            normalized = normalized.normalize()
+        if abs(normalized.x) >= 0.25:
+            move["right"] = normalized.x > 0
+            move["left"] = normalized.x < 0
+        if abs(normalized.y) >= 0.25:
+            move["down"] = normalized.y > 0
+            move["up"] = normalized.y < 0
+        if not any(move.values()):
+            move["right"] = True
+        return move
 
     def _tick_physics(self, dt: float) -> None:
         dt = min(MAX_TICK_DT, max(0.0, float(dt)))
