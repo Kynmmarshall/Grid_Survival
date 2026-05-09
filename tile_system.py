@@ -535,16 +535,21 @@ class TMXTileManager:
             ):
                 continue
 
+            tile_x = int(tile.pixel_x)
+            tile_y = int(tile.pixel_y)
+            if tile.state == TileState.FALLING and not remove_transient_tiles:
+                tile_y += int(tile.fall_offset_y)
+
             tile_surface = pygame.Surface((tile.tile_width, tile.tile_height), pygame.SRCALPHA)
             points = [
-                (p[0] - tile.pixel_x, p[1] - tile.pixel_y)
+                (p[0] - tile_x, p[1] - tile_y)
                 for p in tile.get_diamond_points()
             ]
             pygame.draw.polygon(tile_surface, (255, 255, 255, 255), points)
             tile_mask = pygame.mask.from_surface(tile_surface)
-            updated_mask.erase(tile_mask, (int(tile.pixel_x), int(tile.pixel_y)))
+            updated_mask.erase(tile_mask, (tile_x, tile_y))
             erase_count += 1
-            erased_tiles.append((tile.grid_x, tile.grid_y, tile.state.value, int(tile.pixel_x), int(tile.pixel_y)))
+            erased_tiles.append((tile.grid_x, tile.grid_y, tile.state.value, tile_x, tile_y))
         
         if erase_count > 0 and erase_count < 10:
 
