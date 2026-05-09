@@ -650,9 +650,7 @@ class TMXTileManager:
         for key, tile in self.tiles.items():
             layout_state = layout_lookup.get(key)
             if layout_state:
-                # Apply host-authored tile positions so client and host stay in the same world space.
-                tile.pixel_x = int(layout_state.get("pixel_x", tile.pixel_x))
-                tile.pixel_y = int(layout_state.get("pixel_y", tile.pixel_y))
+                # Preserve locally centered tile positions; snapshot data only updates size.
                 tile.tile_width = int(layout_state.get("tile_width", tile.tile_width))
                 tile.tile_height = int(layout_state.get("tile_height", tile.tile_height))
 
@@ -675,8 +673,6 @@ class TMXTileManager:
             tile.fall_offset_y = float(state.get("fall_offset_y", 0.0))
             tile.shake_timer = float(state.get("shake_timer", 0.0))
             tile.alpha = int(state.get("alpha", 255))
-            tile.pixel_x = int(state.get("pixel_x", tile.pixel_x))
-            tile.pixel_y = int(state.get("pixel_y", tile.pixel_y))
             tile.tile_width = int(state.get("tile_width", tile.tile_width))
             tile.tile_height = int(state.get("tile_height", tile.tile_height))
             if tile.state == TileState.DISAPPEARED:

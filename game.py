@@ -1081,12 +1081,9 @@ class GameManager:
 
     def _rebuild_walkable_mask(self):
         base_mask = self.original_walkable_mask
-        if self.is_network_game and not self.is_network_host:
-            base_mask = self._shift_mask(
-                self.original_walkable_mask,
-                self._network_world_delta[0],
-                self._network_world_delta[1],
-            )
+        if base_mask is None:
+            self.walkable_mask = None
+            return
         self.walkable_mask = self.tile_manager.get_updated_walkable_mask(base_mask)
 
     def _apply_network_snapshot(self, snapshot):
@@ -1207,20 +1204,6 @@ class GameManager:
                 except Exception:
                     pass
 
-            raw_tiles_snapshot = snapshot.get("tiles") if isinstance(snapshot.get("tiles"), dict) else {}
-            layout_entries = raw_tiles_snapshot.get("layout") or []
-            if layout_entries:
-                first_entry = layout_entries[0]
-                key = (int(first_entry.get("x", -1)), int(first_entry.get("y", -1)))
-                local_tile = self.tile_manager.tiles.get(key)
-                if local_tile is not None:
-                    host_px = int(first_entry.get("pixel_x", local_tile.pixel_x))
-                    host_py = int(first_entry.get("pixel_y", local_tile.pixel_y))
-                    self._network_world_delta = (
-                        host_px - int(local_tile.pixel_x),
-                        host_py - int(local_tile.pixel_y),
-                    )
-
             self.tile_manager.apply_snapshot(snapshot.get("tiles"))
             # Rebuild walkable mask immediately after applying host layout so collision matches visuals
             self._rebuild_walkable_mask()
@@ -1292,56 +1275,46 @@ class GameManager:
         # Draw water
         self.water.draw(self.screen)
 
-        world_surface = self.screen
-        world_offset = (0, 0)
-        if self.is_network_game and not self.is_network_host:
-            world_surface = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
-            dx, dy = self._network_world_delta
-            world_offset = (-dx, -dy)
-
         # Determine which players draw behind map
         players_behind = [p for p in self.players if p.draws_behind_map()]
         players_front = [p for p in self.players if not p.draws_behind_map()]
 
         # Draw players behind map
         for player in players_behind:
-            player.draw(world_surface)
+            player.draw(self.screen)
 
         # Draw TMX map with tile disappearance
-        self._draw_tmx_map_with_tiles(world_surface)
+        self._draw_tmx_map_with_tiles(self.screen)
 
         # Draw warning/crumble overlays and debris particles
-        self.tile_manager.draw_warning_overlays(world_surface)
+        self.tile_manager.draw_warning_overlays(self.screen)
 
         # Draw walkable debug overlay
-        self._draw_walkable_debug(world_surface)
+        self._draw_walkable_debug(self.screen)
 
         # Draw orbs floating above the arena
-        self.orb_manager.draw(world_surface)
+        self.orb_manager.draw(self.screen)
 
         # Draw pacman-style enemies before the player front layer
         if self.pacman_enemy_manager:
-            self.pacman_enemy_manager.draw(world_surface)
+            self.pacman_enemy_manager.draw(self.screen)
 
         # Draw players in front of map
         for player in players_front:
-            player.draw(world_surface)
+            player.draw(self.screen)
 
         # Draw hazards
-        self.hazard_manager.draw(world_surface)
+        self.hazard_manager.draw(self.screen)
 
         # Draw projectiles
-        self.projectile_manager.draw(world_surface)
+        self.projectile_manager.draw(self.screen)
 
         # Draw active power visuals
         for player in self.players:
             if player in self.eliminated_players:
                 continue
             if player.power:
-                player.power.draw(world_surface, player)
-
-        if world_surface is not self.screen:
-            self.screen.blit(world_surface, world_offset)
+                player.power.draw(self.screen, player)
 
         # Draw HUD
         self.hud.draw(
@@ -2592,7 +2565,7 @@ class GameManager:
                     pygame.draw.polygon(target_surface, (255, 64, 64, 180), pts, 1)
                     # draw small center marker
                     cx, cy = tile._iso_center()
-                    pygame.draw.circle(self.screen, (255, 200, 60), (int(cx), int(cy)), 2)
+                    pygame.draw.circle(target_surface, (255, 200, 60), (int(cx), int(cy)), 2)
         except Exception:
             pass
 
