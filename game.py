@@ -129,6 +129,7 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._network_world_delta = (0, 0)
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
         self._client_position_blend = 0.32
@@ -190,6 +191,25 @@ class GameManager:
             scale_y,
             offset,
         )
+        
+        # Log initial tile position bounds after load (ensures walkable layer aligns with tile positions)
+        if self.tile_manager and hasattr(self.tile_manager, 'tiles') and self.tile_manager.tiles:
+            min_x = None
+            max_x = None
+            min_y = None
+            max_y = None
+            for tile in self.tile_manager.tiles.values():
+                px = int(tile.pixel_x)
+                py = int(tile.pixel_y)
+                if min_x is None or px < min_x:
+                    min_x = px
+                if max_x is None or px > max_x:
+                    max_x = px
+                if min_y is None or py < min_y:
+                    min_y = py
+                if max_y is None or py > max_y:
+                    max_y = py
+            print(f"[INIT_TILE_BOUNDS] Client initial tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
         self.collision_manager = CollisionManager()
         self.hazard_manager = HazardManager(self.collision_manager)
         self.hud = GameHUD()
@@ -484,7 +504,7 @@ class GameManager:
         self.tile_manager.update(dt)
 
         # Update walkable mask with disappeared/crumbling tiles
-        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        self._rebuild_walkable_mask()
 
         self.hazard_manager.update(dt)
         self.hud.update(dt)
@@ -663,10 +683,24 @@ class GameManager:
                         state=self._build_network_dynamic_world_snapshot(),
                     )
                 if include_world:
-                    self.network.send_message(
-                        "world_snapshot",
-                        state=self._build_network_world_snapshot(),
-                    )
+                        # Build snapshot and log a small sample of layout for debugging
+                        try:
+                            world_snapshot = self._build_network_world_snapshot()
+                            tiles_blob = world_snapshot.get("tiles") or {}
+                            layout_list = (tiles_blob.get("layout") if isinstance(tiles_blob, dict) else None) or []
+                            sample = []
+                            for ent in layout_list[:5]:
+                                try:
+                                    sample.append((int(ent.get("x", -1)), int(ent.get("y", -1)), int(ent.get("pixel_x", -9999)), int(ent.get("pixel_y", -9999))))
+                                except Exception:
+                                    pass
+                            print(f"[NET_DEBUG_HOST] Sending world_snapshot: map_scale_x={self.map_scale_x}, map_scale_y={self.map_scale_y}, map_offset={self.map_offset}, sample={sample}", flush=True)
+                        except Exception:
+                            world_snapshot = self._build_network_world_snapshot()
+                        self.network.send_message(
+                            "world_snapshot",
+                            state=world_snapshot,
+                        )
             self._pending_power_press = False
             self._authoritative_network_inputs = None
 
@@ -993,6 +1027,7 @@ class GameManager:
         return {
             "time_since_start": float(self._time_since_start),
             "round_seq": int(self._network_round_seq),
+            "tiles": self.tile_manager.snapshot_state(),
             "hazards": self.hazard_manager.snapshot_state(),
             "orbs": self.orb_manager.snapshot_state(),
             "pacman_enemies": (
@@ -1024,6 +1059,7 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._network_world_delta = (0, 0)
 
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
@@ -1035,6 +1071,23 @@ class GameManager:
         self.eliminated_players.clear()
         for player in self.players:
             player._eliminated = False
+
+    def _shift_mask(self, source_mask, dx: int, dy: int):
+        if source_mask is None:
+            return None
+        shifted = pygame.mask.Mask(source_mask.get_size(), fill=False)
+        shifted.draw(source_mask, (int(dx), int(dy)))
+        return shifted
+
+    def _rebuild_walkable_mask(self):
+        base_mask = self.original_walkable_mask
+        if self.is_network_game and not self.is_network_host:
+            base_mask = self._shift_mask(
+                self.original_walkable_mask,
+                self._network_world_delta[0],
+                self._network_world_delta[1],
+            )
+        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(base_mask)
 
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
@@ -1135,8 +1188,63 @@ class GameManager:
         applied_any = False
 
         if "tiles" in snapshot and incoming_time + epsilon >= self._last_client_tile_snapshot_time:
+            # Log map/scaling info and a brief sample of the incoming tile layout
+            try:
+                raw_tiles_snapshot = snapshot.get("tiles") or {}
+                layout_entries = (raw_tiles_snapshot.get("layout") if isinstance(raw_tiles_snapshot, dict) else None) or []
+                count = len(layout_entries)
+                sample = None
+                if count:
+                    try:
+                        ent = layout_entries[0]
+                        sample = (int(ent.get("x", -1)), int(ent.get("y", -1)), int(ent.get("pixel_x", -9999)), int(ent.get("pixel_y", -9999)))
+                    except Exception:
+                        sample = None
+                print(f"[NET_DEBUG] Applying tile snapshot: map_scale_x={self.map_scale_x}, map_scale_y={self.map_scale_y}, map_offset={self.map_offset}, layout_count={count}, first={sample}", flush=True)
+            except Exception:
+                try:
+                    print(f"[NET_DEBUG] Applying tile snapshot: map_scale_x={self.map_scale_x}, map_scale_y={self.map_scale_y}, map_offset={self.map_offset}, layout_count=?", flush=True)
+                except Exception:
+                    pass
+
+            raw_tiles_snapshot = snapshot.get("tiles") if isinstance(snapshot.get("tiles"), dict) else {}
+            layout_entries = raw_tiles_snapshot.get("layout") or []
+            if layout_entries:
+                first_entry = layout_entries[0]
+                key = (int(first_entry.get("x", -1)), int(first_entry.get("y", -1)))
+                local_tile = self.tile_manager.tiles.get(key)
+                if local_tile is not None:
+                    host_px = int(first_entry.get("pixel_x", local_tile.pixel_x))
+                    host_py = int(first_entry.get("pixel_y", local_tile.pixel_y))
+                    self._network_world_delta = (
+                        host_px - int(local_tile.pixel_x),
+                        host_py - int(local_tile.pixel_y),
+                    )
+
             self.tile_manager.apply_snapshot(snapshot.get("tiles"))
-            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+            # Rebuild walkable mask immediately after applying host layout so collision matches visuals
+            self._rebuild_walkable_mask()
+            
+            # Validate walkable mask alignment with tile positions
+            print(f"[NET_DEBUG_VALIDATE] Mask active, tiles count={len(self.tile_manager.tiles) if self.tile_manager.tiles else 0}", flush=True)
+            if self.tile_manager.tiles:
+                min_x = None
+                max_x = None
+                min_y = None
+                max_y = None
+                for tile in self.tile_manager.tiles.values():
+                    px = int(tile.pixel_x)
+                    py = int(tile.pixel_y)
+                    if min_x is None or px < min_x:
+                        min_x = px
+                    if max_x is None or px > max_x:
+                        max_x = px
+                    if min_y is None or py < min_y:
+                        min_y = py
+                    if max_y is None or py > max_y:
+                        max_y = py
+                print(f"[NET_DEBUG_VALIDATE] Tile pixel range X=[{min_x}, {max_x}] Y=[{min_y}, {max_y}]", flush=True)
+            
             self._last_client_tile_snapshot_time = incoming_time
             applied_any = True
         if "hazards" in snapshot and incoming_time + epsilon >= self._last_client_hazard_snapshot_time:
@@ -1184,46 +1292,56 @@ class GameManager:
         # Draw water
         self.water.draw(self.screen)
 
+        world_surface = self.screen
+        world_offset = (0, 0)
+        if self.is_network_game and not self.is_network_host:
+            world_surface = pygame.Surface(WINDOW_SIZE, pygame.SRCALPHA)
+            dx, dy = self._network_world_delta
+            world_offset = (-dx, -dy)
+
         # Determine which players draw behind map
         players_behind = [p for p in self.players if p.draws_behind_map()]
         players_front = [p for p in self.players if not p.draws_behind_map()]
 
         # Draw players behind map
         for player in players_behind:
-            player.draw(self.screen)
+            player.draw(world_surface)
 
         # Draw TMX map with tile disappearance
-        self._draw_tmx_map_with_tiles()
+        self._draw_tmx_map_with_tiles(world_surface)
 
         # Draw warning/crumble overlays and debris particles
-        self.tile_manager.draw_warning_overlays(self.screen)
+        self.tile_manager.draw_warning_overlays(world_surface)
 
         # Draw walkable debug overlay
-        self._draw_walkable_debug()
+        self._draw_walkable_debug(world_surface)
 
         # Draw orbs floating above the arena
-        self.orb_manager.draw(self.screen)
+        self.orb_manager.draw(world_surface)
 
         # Draw pacman-style enemies before the player front layer
         if self.pacman_enemy_manager:
-            self.pacman_enemy_manager.draw(self.screen)
+            self.pacman_enemy_manager.draw(world_surface)
 
         # Draw players in front of map
         for player in players_front:
-            player.draw(self.screen)
+            player.draw(world_surface)
 
         # Draw hazards
-        self.hazard_manager.draw(self.screen)
+        self.hazard_manager.draw(world_surface)
 
         # Draw projectiles
-        self.projectile_manager.draw(self.screen)
+        self.projectile_manager.draw(world_surface)
 
         # Draw active power visuals
         for player in self.players:
             if player in self.eliminated_players:
                 continue
             if player.power:
-                player.power.draw(self.screen, player)
+                player.power.draw(world_surface, player)
+
+        if world_surface is not self.screen:
+            self.screen.blit(world_surface, world_offset)
 
         # Draw HUD
         self.hud.draw(
@@ -1395,7 +1513,7 @@ class GameManager:
             return False
 
         best_tile.reset()
-        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+        self._rebuild_walkable_mask()
         return bool(self.walkable_mask)
 
     def _apply_spawn_position(self, player, position: tuple[int, int]):
@@ -1439,7 +1557,7 @@ class GameManager:
 
     def _rescue_player_to_safe_tile(self, player) -> bool:
         if not self.walkable_mask and self.original_walkable_mask:
-            self.walkable_mask = self.tile_manager.get_updated_walkable_mask(self.original_walkable_mask)
+            self._rebuild_walkable_mask()
         if not self.walkable_mask:
             return False
 
@@ -1498,12 +1616,26 @@ class GameManager:
             player._set_state("idle", player.facing)
 
         if self.is_network_game and self.is_network_host and self.network and self.network.connected:
-            self.network.send_message("snapshot", state=self._build_network_snapshot())
-            self.network.send_message(
-                "world_dynamic_snapshot",
-                state=self._build_network_dynamic_world_snapshot(),
-            )
-            self.network.send_message("world_snapshot", state=self._build_network_world_snapshot())
+            try:
+                snap = self._build_network_snapshot()
+                dyn = self._build_network_dynamic_world_snapshot()
+                world = self._build_network_world_snapshot()
+                tiles_blob = world.get("tiles") or {}
+                layout_list = (tiles_blob.get("layout") if isinstance(tiles_blob, dict) else None) or []
+                sample = []
+                for ent in layout_list[:5]:
+                    try:
+                        sample.append((int(ent.get("x", -1)), int(ent.get("y", -1)), int(ent.get("pixel_x", -9999)), int(ent.get("pixel_y", -9999))))
+                    except Exception:
+                        pass
+                print(f"[NET_DEBUG_HOST] Rescue send world_snapshot sample={sample}", flush=True)
+            except Exception:
+                snap = self._build_network_snapshot()
+                dyn = self._build_network_dynamic_world_snapshot()
+                world = self._build_network_world_snapshot()
+            self.network.send_message("snapshot", state=snap)
+            self.network.send_message("world_dynamic_snapshot", state=dyn)
+            self.network.send_message("world_snapshot", state=world)
         return True
 
     def _check_water_contact(self, player):
@@ -2311,12 +2443,26 @@ class GameManager:
                 print(f"[NETWORK] Advancing to round_seq={self._network_round_seq} reset_match={reset_match}", flush=True)
             except Exception:
                 pass
-            self.network.send_message("snapshot", state=self._build_network_snapshot())
-            self.network.send_message(
-                "world_dynamic_snapshot",
-                state=self._build_network_dynamic_world_snapshot(),
-            )
-            self.network.send_message("world_snapshot", state=self._build_network_world_snapshot())
+            try:
+                snap = self._build_network_snapshot()
+                dyn = self._build_network_dynamic_world_snapshot()
+                world = self._build_network_world_snapshot()
+                tiles_blob = world.get("tiles") or {}
+                layout_list = (tiles_blob.get("layout") if isinstance(tiles_blob, dict) else None) or []
+                sample = []
+                for ent in layout_list[:5]:
+                    try:
+                        sample.append((int(ent.get("x", -1)), int(ent.get("y", -1)), int(ent.get("pixel_x", -9999)), int(ent.get("pixel_y", -9999))))
+                    except Exception:
+                        pass
+                print(f"[NET_DEBUG_HOST] Restart round send world_snapshot sample={sample}", flush=True)
+            except Exception:
+                snap = self._build_network_snapshot()
+                dyn = self._build_network_dynamic_world_snapshot()
+                world = self._build_network_world_snapshot()
+            self.network.send_message("snapshot", state=snap)
+            self.network.send_message("world_dynamic_snapshot", state=dyn)
+            self.network.send_message("world_snapshot", state=world)
 
     def _start_network_reconnect_worker(self) -> None:
         if self._network_reconnect_thread and self._network_reconnect_thread.is_alive():
@@ -2404,8 +2550,10 @@ class GameManager:
             if hasattr(player, "_set_state"):
                 player._set_state("idle", player.facing)
 
-    def _draw_tmx_map_with_tiles(self):
+    def _draw_tmx_map_with_tiles(self, target_surface=None):
         """Draw TMX map layers, letting missing tiles reveal the background."""
+        if target_surface is None:
+            target_surface = self.screen
         if not self.tmx_data or not self.map_surface:
             return
 
@@ -2413,23 +2561,40 @@ class GameManager:
         # We need to ensure that the platform tiles (Top) are drawn by tile_manager
         # and that the background (starry void) is visible where platform tiles are missing.
         
-        # 1. Draw static background/bottom layers
-        self.screen.blit(self.map_surface, (0, 0))
+        # 1. Draw static background/bottom layers centered as loaded
+        target_surface.blit(self.map_surface, (0, 0))
 
         # 2. Draw active platform tiles (destructible)
-        self.tile_manager.draw_active_tiles(self.screen)
+        self.tile_manager.draw_active_tiles(target_surface)
 
-    def _draw_walkable_debug(self):
+    def _draw_walkable_debug(self, target_surface=None):
+        if target_surface is None:
+            target_surface = self.screen
         if not (DEBUG_VISUALS_ENABLED and DEBUG_DRAW_WALKABLE) or self.walkable_mask is None:
             return
 
-        if self.walkable_debug_surface is None:
+        # Always regenerate the debug surface so it reflects the most recent mask
+        try:
             color = (*DEBUG_WALKABLE_COLOR, 90)
             self.walkable_debug_surface = self.walkable_mask.to_surface(
                 setcolor=color, unsetcolor=(0, 0, 0, 0)
             )
+            target_surface.blit(self.walkable_debug_surface, (0, 0))
+        except Exception:
+            # Fall back to no overlay if mask conversion fails
+            pass
 
-        self.screen.blit(self.walkable_debug_surface, (0, 0))
+        # Additionally draw tile diamond outlines from the tile manager to compare
+        try:
+            if getattr(self, 'tile_manager', None):
+                for tile in self.tile_manager.tiles.values():
+                    pts = tile.get_diamond_points()
+                    pygame.draw.polygon(target_surface, (255, 64, 64, 180), pts, 1)
+                    # draw small center marker
+                    cx, cy = tile._iso_center()
+                    pygame.draw.circle(self.screen, (255, 200, 60), (int(cx), int(cy)), 2)
+        except Exception:
+            pass
 
     def _configure_powers_for_players(self):
         for idx, player in enumerate(self.players):

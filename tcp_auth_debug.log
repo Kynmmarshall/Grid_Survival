@@ -1,0 +1,8 @@
+[TCP] connecting to 38.242.246.126:5554
+[TCP] sending: {"type":"hello"}
+[TCP] recv raw: b'{"type":"hello_ack"}\n'
+[TCP] received: {'type': 'hello_ack'}
+[TCP] sending auth: {'player': 'kynmmarshall', 'token': '<redacted>'}
+[TCP] recv raw auth response: b'{"type":"internet_auth_error","error":"invalid or expired token"}\n'
+[TCP] received auth response: {'type': 'internet_auth_error', 'error': 'invalid or expired token'}
+[TCP] auth error detail: invalid or expired token

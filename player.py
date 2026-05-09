@@ -517,7 +517,8 @@ class Player:
         feet_rect = self._feet_rect(position)
         feet_mask = self._feet_mask_for_rect(feet_rect)
         overlap = walkable_mask.overlap_area(feet_mask, feet_rect.topleft)
-        return overlap == self._feet_mask_count
+        required_overlap = max(1, int(self._feet_mask_count * 0.75))
+        return overlap >= required_overlap
 
     def _feet_rect(self, position: pygame.Vector2) -> pygame.Rect:
         width = max(4, int(self.rect.width * 0.03))
@@ -701,6 +702,7 @@ class Player:
             "active_orb_duration": float(orb_duration),
             "eliminated": bool(self._eliminated),
             "extra_lives": int(self._extra_lives),
+            "death_fade_alpha": int(self._death_fade_alpha),
         }
 
     def apply_snapshot_state(self, snapshot: dict[str, Any]):
@@ -732,6 +734,7 @@ class Player:
         self._eliminated = bool(snapshot.get("eliminated", self._eliminated))
         self._active_orb_label = snapshot.get("active_orb_label")
         self._extra_lives = int(snapshot.get("extra_lives", self._extra_lives))
+        self._death_fade_alpha = int(snapshot.get("death_fade_alpha", self._death_fade_alpha))
         self._active_orb_timer = float(snapshot.get("active_orb_timer", self._active_orb_timer))
         self._active_orb_indefinite = bool(
             snapshot.get("active_orb_indefinite", self._active_orb_indefinite)

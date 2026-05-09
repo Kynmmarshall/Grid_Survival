@@ -19,10 +19,13 @@ from .match_flow import (
 
 
 DEFAULT_PORT = 5555
+DEFAULT_TCP_PORT = 5554  # TCP handshake on port one before UDP
 GAME_UDP_PORT_OFFSET = 0
 
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_UDP_DATAGRAM_BYTES = 1200
+MAX_UDP_RECV_BYTES = 65536
+SOCKET_RECEIVE_BUFFER_BYTES = 1024 * 1024
 FRAGMENT_RAW_CHUNK_BYTES = 480
 MAX_FRAGMENT_MESSAGES = 256
 FRAGMENT_TTL_SECONDS = 2.5
@@ -218,6 +221,13 @@ class NetworkManager:
             except (socket.error, OSError) as exc:
                 self.last_error = str(exc)
         return sent_any
+
+    @staticmethod
+    def _configure_udp_receive_buffer(sock: socket.socket) -> None:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_RECEIVE_BUFFER_BYTES)
+        except (socket.error, OSError):
+            pass
 
     def _send_control(self, kind: str, *, address: tuple[str, int] | None = None, **payload: Any) -> bool:
         packet = {"k": kind, **payload}
@@ -559,7 +569,8 @@ class NetworkManager:
             return address in self.peer_addresses
         if self.peer_address is None:
             return False
-        return address[0] == self.peer_address[0] and address[1] == self.peer_address[1]
+        matches = address[0] == self.peer_address[0] and address[1] == self.peer_address[1]
+        return matches
 
     def _handle_hello(self, address: tuple[str, int]) -> None:
         if not self.is_host:
@@ -588,11 +599,22 @@ class NetworkManager:
     def _receive_loop(self) -> None:
         while self.running and self.socket:
             try:
-                payload, address = self.socket.recvfrom(MAX_UDP_DATAGRAM_BYTES * 2)
+                payload, address = self.socket.recvfrom(MAX_UDP_RECV_BYTES)
             except socket.timeout:
                 continue
-            except (socket.error, OSError):
-                break
+            except (socket.error, OSError) as e:
+                import errno
+                win_err = getattr(e, "winerror", None)
+                err_no = getattr(e, "errno", None)
+                # If we're shutting down or the socket was closed (WinError 10038
+                # or EBADF), treat this as a normal shutdown and stop looping.
+                if not self.running or win_err == 10038 or err_no == errno.EBADF:
+                    break
+                if win_err == 10040 or err_no == getattr(errno, "EMSGSIZE", None):
+                    self.last_error = f"Dropped oversized UDP datagram: {e}"
+                    continue
+                self.last_error = str(e)
+                continue
             if not payload or len(payload) > MAX_MESSAGE_BYTES:
                 continue
             try:
@@ -680,6 +702,7 @@ class UdpHostTransport(NetworkManager):
         try:
             host_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             host_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._configure_udp_receive_buffer(host_socket)
             host_socket.bind(("0.0.0.0", self.port))
             host_socket.settimeout(0.05)
             self.socket = host_socket
@@ -722,11 +745,228 @@ class UdpClientTransport(NetworkManager):
 
     def __init__(self):
         super().__init__(is_host=False)
+        self.tcp_auth_token = None  # Store token from successful TCP auth
+
+    def _tcp_handshake(self, host: str, port: int, token: str, player_name: str, timeout: float = 5.0) -> bool:
+        """Perform authentication handshake via TCP before UDP connection.
+        
+        Returns True if successful, False otherwise.
+        On success, sets self.tcp_auth_token and session_id.
+        """
+        tcp_port = port - 1  # TCP is on port one before UDP
+        tcp_sock = None
+        try:
+            tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp_sock.settimeout(timeout)
+            
+            # Connect to TCP server
+            try:
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] connecting to {host}:{tcp_port}\n")
+                except Exception:
+                    pass
+                print(f"[TCP] connecting to {host}:{tcp_port}")
+                tcp_sock.connect((host, tcp_port))
+                print("[TCP] connected")
+            except (socket.error, OSError) as e:
+                self.last_error = f"TCP connection failed: {e}"
+                print(f"[TCP] connect failed: {e}")
+                return False
+            
+            # Send hello via TCP
+            hello_msg = json.dumps({"type": "hello"}, separators=(",", ":"), ensure_ascii=True)
+            try:
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] sending: {hello_msg}\n")
+                except Exception:
+                    pass
+                print(f"[TCP] sending: {hello_msg}")
+                tcp_sock.send(hello_msg.encode("utf-8") + b"\n")
+            except (socket.error, OSError) as e:
+                self.last_error = f"TCP send hello failed: {e}"
+                print(f"[TCP] send hello failed: {e}")
+                tcp_sock.close()
+                return False
+            
+            # Receive hello_ack via TCP
+            try:
+                data = tcp_sock.recv(4096)
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] recv raw: {data!r}\n")
+                except Exception:
+                    pass
+                print(f"[TCP] recv raw: {data!r}")
+                if not data:
+                    self.last_error = "TCP connection closed unexpectedly"
+                    print("[TCP] connection closed unexpectedly while waiting for hello_ack")
+                    tcp_sock.close()
+                    return False
+                try:
+                    hello_ack_msg = json.loads(data.decode("utf-8").strip())
+                except Exception as e:
+                    self.last_error = f"TCP JSON parse failed for hello_ack: {e}"
+                    try:
+                        with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                            _f.write(f"[TCP] JSON parse failed for hello_ack: {e}\n")
+                    except Exception:
+                        pass
+                    print(f"[TCP] JSON parse failed for hello_ack: {e}")
+                    tcp_sock.close()
+                    return False
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] received: {hello_ack_msg}\n")
+                except Exception:
+                    pass
+                print(f"[TCP] received: {hello_ack_msg}")
+                if hello_ack_msg.get("type") != "hello_ack":
+                    self.last_error = f"Unexpected TCP response: {hello_ack_msg.get('type')}"
+                    print(f"[TCP] unexpected response type: {hello_ack_msg.get('type')}")
+                    tcp_sock.close()
+                    return False
+            except (socket.error, OSError) as e:
+                self.last_error = f"TCP receive hello_ack failed: {e}"
+                print(f"[TCP] recv hello_ack failed: {e}")
+                tcp_sock.close()
+                return False
+            
+            # Send internet_auth via TCP
+            auth_msg = json.dumps({
+                "type": "internet_auth",
+                "token": str(token),
+                "player": str(player_name)
+            }, separators=(",", ":"), ensure_ascii=True)
+            try:
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] sending auth: {{'player': '{player_name}', 'token': '<redacted>'}}\n")
+                except Exception:
+                    pass
+                try:
+                    print(f"[TCP] sending auth: {{'player': '{player_name}', 'token': '<redacted>'}}")
+                    tcp_sock.send(auth_msg.encode("utf-8") + b"\n")
+                except (socket.error, OSError) as e:
+                    self.last_error = f"TCP send auth failed: {e}"
+                    print(f"[TCP] send auth failed: {e}")
+                    tcp_sock.close()
+                    return False
+            except Exception:
+                # safety net for unexpected errors while logging
+                pass
+            
+            # Receive internet_auth_ok via TCP
+            try:
+                data = tcp_sock.recv(4096)
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] recv raw auth response: {data!r}\n")
+                except Exception:
+                    pass
+                print(f"[TCP] recv raw auth response: {data!r}")
+                if not data:
+                    self.last_error = "TCP connection closed before auth confirmation"
+                    print("[TCP] connection closed before auth confirmation")
+                    tcp_sock.close()
+                    return False
+                try:
+                    auth_ok_msg = json.loads(data.decode("utf-8").strip())
+                except Exception as e:
+                    try:
+                        with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                            _f.write(f"[TCP] JSON parse failed for auth response: {e}\n")
+                    except Exception:
+                        pass
+                    self.last_error = f"TCP JSON parse failed for auth response: {e}"
+                    print(f"[TCP] JSON parse failed for auth response: {e}")
+                    tcp_sock.close()
+                    return False
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] received auth response: {auth_ok_msg}\n")
+                except Exception:
+                    pass
+                print(f"[TCP] received auth response: {auth_ok_msg}")
+                if auth_ok_msg.get("type") != "internet_auth_ok":
+                    if auth_ok_msg.get("type") == "internet_auth_error":
+                        self.last_error = f"Auth error: {auth_ok_msg.get('error', 'unknown')}"
+                        try:
+                            with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                                _f.write(f"[TCP] auth error detail: {auth_ok_msg.get('error')}\n")
+                        except Exception:
+                            pass
+                        print(f"[TCP] auth error detail: {auth_ok_msg.get('error')}")
+                    else:
+                        self.last_error = f"Unexpected TCP response: {auth_ok_msg.get('type')}"
+                        print(f"[TCP] unexpected auth response type: {auth_ok_msg.get('type')}")
+                    tcp_sock.close()
+                    return False
+                # Store session info
+                self.tcp_auth_token = str(token)
+                self.session_id = str(auth_ok_msg.get("session_id", ""))
+                try:
+                    with open("tcp_auth_debug.log", "a", encoding="utf-8") as _f:
+                        _f.write(f"[TCP] auth succeeded, session_id={self.session_id}\n")
+                except Exception:
+                    pass
+                print(f"[TCP] auth succeeded, session_id={self.session_id}")
+            except (socket.error, OSError) as e:
+                self.last_error = f"TCP receive auth_ok failed: {e}"
+                print(f"[TCP] recv auth response failed: {e}")
+                tcp_sock.close()
+                return False
+            
+            tcp_sock.close()
+            return True
+            
+        except Exception as e:
+            self.last_error = f"TCP handshake exception: {e}"
+            if tcp_sock:
+                try:
+                    tcp_sock.close()
+                except Exception:
+                    pass
+            return False
+
+    def _setup_udp_socket(self, host: str, port: int = DEFAULT_PORT) -> bool:
+        """Setup UDP socket and threads WITHOUT waiting for hello_ack.
+        
+        Used when TCP auth happens instead of UDP hello handshake.
+        Returns True if socket is ready, False on error.
+        """
+        try:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._configure_udp_receive_buffer(client_socket)
+            client_socket.bind(("0.0.0.0", 0))
+            client_socket.settimeout(0.05)
+            self.socket = client_socket
+            self.udp_socket = client_socket
+            self.peer_address = (host, int(port))
+            self.udp_peer_address = self.peer_address
+            self.last_error = None
+            self._disconnect_notified = False
+            self._last_recv_time = time.time()
+            self._start_threads()
+            return True
+        except (socket.error, OSError) as exc:
+            self.last_error = str(exc)
+            if self.socket:
+                try:
+                    self.socket.close()
+                except OSError:
+                    pass
+                self.socket = None
+                self.udp_socket = None
+            return False
 
     def connect_to_host(self, host: str, port: int = DEFAULT_PORT) -> bool:
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._configure_udp_receive_buffer(client_socket)
             client_socket.bind(("0.0.0.0", 0))
             client_socket.settimeout(0.05)
             self.socket = client_socket
@@ -747,11 +987,6 @@ class UdpClientTransport(NetworkManager):
                 if now >= next_hello:
                     self._send_control(PKT_HELLO, ts=now)
                     hello_sent += 1
-                    if hello_sent <= 3 or hello_sent % 10 == 0:
-                        try:
-                            print(f"[DEBUG] hello sent #{hello_sent} to {self.peer_address}")
-                        except Exception:
-                            pass
                     next_hello = now + HELLO_RETRY_INTERVAL
                 time.sleep(0.02)
             if self.connected:

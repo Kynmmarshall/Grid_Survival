@@ -1,0 +1,186 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{hyperref}
+\usepackage{array}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Grid Survival Project Proposal}
+\lhead{ICT University, Level 2}
+\cfoot{\thepage}
+% Add website to footer
+\rfoot{\href{https://gridsurvival.duckdns.org}{gridsurvival.duckdns.org}}
+
+\title{\textbf{GRID SURVIVAL} \\ \Large Multiplayer Game Development Project \\ \vspace{0.3cm} \normalsize Project Proposal}
+\author{Level 2 Students \\ ICT University \\ ICT Faculty}
+\date{May 2026}
+
+\begin{document}
+
+% Title page with logo and website
+\begin{titlepage}
+    \centering
+    \includegraphics[width=0.3\textwidth]{logo.png}\\[1cm]
+    {\huge \textbf{GRID SURVIVAL}}\\[0.5cm]
+    {\Large Multiplayer Game Development Project}\\[0.5cm]
+    {\large Project Proposal}\\[2cm]
+    Level 2 Students\\[0.2cm]
+    The ICT University, ICT Faculty\\[0.2cm]
+    May 2026\\[1cm]
+    \href{https://gridsurvival.duckdns.org}{\Large \textbf{gridsurvival.duckdns.org}}
+\end{titlepage}
+
+\section{Project Overview}
+
+\subsection{Origin and Inspiration}
+
+The concept of Grid Survival emerged during our Game Development course at ICT University, where students were tasked with creating a fully functional, playable game with multiplayer support. Our team drew inspiration from the competitive minigame format popularized by Mario Party and similar party games, which combine simple controls, quick match duration (2–5 minutes), and intense competition.
+
+We identified a gap in accessible, LAN-based competitive games suitable for classroom and campus settings, and designed Grid Survival to fill that niche: a game that is quick to learn, fun to play, and technically sophisticated enough to serve as a portfolio piece demonstrating modern game development practices.
+
+\subsection{Game Concept}
+
+\textbf{Title:} Grid Survival \\
+\textbf{Genre:} Multiplayer Party Game \\
+\textbf{Platform:} PC (Windows 10/11) \\
+\textbf{Player Count:} 3–4 players per match \\
+\textbf{Match Duration:} 5–15 minutes \\
+\textbf{Core Mechanics:}
+\begin{itemize}
+    \item Navigate a disappearing tile grid while avoiding environmental hazards
+    \item Collect power-up orbs that grant temporary abilities
+    \item Outlast opponents through skill, timing, and strategy
+    \item Compete in Campaign, LAN, and Online modes
+\end{itemize}
+
+\section{Project Requirements}
+
+\subsection{Server Infrastructure (for Online Mode)}
+
+To support worldwide online play, the following server specification is required:
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{|X|X|}
+\hline
+\textbf{Specification} & \textbf{Requirement} \\
+\hline
+Compute & 2–4 vCPU (2.0+ GHz) \\
+\hline
+RAM & 8–16 GB \\
+\hline
+Bandwidth & 50–200 Mbps \\
+\hline
+Storage & SSD 50 GB (logs, assignment cache) \\
+\hline
+Concurrent Matches & 25–125 (3–4 players each) \\
+\hline
+Operating System & Linux (Ubuntu 20.04+) \\
+\hline
+Network Protocol & UDP (port 5555) \\
+\hline
+\end{tabularx}
+\caption{Server Specifications for Small-Scale Online Play (100–500 concurrent players)}
+\end{table}
+
+\subsection{On-Campus Installation}
+
+For local deployment in the school game hall:
+
+\begin{itemize}
+    \item \textbf{Computer Specification:} Desktop/Laptop with minimum 4 CPUs, 8 GB RAM, SSD 250 GB
+    \item \textbf{Display Setup:} Two monitors for multiplayer viewing
+    \item \textbf{Input Devices:} Two keyboards (shared setup)
+    \item \textbf{Input Devices:} Two mouses (shared setup)
+    \item \textbf{Network:} Stable LAN connection (1 Gbps recommended)
+    \item \textbf{Location:} School game hall or computer lab
+\end{itemize}
+
+\section{Team Composition and Roles}
+
+\subsection{Development Team}
+
+Below is a detailed breakdown of each team member's role and specific contributions to Grid Survival, including their contact details.
+
+\subsubsection*{Kamdeu Yamdjeuson – Lead Engine \& Network Developer}
+Kamdeu designed the core game loop and implemented the entire UDP-based networking layer. He built the authoritative server architecture, client-side prediction, and snapshot interpolation that allows smooth multiplayer even on imperfect connections. He also integrated the matchmaking lobby system and handles server deployment scripts. \\
+\textit{Contact:} Matricule [ICTU20241386] | Phone [676093910]
+
+\subsubsection*{Ayukeyong Dohbila – UI Designer \& Front-End Developer}
+Ayukeyong created all user interfaces from scratch: title screen, main menu, character selection, player cards, in-game HUD, and post-match results. He ensured the UI is responsive and visually consistent, and he implemented custom animations for buttons, transitions, and feedback effects. \\
+\textit{Contact:} Matricule [ICTU20234131] | Phone [653591460]
+
+\subsubsection*{Lum Azinui Emerald – Sound Designer \& Asset Builder}
+Lum composed the original background music and recorded all sound effects (footsteps, power-up pickups, tile falls, victory/loss jingles). She also sourced and optimised free-to-use assets for environmental tiles, hazards, and UI icons, and integrated the audio mixer with volume control and dynamic attenuation. \\
+\textit{Contact:} Matricule [ICTU20241334] | Phone [681065536]
+
+\subsubsection*{Fru Chi – Gameplay UI Developer}
+Fru focused on the in-game user interface elements: player health bars, power-up cooldown timers, scoreboards, and event notifications. She wrote the logic for displaying tile disappearance warnings and hazard indicators, and worked closely with Ayukeyong to ensure seamless UI integration with the game engine. \\
+\textit{Contact:} Matricule [ICTU20241812] | Phone [672504126]
+
+\subsubsection*{Nadrie – Character Artist \& Sprite Animator}
+Nadrie designed all eight playable characters (Caveman, Giant Goblin, Ninja, Viking Leader, Chief Goblin, Female Goblin, and two secret characters). He created sprite sheets for idle, running, jumping, and dying animations, as well as particle effects for power-ups and explosions. His art style gives Grid Survival its distinctive, colourful look. \\
+\textit{Contact:} Matricule [ICTU20241537] | Phone [659253395]
+
+\subsubsection*{Tabi Paul – Gameplay Mechanics Developer}
+Tabi implemented the core rules: tile disappearance system, hazard spawning, collision detection, power-up logic, and win/loss conditions. He balanced the game’s difficulty across three modes (Campaign, LAN, Online) and coded the AI opponents for single-player campaign, ensuring they provide a fair but challenging experience. \\
+\textit{Contact:} Matricule [ICTU20241934] | Phone [650716480]
+
+\subsubsection*{Chijioke Emmanuel – Assistant Audio Producer}
+Chijioke assisted Lum with audio production: cleaning recordings, looping background tracks, and implementing positional audio for hazards. He also managed the audio file versioning and ensured all sound assets met the game’s performance targets (low memory footprint, fast loading). \\
+\textit{Contact:} Matricule [ICTU20141760] | Phone [Phone]
+
+\subsubsection*{Abongong Patience – Community \& Outreach Coordinator}
+Price manages the project’s social media presence, Facebook Community(\url{https://www.facebook.com/share/g/1GT6LzbqPa/}), Discord server, and the official website (\url{https://gridsurvival.duckdns.org}). She collects player feedback, organises playtesting sessions, and will handle the public release announcement. She also writes documentation and user guides. \\
+\textit{Contact:} Matricule [ICTU20241375] | Phone [673046663]
+
+\subsubsection*{Kwete Rayan – Game Tester\& Error Finder}
+Rayan systematically tested gameplay mechanics and identified critical bugs to ensure a polished and stable player experience. \\
+\textit{Contact:} Matricule [ICTU20241377] | Phone [688435162]
+
+\newpage
+
+\section{Development Timeline}
+
+\subsection{Current Progress (2 Months)}
+
+\textbf{Development Start Date:} March 2026 \\
+\textbf{Current Date:} May 2026 \\
+\textbf{Duration Completed:} 2 months
+
+\section{Game Features}
+
+\begin{itemize}
+    \item \textbf{Game Modes:} Campaign (AI), LAN Multiplayer, Online Multiplayer
+    \item \textbf{Characters:} Caveman, Giant Goblin, Ninja, Viking Leader, Chief Goblin, Female Goblin (plus two unlockable secret characters)
+    \item \textbf{Power-Ups:} Speed boost, shield, void walk, freeze, life extension
+    \item \textbf{Hazards:} Falling tiles, water hazards, enemy Pac-Man-style AI roaming the grid
+    \item \textbf{Customization:} Remappable controls (keyboard/gamepad), difficulty levels
+    \item \textbf{Visual Polish:} Sprite animations, particle effects, smooth transitions
+\end{itemize}
+
+\section{Conclusion}
+
+Grid Survival represents a successful application of modern game development principles, including networking architecture, real-time physics, multiplayer synchronization, and user experience design. The two-month development cycle demonstrates rapid iteration and team collaboration, while the technical depth (custom UDP networking, authoritative server, client-side smoothing) positions this project as a compelling portfolio piece.
+
+With the requested server infrastructure and on-campus installation, Grid Survival will transition from a campus project to a playable, distributable product capable of supporting a growing player base.
+
+\vspace{1cm}
+\noindent
+
+\subsection{Supervisor}
+
+\textbf{Academic Supervisor:} Engr Daniel Moune \\
+\textbf{Affiliation:} ICT University, Faculty of Computing \\
+\textbf{Role:} Technical guidance and infrastructure advice. \\
+\textit{Contact:} Email [moune.daniel@ictuniversity.edu]
+
+\vspace{1cm}
+\noindent
+\textbf{Project Status:} \textit{Deployed — Beta Playable} \\
+\textbf{Website:} \href{https://gridsurvival.duckdns.org}{gridsurvival.duckdns.org}
+
+\end{document}
