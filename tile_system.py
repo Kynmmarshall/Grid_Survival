@@ -510,7 +510,12 @@ class TMXTileManager:
 
     # ── walkable mask ──────────────────────────────────────────────────────
 
-    def get_updated_walkable_mask(self, original_mask: pygame.mask.Mask) -> pygame.mask.Mask:
+    def get_updated_walkable_mask(
+        self,
+        original_mask: pygame.mask.Mask,
+        *,
+        remove_transient_tiles: bool = True,
+    ) -> pygame.mask.Mask:
         """
         Generate updated walkable mask with disappeared tiles removed.
         Tiles in CRUMBLING state are also removed (not walkable).
@@ -522,18 +527,24 @@ class TMXTileManager:
         erase_count = 0
         erased_tiles = []
 
+        transient_states = (TileState.CRUMBLING, TileState.FALLING)
+
         for tile in self.tiles.values():
-            if tile.state in (TileState.DISAPPEARED, TileState.CRUMBLING, TileState.FALLING):
-                tile_surface = pygame.Surface((tile.tile_width, tile.tile_height), pygame.SRCALPHA)
-                points = [
-                    (p[0] - tile.pixel_x, p[1] - tile.pixel_y)
-                    for p in tile.get_diamond_points()
-                ]
-                pygame.draw.polygon(tile_surface, (255, 255, 255, 255), points)
-                tile_mask = pygame.mask.from_surface(tile_surface)
-                updated_mask.erase(tile_mask, (int(tile.pixel_x), int(tile.pixel_y)))
-                erase_count += 1
-                erased_tiles.append((tile.grid_x, tile.grid_y, tile.state.value, int(tile.pixel_x), int(tile.pixel_y)))
+            if tile.state != TileState.DISAPPEARED and (
+                not remove_transient_tiles or tile.state not in transient_states
+            ):
+                continue
+
+            tile_surface = pygame.Surface((tile.tile_width, tile.tile_height), pygame.SRCALPHA)
+            points = [
+                (p[0] - tile.pixel_x, p[1] - tile.pixel_y)
+                for p in tile.get_diamond_points()
+            ]
+            pygame.draw.polygon(tile_surface, (255, 255, 255, 255), points)
+            tile_mask = pygame.mask.from_surface(tile_surface)
+            updated_mask.erase(tile_mask, (int(tile.pixel_x), int(tile.pixel_y)))
+            erase_count += 1
+            erased_tiles.append((tile.grid_x, tile.grid_y, tile.state.value, int(tile.pixel_x), int(tile.pixel_y)))
         
         if erase_count > 0 and erase_count < 10:
 

@@ -1084,25 +1084,11 @@ class GameManager:
         if base_mask is None:
             self.walkable_mask = None
             return
-        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(base_mask)
-    
-    # In online client mode, log mask and tile bounds to detect misalignment
-    if self.is_network_game and not self.is_network_host and not getattr(self, '_mask_logged', False):
-        self._mask_logged = True
-        try:
-            mask_rects = self.walkable_mask.get_bounding_rects() if self.walkable_mask else []
-            if mask_rects:
-                full_rect = pygame.Rect.unionall(mask_rects)
-                print(f"[MASK_INFO_CLIENT] Rebuilt mask bounding rect: {full_rect}", flush=True)
-            
-            if self.tile_manager.tiles:
-                px_vals = [int(t.pixel_x) for t in self.tile_manager.tiles.values()]
-                py_vals = [int(t.pixel_y) for t in self.tile_manager.tiles.values()]
-                if px_vals and py_vals:
-                    print(f"[MASK_INFO_CLIENT] Tile pixel X range: [{min(px_vals)}, {max(px_vals)}]", flush=True)
-                    print(f"[MASK_INFO_CLIENT] Tile pixel Y range: [{min(py_vals)}, {max(py_vals)}]", flush=True)
-        except Exception as e:
-            print(f"[MASK_INFO_CLIENT] Logging failed: {e}", flush=True)
+        remove_transient_tiles = not (self.is_network_game and not self.is_network_host)
+        self.walkable_mask = self.tile_manager.get_updated_walkable_mask(
+            base_mask,
+            remove_transient_tiles=remove_transient_tiles,
+        )
 
     def _apply_network_snapshot(self, snapshot):
         if not isinstance(snapshot, dict):
