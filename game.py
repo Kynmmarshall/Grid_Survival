@@ -140,7 +140,12 @@ class GameManager:
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
         self._client_remote_extrapolation_cap = 1 / 6
-        self._net_quality_font = pygame.font.Font(None, 20)
+        self._net_quality_font = pygame.font.Font(None, 18)
+        self._ping_average_window = 10.0
+        self._ping_samples: list[int] = []
+        self._ping_sample_times: list[float] = []
+        self._last_ping_display_update = 0.0
+        self._current_display_ping: int | None = None
         self._network_disconnect_started_at: float | None = None
         self._network_last_reconnect_attempt_at = 0.0
         self._network_reconnect_thread: threading.Thread | None = None
@@ -1494,41 +1499,56 @@ class GameManager:
             return
 
         connected = bool(metrics.get("connected", False))
-        quality = str(metrics.get("quality", "UNKNOWN"))
         ping_ms = metrics.get("ping_ms")
-        last_recv_ms = metrics.get("last_recv_ms")
-
-        if connected:
-            ping_label = f"{int(ping_ms)}ms" if isinstance(ping_ms, int) else "--"
-            freshness = f" RX {int(last_recv_ms)}ms" if isinstance(last_recv_ms, int) else ""
-            label = f"NET {quality} {ping_label}{freshness}"
-            if quality == "EXCELLENT":
+        
+        if connected and isinstance(ping_ms, int):
+            now = time.time()
+            self._ping_samples.append(ping_ms)
+            self._ping_sample_times.append(now)
+            
+            cutoff_time = now - self._ping_average_window
+            self._ping_samples = [p for p, t in zip(self._ping_samples, self._ping_sample_times) if t >= cutoff_time]
+            self._ping_sample_times = [t for t in self._ping_sample_times if t >= cutoff_time]
+            
+            if now - self._last_ping_display_update >= self._ping_average_window:
+                if self._ping_samples:
+                    self._current_display_ping = int(sum(self._ping_samples) / len(self._ping_samples))
+                self._last_ping_display_update = now
+        
+        if self._current_display_ping is None:
+            label = "NET: --"
+            bg = (90, 48, 44, 220)
+            border = (236, 154, 154)
+        else:
+            ping_val = self._current_display_ping
+            if ping_val <= 70:
+                label = f"NET: {ping_val}ms EXCELLENT"
                 bg = (34, 78, 52, 220)
                 border = (128, 224, 174)
-            elif quality == "GOOD":
+            elif ping_val <= 130:
+                label = f"NET: {ping_val}ms GOOD"
                 bg = (30, 70, 88, 220)
                 border = (120, 194, 232)
-            elif quality == "FAIR":
+            elif ping_val <= 220:
+                label = f"NET: {ping_val}ms FAIR"
                 bg = (84, 74, 38, 220)
                 border = (224, 198, 124)
             else:
+                label = f"NET: {ping_val}ms POOR"
                 bg = (90, 48, 44, 220)
                 border = (236, 154, 154)
-        else:
-            label = "NET DISCONNECTED"
-            bg = (90, 48, 44, 220)
-            border = (236, 154, 154)
 
         text = self._net_quality_font.render(label, True, (245, 248, 255))
-        badge_w = max(184, text.get_width() + 28)
-        badge_h = max(28, text.get_height() + 10)
-        margin = 14
+        badge_w = max(160, text.get_width() + 20)
+        badge_h = max(26, text.get_height() + 8)
+        margin = 12
         sw, sh = surface.get_size()
+        
         candidates = (
-            pygame.Rect(margin, margin, badge_w, badge_h),
-            pygame.Rect(sw - margin - badge_w, margin, badge_w, badge_h),
-            pygame.Rect(margin, sh - margin - badge_h, badge_w, badge_h),
             pygame.Rect(sw - margin - badge_w, sh - margin - badge_h, badge_w, badge_h),
+            pygame.Rect(margin, sh - margin - badge_h, badge_w, badge_h),
+            pygame.Rect(sw - margin - badge_w, margin, badge_w, badge_h),
+            pygame.Rect(margin, margin, badge_w, badge_h),
         )
 
         def overlap_area(rect: pygame.Rect) -> int:
@@ -1543,9 +1563,9 @@ class GameManager:
 
         chosen = min(candidates, key=overlap_area)
         badge = pygame.Surface(chosen.size, pygame.SRCALPHA)
-        pygame.draw.rect(badge, bg, badge.get_rect(), border_radius=10)
+        pygame.draw.rect(badge, bg, badge.get_rect(), border_radius=8)
         surface.blit(badge, chosen.topleft)
-        pygame.draw.rect(surface, border, chosen, 2, border_radius=10)
+        pygame.draw.rect(surface, border, chosen, 2, border_radius=8)
         surface.blit(text, text.get_rect(center=chosen.center))
 
     def _ensure_players_on_walkable_surface(self):

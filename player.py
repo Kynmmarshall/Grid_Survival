@@ -598,6 +598,35 @@ class Player:
             surface.blit(bot_panel, bot_bg.topleft)
             surface.blit(bot_text, bot_text.get_rect(center=bot_bg.center))
 
+            if self.power and self.state != "death":
+                power_name = getattr(self.power, "NAME", "POWER")
+                cooldown_remaining = getattr(self.power, "cooldown_remaining", 0.0)
+                active = getattr(self.power, "active", False)
+                power_color = getattr(self.power, "COLOR", (180, 180, 180))
+            
+                if active or cooldown_remaining > 0:
+                    power_font = pygame.font.Font(None, 16)
+                    if active:
+                        power_status = "ACTIVE"
+                        status_color = (100, 255, 100)
+                    else:
+                        cooldown_secs = max(0.1, cooldown_remaining)
+                        power_status = f"{cooldown_secs:.1f}s"
+                        status_color = (255, 200, 100)
+                
+                    power_text = power_font.render(f"{power_name.upper()} {power_status}", True, status_color)
+                    power_bg = pygame.Rect(0, 0, power_text.get_width() + 12, power_text.get_height() + 6)
+                    if self.is_ai:
+                        power_bg.midbottom = (draw_rect.centerx, draw_rect.top - 50)
+                    else:
+                        power_bg.midbottom = (draw_rect.centerx, draw_rect.top - 28)
+                
+                    power_panel = pygame.Surface(power_bg.size, pygame.SRCALPHA)
+                    pygame.draw.rect(power_panel, (*power_color[:3], 60), power_panel.get_rect(), border_radius=6)
+                    pygame.draw.rect(power_panel, power_color, power_panel.get_rect(), 1, border_radius=6)
+                    surface.blit(power_panel, power_bg.topleft)
+                    surface.blit(power_text, power_text.get_rect(center=power_bg.center))
+
         death_opacity = death_alpha / 255.0
         if self._has_speed_orb_glow():
             self._draw_speed_orb_glow(surface, draw_rect, death_opacity)

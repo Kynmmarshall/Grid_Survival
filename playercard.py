@@ -171,9 +171,27 @@ class PlayerCardRenderer:
         power = getattr(player, "power", None)
         power_name = getattr(power, "NAME", None) or "NONE"
         power_color = getattr(power, "COLOR", border_color)
-        power_chip_text = f"POWER: {power_name.upper()}"
+        
+        cooldown_remaining = getattr(power, "cooldown_remaining", 0.0) if power else 0.0
+        is_active = getattr(power, "active", False) if power else False
+        
+        if is_active:
+            power_status = "ACTIVE"
+            power_chip_text = f"{power_name.upper()} - {power_status}"
+            status_bg = (50, 150, 50, 100)
+            status_fg = (150, 255, 150)
+        elif cooldown_remaining > 0.05:
+            cooldown_display = f"{cooldown_remaining:.1f}s"
+            power_chip_text = f"{power_name.upper()} - {cooldown_display}"
+            status_bg = (150, 100, 50, 100)
+            status_fg = (255, 200, 100)
+        else:
+            power_chip_text = f"{power_name.upper()} - READY"
+            status_bg = (50, 100, 150, 100)
+            status_fg = (120, 200, 255)
+        
         power_chip_rect = pygame.Rect(text_x, rect.top + 42, rect.width - (text_x - rect.left) - 16, 22)
-        self._draw_badge(surface, power_chip_rect, (*power_color[:3], 55), power_color, power_chip_text, (255, 255, 255))
+        self._draw_badge(surface, power_chip_rect, status_bg, status_fg, power_chip_text, (255, 255, 255))
 
         lives = self._player_lives_count(player)
         lives_label = self._font_small.render("LIVES", True, border_color)
