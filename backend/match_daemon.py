@@ -2023,11 +2023,12 @@ class MatchDaemon:
                                     )
                                     score = self._match_performance_score(match_stats, idx, winner_index, mvp_index, is_draw=False)
                                     if idx == mvp_index:
+                                        # Only the MVP can gain RR; everyone else loses based on their performance.
                                         rr_delta = int(round(score * float(max_gain)))
                                         rr_delta = max(0, min(max_gain, rr_delta))
                                     else:
-                                        rr_delta = -int(round((1.0 - score) * float(max_loss)))
-                                        rr_delta = -max(0, min(max_loss, abs(rr_delta)))
+                                        loss = int(round((1.0 - score) * float(max_loss)))
+                                        rr_delta = -max(1, min(max_loss, loss))
                                 else:
                                     rr_delta = 0
                                 if ranked_mode and self.account_store is not None:
@@ -2043,10 +2044,10 @@ class MatchDaemon:
                                                     "ranked": True,
                                                     "rr_delta": int(rr_delta),
                                                     "rr_after": max(0, int(rr_before + rr_delta)),
-                                                    "damage_dealt": 0,
-                                                    "damage_taken": 0,
-                                                    "eliminations": 0,
-                                                    "deaths": 0,
+                                                    "damage_dealt": int(max(0, match_stats[idx].get("damage_dealt", 0))),
+                                                    "damage_taken": int(max(0, match_stats[idx].get("damage_taken", 0))),
+                                                    "eliminations": int(max(0, match_stats[idx].get("eliminations", 0))),
+                                                    "deaths": int(max(0, match_stats[idx].get("deaths", 0))),
                                                     "rounds_played": int(max(0, match_stats[idx].get("rounds_played", 0))),
                                                     "rounds_won": int(max(0, match_stats[idx].get("rounds_won", 0))),
                                                     "matches_played": 1,

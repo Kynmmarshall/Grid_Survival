@@ -502,7 +502,7 @@ class AccountService:
 
         return leaderboard
 
-    def sync_pending(self, username: str | None = None) -> bool:
+    def sync_pending(self, username: str | None = None, pull_profile: bool = True) -> bool:
         """Attempt to push queued updates to VPS and pull latest profile data."""
         if not self._has_remote():
             return False
@@ -546,7 +546,7 @@ class AccountService:
                         (int(row["id"]),),
                     )
 
-        if username:
+        if username and pull_profile:
             self._pull_remote_profile(username)
 
         return any_success

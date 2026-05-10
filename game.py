@@ -2315,10 +2315,18 @@ class GameManager:
         match_stats: list[dict[str, Any]] = []
         for idx in range(len(self.players)):
             row = self._match_player_stats[idx] if idx < len(self._match_player_stats) else self._new_match_stat_row(idx)
+            selected_character = ""
+            if 0 <= idx < len(self.selected_characters):
+                selected_character = str(self.selected_characters[idx]).strip()
             match_stats.append(
                 {
                     "username": str(row.get("username", self._resolve_player_label(idx))),
-                    "character": str(row.get("character", getattr(self.players[idx], "character_name", "Caveman"))),
+                    "character": str(
+                        row.get(
+                            "character",
+                            selected_character or getattr(self.players[idx], "character_name", "Caveman"),
+                        )
+                    ),
                     "rounds_played": int(max(0, row.get("rounds_played", 0))),
                     "rounds_won": int(max(0, row.get("rounds_won", 0))),
                     "eliminations": int(max(0, row.get("eliminations", 0))),
@@ -2390,10 +2398,18 @@ class GameManager:
             rebuilt_stats: list[dict[str, Any]] = []
             for idx in range(len(self.players)):
                 entry = incoming_stats[idx] if idx < len(incoming_stats) and isinstance(incoming_stats[idx], dict) else {}
+                selected_character = ""
+                if 0 <= idx < len(self.selected_characters):
+                    selected_character = str(self.selected_characters[idx]).strip()
                 rebuilt_stats.append(
                     {
                         "username": str(entry.get("username", self._resolve_player_label(idx))),
-                        "character": str(entry.get("character", getattr(self.players[idx], "character_name", "Caveman"))),
+                        "character": str(
+                            entry.get(
+                                "character",
+                                selected_character or getattr(self.players[idx], "character_name", "Caveman"),
+                            )
+                        ),
                         "rounds_played": int(max(0, entry.get("rounds_played", 0))),
                         "rounds_won": int(max(0, entry.get("rounds_won", 0))),
                         "eliminations": int(max(0, entry.get("eliminations", 0))),
@@ -2528,7 +2544,7 @@ class GameManager:
                         mvp_count=mvp_delta,
                         ranked=ranked_mode,
                         sync_now=False,
-                        queue_sync=False,
+                        queue_sync=True,
                     )
                     if updated is not None:
                         rr_after = int(updated.rr)
@@ -2582,6 +2598,9 @@ class GameManager:
         for idx, row in enumerate(self._match_player_stats):
             player_character = str(row.get("character", "")).strip()
             if not player_character:
+                if 0 <= idx < len(self.selected_characters):
+                    player_character = str(self.selected_characters[idx]).strip()
+            if not player_character:
                 player_character = str(getattr(self.players[idx], "character_name", "Caveman"))
             rows.append(
                 {
@@ -2618,18 +2637,18 @@ class GameManager:
             is_draw=is_draw,
             ranked_mode_override=ranked_mode_override,
         )
+        ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
         if (
             self.is_network_game
             and self._match_complete
+            and ranked_mode
             and self.account_service
             and self.account_username
-            and self.account_service.is_remote_online()
         ):
             try:
-                self.account_service.sync_pending(self.account_username)
+                self.account_service.sync_pending(self.account_username, pull_profile=False)
             except Exception:
                 pass
-        ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
         if ranked_mode:
             rr_start = int(self._match_rr_start)
             rr_screen = RRGainScreen(rr_user, rr_start, rr_after, "RANKED MATCH COMPLETE")

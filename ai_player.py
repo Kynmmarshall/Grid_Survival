@@ -1,7 +1,8 @@
 """Adaptive AI player with difficulty tiers and hazard awareness."""
 
+import math
 import random
-from typing import Dict
+from typing import Any, Dict
 
 import pygame
 
@@ -100,6 +101,33 @@ EDGE_SAMPLE_OFFSETS = (
     pygame.Vector2(-22, -22),
 )
 
+BOT_CANDIDATE_DIRECTIONS = (
+    pygame.Vector2(0, 0),
+    pygame.Vector2(1, 0),
+    pygame.Vector2(-1, 0),
+    pygame.Vector2(0, 1),
+    pygame.Vector2(0, -1),
+    pygame.Vector2(1, 1).normalize(),
+    pygame.Vector2(-1, 1).normalize(),
+    pygame.Vector2(1, -1).normalize(),
+    pygame.Vector2(-1, -1).normalize(),
+)
+
+BOT_ROAM_RETARGET_SECONDS = 1.25
+BOT_LOOKAHEAD_DISTANCE = 40.0
+BOT_EDGE_SAMPLE_OFFSETS = (
+    pygame.Vector2(0, 28),
+    pygame.Vector2(0, -28),
+    pygame.Vector2(28, 0),
+    pygame.Vector2(-28, 0),
+    pygame.Vector2(22, 22),
+    pygame.Vector2(-22, 22),
+    pygame.Vector2(22, -22),
+    pygame.Vector2(-22, -22),
+)
+BOT_THREAT_RADIUS = 220.0
+BOT_SPREAD_RADIUS = 140.0
+
 
 def _clamp_difficulty(value: int) -> int:
     return max(1, min(5, int(value)))
@@ -108,16 +136,28 @@ def _clamp_difficulty(value: int) -> int:
 class AIPlayer(Player):
     """Versatile AI opponent whose awareness scales with difficulty."""
 
-    def __init__(self, position=None, difficulty: int = AI_DEFAULT_DIFFICULTY, character_name: str | None = None):
+    def __init__(
+        self,
+        position=None,
+        difficulty: int = AI_DEFAULT_DIFFICULTY,
+        character_name: str | None = None,
+        use_online_bot_logic: bool = False,
+    ):
         super().__init__(position=position or PLAYER_START_POS, character_name=character_name)
         self.is_ai = True
         self.difficulty = _clamp_difficulty(difficulty)
         self.config = DIFFICULTY_PRESETS[self.difficulty]
         self._rng = random.Random()
+        self.use_online_bot_logic = bool(use_online_bot_logic)
         self._decision_timer = 0.0
         self._current_direction = pygame.Vector2(0, 0)
         self._desired_direction = pygame.Vector2(0, 0)
         self._last_escape_vector = pygame.Vector2(0, 0)
+        self._online_roam_state: dict[str, Any] = {
+            "anchor_index": 0,
+            "time_to_retarget": BOT_ROAM_RETARGET_SECONDS,
+            "target": None,
+        }
 
     def reset(self):
         super().reset()
@@ -125,8 +165,17 @@ class AIPlayer(Player):
         self._current_direction.update(0, 0)
         self._desired_direction.update(0, 0)
         self._last_escape_vector.update(0, 0)
+        self._online_roam_state = {
+            "anchor_index": 0,
+            "time_to_retarget": BOT_ROAM_RETARGET_SECONDS,
+            "target": None,
+        }
 
     def update_ai(self, dt: float, walkable_mask, walkable_bounds, hazard_manager=None, pacman_enemy_manager=None):
+        if self.use_online_bot_logic:
+            self._update_online_bot_logic(dt, walkable_mask, walkable_bounds, hazard_manager, pacman_enemy_manager)
+            return
+
         self._tick_status_effects(dt)
         if self.is_frozen():
             self._current_direction.update(0, 0)
@@ -182,6 +231,274 @@ class AIPlayer(Player):
             walkable_bounds,
             jump_pressed=False,
         )
+
+    def _update_online_bot_logic(self, dt: float, walkable_mask, walkable_bounds, hazard_manager=None, pacman_enemy_manager=None) -> None:
+        self._tick_status_effects(dt)
+        if self.is_frozen():
+            self._current_direction.update(0, 0)
+            self._desired_direction.update(0, 0)
+            self._update_with_move_vector(
+                dt,
+                pygame.Vector2(0, 0),
+                walkable_mask,
+                walkable_bounds,
+                jump_pressed=False,
+            )
+            return
+
+        if self.power and hasattr(self.power, "blocks_player_motion") and self.power.blocks_player_motion():
+            self._current_direction.update(0, 0)
+            self._desired_direction.update(0, 0)
+            self.velocity.update(0, 0)
+            self.rect.center = (round(self.position.x), round(self.position.y))
+            return
+
+        bot_pos = pygame.Vector2(self.position)
+        roam_target = self._select_online_roam_target(bot_pos, walkable_mask, walkable_bounds, dt)
+        threat_vector, threat_pressure = self._online_threat_vector(bot_pos, hazard_manager, pacman_enemy_manager)
+        best_dir = self._choose_online_direction(bot_pos, walkable_mask, walkable_bounds, roam_target, threat_vector, threat_pressure)
+        self._desired_direction = pygame.Vector2(best_dir)
+        blend_rate = min(1.0, dt * 4.0)
+        self._current_direction = self._current_direction.lerp(self._desired_direction, blend_rate)
+        move_dir = self._current_direction.normalize() if self._current_direction.length_squared() > 1e-3 else pygame.Vector2(0, 0)
+        self._update_with_move_vector(
+            dt,
+            move_dir,
+            walkable_mask,
+            walkable_bounds,
+            jump_pressed=False,
+        )
+
+    def _select_online_roam_target(self, bot_pos: pygame.Vector2, walkable_mask, walkable_bounds, dt: float) -> pygame.Vector2:
+        anchors = self._bot_anchor_points(walkable_bounds)
+        if not anchors:
+            return pygame.Vector2(bot_pos)
+
+        self._online_roam_state["time_to_retarget"] = float(self._online_roam_state.get("time_to_retarget", BOT_ROAM_RETARGET_SECONDS)) - float(dt)
+        target = self._online_roam_state.get("target")
+        target_vec = None
+        if isinstance(target, (list, tuple)) and len(target) >= 2:
+            try:
+                target_vec = pygame.Vector2(float(target[0]), float(target[1]))
+            except (TypeError, ValueError):
+                target_vec = None
+
+        needs_new_target = (
+            target_vec is None
+            or self._online_roam_state["time_to_retarget"] <= 0.0
+            or bot_pos.distance_to(target_vec) < 64.0
+            or (walkable_mask is not None and not self._is_over_platform(target_vec, walkable_mask))
+        )
+
+        if needs_new_target:
+            anchor_index = int(self._online_roam_state.get("anchor_index", 0))
+            anchor_index = (anchor_index + 1) % len(anchors)
+            self._online_roam_state["anchor_index"] = anchor_index
+            self._online_roam_state["time_to_retarget"] = BOT_ROAM_RETARGET_SECONDS + (anchor_index % 4) * 0.35
+            desired = anchors[anchor_index]
+            target_vec = self._nearest_walkable_point(bot_pos, desired, walkable_mask)
+            if target_vec is None:
+                target_vec = pygame.Vector2(desired)
+            self._online_roam_state["target"] = [float(target_vec.x), float(target_vec.y)]
+
+        return pygame.Vector2(target_vec)
+
+    def _nearest_walkable_point(self, bot_pos: pygame.Vector2, desired: pygame.Vector2, walkable_mask, max_radius: float = 220.0, step: float = 24.0) -> pygame.Vector2 | None:
+        if walkable_mask is None:
+            return pygame.Vector2(desired)
+        if self._is_over_platform(desired, walkable_mask):
+            return pygame.Vector2(desired)
+
+        radius = step
+        while radius <= max_radius:
+            for angle_deg in range(0, 360, 20):
+                angle = math.radians(angle_deg)
+                candidate = pygame.Vector2(desired.x + math.cos(angle) * radius, desired.y + math.sin(angle) * radius)
+                if self._is_over_platform(candidate, walkable_mask):
+                    return candidate
+            radius += step
+        return None
+
+    def _bot_anchor_points(self, walkable_bounds) -> list[pygame.Vector2]:
+        if walkable_bounds is None or getattr(walkable_bounds, "width", 0) <= 0 or getattr(walkable_bounds, "height", 0) <= 0:
+            return [pygame.Vector2(PLAYER_START_POS)]
+
+        left = float(walkable_bounds.left)
+        right = float(walkable_bounds.right)
+        top = float(walkable_bounds.top)
+        bottom = float(walkable_bounds.bottom)
+        cx, cy = walkable_bounds.center
+        inset_x = max(44.0, walkable_bounds.width * 0.18)
+        inset_y = max(44.0, walkable_bounds.height * 0.18)
+        return [
+            pygame.Vector2(cx, cy),
+            pygame.Vector2(left + inset_x, top + inset_y),
+            pygame.Vector2(right - inset_x, top + inset_y),
+            pygame.Vector2(left + inset_x, bottom - inset_y),
+            pygame.Vector2(right - inset_x, bottom - inset_y),
+            pygame.Vector2(cx, top + inset_y),
+            pygame.Vector2(cx, bottom - inset_y),
+            pygame.Vector2(left + inset_x, cy),
+            pygame.Vector2(right - inset_x, cy),
+        ]
+
+    def _online_threat_vector(self, bot_pos: pygame.Vector2, hazard_manager=None, pacman_enemy_manager=None) -> tuple[pygame.Vector2, float]:
+        escape = pygame.Vector2(0, 0)
+        pressure = 0.0
+
+        def add_repulsion(source_pos: pygame.Vector2 | None, radius: float, strength: float) -> None:
+            nonlocal escape, pressure
+            if source_pos is None:
+                return
+            delta = bot_pos - source_pos
+            distance = delta.length()
+            if distance <= 0.0 or distance > radius:
+                return
+            influence = max(0.0, 1.0 - (distance / radius))
+            escape += delta.normalize() * influence * strength
+            pressure = max(pressure, influence)
+
+        if hazard_manager is not None:
+            for bullet in getattr(hazard_manager, "bullets", []):
+                if not getattr(bullet, "active", False):
+                    continue
+                add_repulsion(pygame.Vector2(getattr(bullet, "position", bot_pos)), BOT_THREAT_RADIUS, 1.6)
+            for trap in getattr(hazard_manager, "traps", []):
+                if not getattr(trap, "active", False):
+                    continue
+                add_repulsion(pygame.Vector2(getattr(trap, "position", bot_pos)), BOT_THREAT_RADIUS, 1.3)
+            for hazard in getattr(hazard_manager, "animated_hazards", []):
+                if not getattr(hazard, "active", True):
+                    continue
+                add_repulsion(pygame.Vector2(getattr(hazard, "position", bot_pos)), BOT_THREAT_RADIUS * 0.9, 1.25)
+            for explosion in getattr(hazard_manager, "explosions", []):
+                add_repulsion(pygame.Vector2(getattr(explosion, "position", bot_pos)), BOT_THREAT_RADIUS * 0.85, 1.4)
+
+        if pacman_enemy_manager is not None:
+            for enemy in getattr(pacman_enemy_manager, "enemies", []):
+                add_repulsion(pygame.Vector2(getattr(enemy, "position", bot_pos)), BOT_THREAT_RADIUS * 1.05, 1.5)
+
+        if escape.length_squared() == 0:
+            return pygame.Vector2(0, 0), pressure
+        return escape, pressure
+
+    def _choose_online_direction(
+        self,
+        bot_pos: pygame.Vector2,
+        walkable_mask,
+        walkable_bounds,
+        roam_target: pygame.Vector2,
+        threat_vector: pygame.Vector2,
+        threat_pressure: float,
+    ) -> pygame.Vector2:
+        current_direction = pygame.Vector2(self._current_direction)
+        best_dir = pygame.Vector2(0, 0)
+        best_score = float("-inf")
+
+        if threat_pressure >= 0.8 and threat_vector.length_squared() > 0:
+            emergency = threat_vector.normalize()
+            if self._bot_direction_score(
+                bot_pos,
+                emergency,
+                walkable_mask,
+                roam_target,
+                threat_vector,
+                threat_pressure,
+                current_direction,
+                walkable_bounds,
+            ) > -0.25:
+                return emergency
+
+        for direction in BOT_CANDIDATE_DIRECTIONS:
+            score = self._bot_direction_score(
+                bot_pos,
+                direction,
+                walkable_mask,
+                roam_target,
+                threat_vector,
+                threat_pressure,
+                current_direction,
+                walkable_bounds,
+            )
+            if score > best_score:
+                best_score = score
+                best_dir = pygame.Vector2(direction)
+
+        if best_dir.length_squared() == 0:
+            best_dir = current_direction if current_direction.length_squared() > 0 else pygame.Vector2(random.choice(BOT_CANDIDATE_DIRECTIONS[1:]))
+        return best_dir
+
+    def _bot_direction_score(
+        self,
+        bot_pos: pygame.Vector2,
+        direction: pygame.Vector2,
+        walkable_mask,
+        roam_target: pygame.Vector2,
+        threat_vector: pygame.Vector2,
+        threat_pressure: float,
+        current_direction: pygame.Vector2,
+        walkable_bounds,
+    ) -> float:
+        if direction.length_squared() == 0:
+            return -0.12 + random.uniform(-0.2, 0.2)
+
+        direction = pygame.Vector2(direction).normalize()
+        probe = bot_pos + direction * BOT_LOOKAHEAD_DISTANCE
+        if walkable_mask is not None and not self._is_over_platform(probe, walkable_mask):
+            return -2.0 - random.uniform(0.0, 0.5)
+
+        distance = self._bot_walkable_distance(direction, walkable_mask)
+        distance_score = distance / 180.0
+
+        roam_score = 0.0
+        if roam_target is not None and roam_target.length_squared() > 0:
+            to_target = roam_target - bot_pos
+            if to_target.length_squared() > 0:
+                roam_score = direction.dot(to_target.normalize()) * 1.15
+
+        threat_score = 0.0
+        if threat_vector.length_squared() > 0:
+            threat_dir = threat_vector.normalize()
+            threat_score = direction.dot(threat_dir) * (1.8 * max(0.15, threat_pressure))
+
+        edge_score = self._bot_edge_safety_score(bot_pos, direction, walkable_mask, walkable_bounds)
+        spread_score = 0.0
+        momentum = max(0.0, direction.dot(current_direction)) * 0.2
+        jitter = random.uniform(-0.14, 0.14)
+        return distance_score + roam_score + threat_score + edge_score + spread_score + momentum + jitter
+
+    def _bot_walkable_distance(self, direction: pygame.Vector2, walkable_mask) -> float:
+        if walkable_mask is None:
+            return 220.0
+
+        step = 12.0
+        max_distance = 220.0
+        sampled = 0.0
+        probe = pygame.Vector2(self.position)
+        while sampled < max_distance:
+            probe += direction * step
+            sampled += step
+            if not self._is_over_platform(probe, walkable_mask):
+                break
+        return sampled
+
+    def _bot_edge_safety_score(self, bot_pos: pygame.Vector2, direction: pygame.Vector2, walkable_mask, walkable_bounds) -> float:
+        if walkable_mask is None:
+            return 0.0
+
+        danger_hits = 0
+        for offset in BOT_EDGE_SAMPLE_OFFSETS:
+            sample_point = bot_pos + offset + direction * 18.0
+            if not self._is_over_platform(sample_point, walkable_mask):
+                danger_hits += 1
+
+        score = 0.45 if danger_hits == 0 else -0.45 * (danger_hits / len(BOT_EDGE_SAMPLE_OFFSETS))
+        if walkable_bounds is not None and getattr(walkable_bounds, "width", 0) > 0 and getattr(walkable_bounds, "height", 0) > 0:
+            center = pygame.Vector2(walkable_bounds.center)
+            to_center = center - bot_pos
+            if to_center.length_squared() > 0:
+                score += max(0.0, direction.dot(to_center.normalize())) * 0.35
+        return score
 
     def _emergency_vector(self, walkable_mask, walkable_bounds, hazard_manager=None, pacman_enemy_manager=None):
         edge_danger = self._edge_danger_level(walkable_mask) if walkable_mask else 0.0
