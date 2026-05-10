@@ -395,6 +395,22 @@ class MatchDaemon:
             return len(players)
         return max(2, len(session.get("players", {})))
 
+    @staticmethod
+    def _assignment_character_name(assignment: dict[str, Any], player_name: str, fallback: str = "Caveman") -> str:
+        players = assignment.get("payload", {}).get("players", [])
+        if isinstance(players, list):
+            needle = str(player_name).strip().lower()
+            for entry in players:
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name", "")).strip().lower()
+                if needle and name != needle:
+                    continue
+                character = str(entry.get("character", fallback)).strip()
+                if character:
+                    return character
+        return str(fallback)
+
     def _session_ready(self, session: dict) -> bool:
         assigned_players = session.get("assignment", {}).get("payload", {}).get("players", [])
         if not isinstance(assigned_players, list) or not assigned_players:
@@ -656,7 +672,14 @@ class MatchDaemon:
                 session_players = session["players"]
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
                 spawn_y = float(PLAYER_START_POS[1])
-                session_players[player] = {"addr": addr, "x": spawn_x, "y": spawn_y, "last_input": {}, "last_seen": time.time()}
+                session_players[player] = {
+                    "addr": addr,
+                    "x": spawn_x,
+                    "y": spawn_y,
+                    "last_input": {},
+                    "last_seen": time.time(),
+                    "character_name": self._assignment_character_name(assignment, player, "Caveman"),
+                }
                 bot_entries = assignment.get("payload", {}).get("players", [])
                 if isinstance(bot_entries, list) and not session.get("bot_names"):
                     for idx, entry in enumerate(bot_entries):
@@ -664,7 +687,7 @@ class MatchDaemon:
                             continue
                         bot_name = str(entry.get("name", f"BOT-{idx + 1}"))
                         session["bot_names"].append(bot_name)
-                        session["bot_profiles"][bot_name] = str(entry.get("profile", "Bot"))
+                        session["bot_profiles"][bot_name] = str(entry.get("profile", entry.get("character", "Bot")))
                         bot_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(session_players) + len(session["bot_names"]))
                         bot_y = float(PLAYER_START_POS[1])
                         session_players[bot_name] = {
@@ -673,7 +696,8 @@ class MatchDaemon:
                             "y": bot_y,
                             "last_input": {},
                             "bot": True,
-                            "profile": str(entry.get("profile", "Bot")),
+                            "profile": str(entry.get("profile", entry.get("character", "Bot"))),
+                            "character_name": str(entry.get("character", entry.get("profile", "Bot"))),
                         }
                     if session.get("bot_names"):
                         enemy_spawns = self._build_enemy_spawns(session)
@@ -862,6 +886,7 @@ class MatchDaemon:
                     "last_input": {},
                     "last_seen": time.time(),
                     "tcp_verified": True,  # Mark as TCP-authenticated
+                    "character_name": self._assignment_character_name(assignment, player, "Caveman"),
                 }
                 
                 # Setup bots if first player
@@ -872,7 +897,7 @@ class MatchDaemon:
                             continue
                         bot_name = str(entry.get("name", f"BOT-{idx + 1}"))
                         session["bot_names"].append(bot_name)
-                        session["bot_profiles"][bot_name] = str(entry.get("profile", "Bot"))
+                        session["bot_profiles"][bot_name] = str(entry.get("profile", entry.get("character", "Bot")))
                         bot_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(session_players) + len(session["bot_names"]))
                         bot_y = float(PLAYER_START_POS[1])
                         session_players[bot_name] = {
@@ -881,7 +906,8 @@ class MatchDaemon:
                             "y": bot_y,
                             "last_input": {},
                             "bot": True,
-                            "profile": str(entry.get("profile", "Bot")),
+                            "profile": str(entry.get("profile", entry.get("character", "Bot"))),
+                            "character_name": str(entry.get("character", entry.get("profile", "Bot"))),
                         }
                     if session.get("bot_names"):
                         enemy_spawns = self._build_enemy_spawns(session)

@@ -2580,10 +2580,13 @@ class GameManager:
     def _build_summary_rows(self) -> list[dict]:
         rows: list[dict] = []
         for idx, row in enumerate(self._match_player_stats):
+            player_character = str(row.get("character", "")).strip()
+            if not player_character:
+                player_character = str(getattr(self.players[idx], "character_name", "Caveman"))
             rows.append(
                 {
                     "username": str(row.get("username", self._resolve_player_label(idx))),
-                    "character": str(row.get("character", getattr(self.players[idx], "character_name", "Caveman"))),
+                    "character": player_character,
                     "rounds_won": int(row.get("rounds_won", 0)),
                     "eliminations": int(row.get("eliminations", 0)),
                     "deaths": int(row.get("deaths", 0)),
@@ -2615,7 +2618,13 @@ class GameManager:
             is_draw=is_draw,
             ranked_mode_override=ranked_mode_override,
         )
-        if self.is_network_game and self._match_complete and self.account_service and self.account_username:
+        if (
+            self.is_network_game
+            and self._match_complete
+            and self.account_service
+            and self.account_username
+            and self.account_service.is_remote_online()
+        ):
             try:
                 self.account_service.sync_pending(self.account_username)
             except Exception:

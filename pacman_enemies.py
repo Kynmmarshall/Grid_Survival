@@ -562,6 +562,13 @@ class PacmanEnemyManager:
         """Advance animation timers on clients between host snapshots."""
         for enemy in self.enemies:
             enemy._anim_time += dt
+            if isinstance(enemy, MonsterEnemy):
+                anim = enemy.animations.get(enemy.current_state)
+                if anim is None and "idle" in enemy.animations:
+                    enemy.current_state = "idle"
+                    anim = enemy.animations.get("idle")
+                if anim is not None:
+                    anim.update(dt)
 
     def snapshot_state(self) -> dict:
         """Serialize enemy state for LAN snapshot sync."""
@@ -574,7 +581,11 @@ class PacmanEnemyManager:
                     "dir_y": float(enemy._direction.y),
                     "activation_timer": float(enemy._activation_timer),
                     "anim_time": float(enemy._anim_time),
-                    "monster_type": getattr(enemy, "monster_type", 1)
+                    "monster_type": getattr(enemy, "monster_type", 1),
+                    "current_state": str(getattr(enemy, "current_state", "idle")),
+                    "facing_left": bool(getattr(enemy, "facing_left", False)),
+                    "is_dying": bool(getattr(enemy, "is_dying", False)),
+                    "health": int(getattr(enemy, "health", getattr(enemy, "max_health", 1))),
                 }
                 for enemy in self.enemies
             ]
@@ -623,6 +634,13 @@ class PacmanEnemyManager:
                 float(state.get("activation_timer", enemy._activation_timer)),
             )
             enemy._anim_time = float(state.get("anim_time", enemy._anim_time))
+            if isinstance(enemy, MonsterEnemy):
+                enemy.current_state = str(state.get("current_state", enemy.current_state)).lower() or enemy.current_state
+                enemy.facing_left = bool(state.get("facing_left", enemy.facing_left))
+                enemy.is_dying = bool(state.get("is_dying", enemy.is_dying))
+                enemy.health = max(0, int(state.get("health", enemy.health)))
+                if enemy.current_state not in enemy.animations and "idle" in enemy.animations:
+                    enemy.current_state = "idle"
 
     def draw(self, surface: pygame.Surface):
         for enemy in sorted(self.enemies, key=lambda enemy: enemy.position.y):
