@@ -1832,8 +1832,13 @@ class MatchDaemon:
         draw_bonus = 0.03 if is_draw else 0.0
         return self._clamp01(base_score + win_bonus + mvp_bonus + draw_bonus)
 
-    def _rr_caps_for_target_score(self, target_score: int | None = None) -> tuple[int, int]:
+    def _rr_caps_for_target_score(
+        self,
+        target_score: int | None = None,
+        player_count: int | None = None,
+    ) -> tuple[int, int]:
         score_to_win = int(target_score if target_score is not None else 3)
+        players_total = int(player_count if player_count is not None else 2)
         min_target = 3
         max_target = 20
         min_win_cap = 12
@@ -1846,8 +1851,14 @@ class MatchDaemon:
 
         t = (score_to_win - min_target) / float(max_target - min_target)
         t = max(0.0, min(1.0, t))
-        win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
-        lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+        base_win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
+        base_lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+
+        # Larger lobbies should have slightly higher RR swings at the same round target.
+        player_t = (players_total - 2) / 2.0
+        player_t = max(0.0, min(1.0, player_t))
+        win_cap = int(round(base_win_cap * (1.0 + 0.35 * player_t)))
+        lose_cap = int(round(base_lose_cap * (1.0 + 0.30 * player_t)))
         return win_cap, lose_cap
 
     def _compute_rr_delta(
@@ -1862,7 +1873,10 @@ class MatchDaemon:
         if is_draw:
             return 0
 
-        max_gain, max_loss = self._rr_caps_for_target_score(target_score)
+        max_gain, max_loss = self._rr_caps_for_target_score(
+            target_score,
+            player_count=len(match_stats),
+        )
         score = self._match_performance_score(match_stats, local_index, winner_index, mvp_index, is_draw=is_draw)
         won_match = winner_index is not None and local_index == winner_index
         if won_match:

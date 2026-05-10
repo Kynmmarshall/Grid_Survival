@@ -250,6 +250,7 @@ class AccountService:
         mvp_count: int = 0,
         ranked: bool = True,
         sync_now: bool = True,
+        queue_sync: bool = True,
     ) -> AccountProfile | None:
         profile = self.get_profile(username)
         if profile is None:
@@ -343,8 +344,9 @@ class AccountService:
             "mvp_count": int(max(0, mvp_count)),
             "updated_at": now,
         }
-        self._queue_sync_event(profile.username, "stat_delta", sync_payload)
-        if sync_now:
+        if queue_sync:
+            self._queue_sync_event(profile.username, "stat_delta", sync_payload)
+        if sync_now and queue_sync:
             self.sync_pending(profile.username)
         return self.get_profile(profile.username)
 

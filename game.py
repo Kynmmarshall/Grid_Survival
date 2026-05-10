@@ -2251,7 +2251,10 @@ class GameManager:
         if is_draw:
             return 0
 
-        max_gain, max_loss = self._rr_caps_for_target_score(self.target_score)
+        max_gain, max_loss = self._rr_caps_for_target_score(
+            self.target_score,
+            player_count=len(self.players),
+        )
         score = self._match_performance_score(local_index, winner_index, mvp_index, is_draw=is_draw)
         won_match = winner_index is not None and local_index == winner_index
         if won_match:
@@ -2261,9 +2264,14 @@ class GameManager:
         loss = int(round((1.0 - score) * float(max_loss)))
         return -max(0, min(max_loss, loss))
 
-    def _rr_caps_for_target_score(self, target_score: int | None = None) -> tuple[int, int]:
+    def _rr_caps_for_target_score(
+        self,
+        target_score: int | None = None,
+        player_count: int | None = None,
+    ) -> tuple[int, int]:
         """Scale RR caps by match length so short matches swing less than long matches."""
         score_to_win = int(self.target_score if target_score is None else target_score)
+        players_total = int(len(self.players) if player_count is None else player_count)
 
         min_target = 3
         max_target = 20
@@ -2277,8 +2285,14 @@ class GameManager:
 
         t = (score_to_win - min_target) / float(max_target - min_target)
         t = max(0.0, min(1.0, t))
-        win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
-        lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+        base_win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
+        base_lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+
+        # Larger lobbies should have slightly higher RR swings at the same round target.
+        player_t = (players_total - 2) / 2.0
+        player_t = max(0.0, min(1.0, player_t))
+        win_cap = int(round(base_win_cap * (1.0 + 0.35 * player_t)))
+        lose_cap = int(round(base_lose_cap * (1.0 + 0.30 * player_t)))
         return win_cap, lose_cap
 
     def _build_network_match_result(
@@ -2452,6 +2466,19 @@ class GameManager:
         if local_index is None:
             return local_label, rr_before, rr_after, rr_delta
 
+        local_row = self._match_player_stats[local_index] if local_index < len(self._match_player_stats) else {}
+        damage_dealt_delta = int(max(0, local_row.get("damage_dealt", 0)))
+        damage_taken_delta = int(max(0, local_row.get("damage_taken", 0)))
+        eliminations_delta = int(max(0, local_row.get("eliminations", 0)))
+        deaths_delta = int(max(0, local_row.get("deaths", 0)))
+        rounds_played_delta = int(max(0, local_row.get("rounds_played", 0)))
+        rounds_won_delta = int(max(0, local_row.get("rounds_won", 0)))
+
+        did_win_match = bool(self._match_complete and not is_draw and winner_index is not None and local_index == winner_index)
+        matches_played_delta = 1 if self._match_complete else 0
+        matches_won_delta = 1 if did_win_match else 0
+        mvp_delta = 1 if self._match_complete and local_index == mvp_index else 0
+
         if self.is_network_game:
             authoritative = self._network_authoritative_rr_results.get(local_label) or self._network_authoritative_rr_results.get(self.account_username or "")
             if isinstance(authoritative, dict) and authoritative:
@@ -2465,6 +2492,32 @@ class GameManager:
                     rr_after = rr_before
                 rr_delta = rr_after - rr_before
                 self._guest_rr = rr_after
+                ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
+                if self.account_service and self.account_username:
+                    profile_before = self.account_service.get_profile(self.account_username)
+                    if profile_before is not None:
+                        current_local_rr = int(profile_before.rr)
+                        rr_before = int(authoritative.get("rr_before", current_local_rr)) if isinstance(authoritative, dict) else current_local_rr
+                        rr_delta = int(rr_after - current_local_rr)
+                    updated = self.account_service.apply_stat_delta(
+                        self.account_username,
+                        rr_delta=rr_delta,
+                        damage_dealt=damage_dealt_delta,
+                        damage_taken=damage_taken_delta,
+                        eliminations=eliminations_delta,
+                        deaths=deaths_delta,
+                        rounds_played=rounds_played_delta,
+                        rounds_won=rounds_won_delta,
+                        matches_played=matches_played_delta,
+                        matches_won=matches_won_delta,
+                        mvp_count=mvp_delta,
+                        ranked=ranked_mode,
+                        sync_now=False,
+                        queue_sync=False,
+                    )
+                    if updated is not None:
+                        rr_after = int(updated.rr)
+                        self._guest_rr = rr_after
                 return local_label, rr_before, rr_after, rr_delta
 
         ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
@@ -2475,19 +2528,6 @@ class GameManager:
             is_draw=is_draw,
             ranked_mode=ranked_mode,
         )
-
-        local_row = self._match_player_stats[local_index] if local_index < len(self._match_player_stats) else {}
-        damage_dealt_delta = int(max(0, local_row.get("damage_dealt", 0)))
-        damage_taken_delta = int(max(0, local_row.get("damage_taken", 0)))
-        eliminations_delta = int(max(0, local_row.get("eliminations", 0)))
-        deaths_delta = int(max(0, local_row.get("deaths", 0)))
-        rounds_played_delta = int(max(0, local_row.get("rounds_played", 0)))
-        rounds_won_delta = int(max(0, local_row.get("rounds_won", 0)))
-
-        did_win_match = bool(self._match_complete and not is_draw and winner_index is not None and local_index == winner_index)
-        matches_played_delta = 1 if self._match_complete else 0
-        matches_won_delta = 1 if did_win_match else 0
-        mvp_delta = 1 if self._match_complete and local_index == mvp_index else 0
 
         if self.account_service and self.account_username:
             profile_before = self.account_service.get_profile(self.account_username)
@@ -2560,6 +2600,11 @@ class GameManager:
             is_draw=is_draw,
             ranked_mode_override=ranked_mode_override,
         )
+        if self.is_network_game and self._match_complete and self.account_service and self.account_username:
+            try:
+                self.account_service.sync_pending(self.account_username)
+            except Exception:
+                pass
         ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
         if ranked_mode:
             rr_start = int(self._match_rr_start)
