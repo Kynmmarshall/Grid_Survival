@@ -325,6 +325,7 @@ class ControlPlaneState:
                         "map_id": int(base_lobby.map_pool[0] if base_lobby.map_pool else 1),
                         "players": players,
                         "bot_count": int(bot_count),
+                        "player_count": int(target_players),
                     },
                 ),
             },
