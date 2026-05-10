@@ -1098,6 +1098,7 @@ class GameManager:
             ],
             "hud": self.hud.snapshot_state(),
         }
+        snapshot["warmup_round"] = bool(self.is_network_game and not self._match_complete and self._network_round_seq == 0)
         return snapshot
 
     def _build_network_world_snapshot(self) -> dict:
@@ -1105,6 +1106,7 @@ class GameManager:
             "time_since_start": float(self._time_since_start),
             "round_seq": int(self._network_round_seq),
             "tiles": self.tile_manager.snapshot_state(),
+            "warmup_round": bool(self.is_network_game and not self._match_complete and self._network_round_seq == 0),
         }
 
     def _build_network_dynamic_world_snapshot(self) -> dict:
@@ -1114,6 +1116,7 @@ class GameManager:
             "tiles": self.tile_manager.snapshot_state(),
             "hazards": self.hazard_manager.snapshot_state(),
             "orbs": self.orb_manager.snapshot_state(),
+            "warmup_round": bool(self.is_network_game and not self._match_complete and self._network_round_seq == 0),
             "pacman_enemies": (
                 self.pacman_enemy_manager.snapshot_state()
                 if self.pacman_enemy_manager
@@ -2185,6 +2188,13 @@ class GameManager:
             return 0
         return None
 
+    def _local_network_player_name(self) -> str:
+        if 0 <= self.local_player_index < len(self.network_player_names):
+            label = self.network_player_names[self.local_player_index].strip()
+            if label:
+                return label
+        return self.player_name
+
     def _is_ranked_mode(self) -> bool:
         if self._ranked_override is not None:
             return bool(self._ranked_override)
@@ -2480,7 +2490,12 @@ class GameManager:
         mvp_delta = 1 if self._match_complete and local_index == mvp_index else 0
 
         if self.is_network_game:
-            authoritative = self._network_authoritative_rr_results.get(local_label) or self._network_authoritative_rr_results.get(self.account_username or "")
+            local_network_name = self._local_network_player_name()
+            authoritative = (
+                self._network_authoritative_rr_results.get(local_network_name)
+                or self._network_authoritative_rr_results.get(local_label)
+                or self._network_authoritative_rr_results.get(self.account_username or "")
+            )
             if isinstance(authoritative, dict) and authoritative:
                 try:
                     rr_before = int(authoritative.get("rr_before", rr_before))

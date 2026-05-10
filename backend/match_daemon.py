@@ -848,6 +848,7 @@ class MatchDaemon:
                     "game_over": False,
                     "match_complete": False,
                     "end_state": None,
+                    "warmup_round_consumed": False,
                 })
                 session_players = session["players"]
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
@@ -987,6 +988,7 @@ class MatchDaemon:
             "round_wins": round_wins[: len(players_list)] if players_list else round_wins,
             "match_complete": bool(session.get("match_complete", False)),
             "end_state": session.get("end_state"),
+            "warmup_round": bool(not session.get("warmup_round_consumed", False) and not session.get("match_complete", False)),
             "players": players_list,
             "hud": {
                 "survival_time": elapsed,
@@ -995,6 +997,7 @@ class MatchDaemon:
                 "total_players": int(len(players_list)),
                 "round_wins": round_wins[: len(players_list)] if players_list else round_wins,
                 "target_score": target_score,
+                "warmup_round": bool(not session.get("warmup_round_consumed", False) and not session.get("match_complete", False)),
             },
         }
         return snapshot
@@ -1252,6 +1255,7 @@ class MatchDaemon:
         if reset_match:
             session["match_complete"] = False
             session["round_wins"] = [0 for _ in range(max(1, len(session.get("players", {}))))]
+            session["warmup_round_consumed"] = False
 
         tile_manager = session.get("tile_manager")
         if tile_manager is not None:
@@ -1335,6 +1339,13 @@ class MatchDaemon:
         wins = self._ensure_round_wins(session)
         target_score = max(1, int(session.get("assignment", {}).get("payload", {}).get("target_score", 3)))
         session["round_finished"] = True
+
+        # Consume the first completed round as a warm-up so the online match has one load-safe round.
+        if not bool(session.get("warmup_round_consumed", False)):
+            session["warmup_round_consumed"] = True
+            session["game_over"] = False
+            session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
+            return
 
         if len(alive) == 1:
             winner_index, winner_name, winner_entry = alive[0]
@@ -1979,7 +1990,20 @@ class MatchDaemon:
                                     continue
                                 rr_before = 1000
                                 rr_after = 1000
-                                rr_delta = self._compute_rr_delta(match_stats, idx, winner_index, mvp_index, target_score, is_draw=False) if ranked_mode else 0
+                                if ranked_mode:
+                                    max_gain, max_loss = self._rr_caps_for_target_score(
+                                        target_score,
+                                        player_count=len(match_stats),
+                                    )
+                                    score = self._match_performance_score(match_stats, idx, winner_index, mvp_index, is_draw=False)
+                                    if idx == mvp_index:
+                                        rr_delta = int(round(score * float(max_gain)))
+                                        rr_delta = max(0, min(max_gain, rr_delta))
+                                    else:
+                                        rr_delta = -int(round((1.0 - score) * float(max_loss)))
+                                        rr_delta = -max(0, min(max_loss, abs(rr_delta)))
+                                else:
+                                    rr_delta = 0
                                 if ranked_mode and self.account_store is not None:
                                     try:
                                         profile = self.account_store.get_profile(pname)
