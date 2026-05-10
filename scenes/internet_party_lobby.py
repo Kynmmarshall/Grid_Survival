@@ -12,6 +12,7 @@ from settings import (
     FONT_PATH_BODY,
     FONT_PATH_HEADING,
     FONT_PATH_SMALL,
+    SOUND_MATCH_FOUND,
     WINDOW_SIZE,
     SOUND_POWER_READY,
 )
@@ -280,7 +281,7 @@ class InternetPartyLobbyScreen:
         countdown = 3.0
         # play SFX once on match found
         try:
-            get_audio().play_sfx(SOUND_POWER_READY, volume=0.85, max_instances=1)
+            get_audio().play_sfx(SOUND_MATCH_FOUND, volume=0.95, max_instances=1)
         except Exception:
             pass
         start = pygame.time.get_ticks() / 1000.0
