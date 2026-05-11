@@ -127,11 +127,92 @@ class InternetPartyLobbyScreen:
         self._ready = False
         self._set_status(f"Lobby {self._lobby_code} created")
 
+    def _prompt_lobby_code(self) -> str | None:
+        """Show a small modal to enter a lobby code (letters/digits/hyphen allowed)."""
+        width, height = WINDOW_SIZE
+        card_w = min(max(640, 640), width - 120)
+        card_h = max(230, 230)
+        font_title = self._font_title
+        font_body = self._font_body
+        font_small = self._font_small
+        audio_overlay = SceneAudioOverlay()
+        input_str = ""
+        btn_w, btn_h = 180, 52
+        btn_gap = 18
+        card_rect = pygame.Rect(0, 0, card_w, card_h)
+        card_rect.center = (width // 2, height // 2 + 10)
+        btn_confirm = pygame.Rect(0, 0, btn_w, btn_h)
+        btn_back = pygame.Rect(0, 0, btn_w, btn_h)
+        btn_confirm.center = (width // 2 + btn_w // 2 + btn_gap // 2, card_rect.bottom + 46)
+        btn_back.center = (width // 2 - btn_w // 2 - btn_gap // 2, card_rect.bottom + 46)
+
+        def draw(show_cursor: bool = True):
+            draw_lan_backdrop(self.screen, self._anim_time)
+            _draw_rounded_rect(self.screen, card_rect, (24, 30, 50), (110, 130, 180), 3, 18)
+            title = font_title.render("Enter Lobby Code", True, (255, 255, 255))
+            self.screen.blit(title, title.get_rect(center=(card_rect.centerx, card_rect.top + 36)))
+
+            help = font_small.render("Enter the party code (letters and digits). Example: ABCD-1234", True, (200, 205, 220))
+            self.screen.blit(help, help.get_rect(center=(card_rect.centerx, card_rect.top + 80)))
+
+            input_box = pygame.Rect(card_rect.left + 42, card_rect.centery - 6, card_rect.width - 84, 62)
+            _draw_rounded_rect(self.screen, input_box, (12, 20, 38), (100, 120, 160), 2, 14)
+            display = input_str + ("_" if show_cursor else "")
+            txt = font_body.render(display, True, (255, 220, 90))
+            self.screen.blit(txt, txt.get_rect(midleft=(input_box.left + 12, input_box.centery + 1)))
+
+            tip = font_small.render("Letters, digits and '-' allowed", True, (165, 175, 205))
+            self.screen.blit(tip, tip.get_rect(center=(card_rect.centerx, input_box.bottom + 22)))
+
+            mouse_pos = pygame.mouse.get_pos()
+            for rect, label in ((btn_back, "Back"), (btn_confirm, "Join")):
+                hovered = rect.collidepoint(mouse_pos)
+                bg = (40, 54, 88) if not hovered else (54, 72, 110)
+                border = (108, 128, 170) if not hovered else (170, 200, 255)
+                _draw_rounded_rect(self.screen, rect, bg + (220,), border + (255,), 2, 12)
+                lab = font_small.render(label.upper(), True, border)
+                self.screen.blit(lab, lab.get_rect(center=rect.center))
+
+            footer = font_small.render("ENTER to join  *  ESC to cancel", True, (175, 185, 205))
+            self.screen.blit(footer, footer.get_rect(center=(width // 2, height - 44)))
+            audio_overlay.draw(self.screen)
+            pygame.display.flip()
+
+        cursor_timer = 0.0
+        while True:
+            dt = self.clock.tick(60) / 1000.0
+            cursor_timer += dt
+            show_cursor = (int(cursor_timer * 2) % 2) == 0
+            draw(show_cursor)
+            for event in pygame.event.get():
+                if audio_overlay.handle_event(event):
+                    continue
+                if event.type == pygame.QUIT:
+                    self.quit_requested = True
+                    return None
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN and input_str:
+                        return input_str
+                    elif event.key == pygame.K_BACKSPACE:
+                        input_str = input_str[:-1]
+                    elif event.key == pygame.K_ESCAPE:
+                        return None
+                    elif event.unicode and len(input_str) < 32:
+                        ch = event.unicode.upper()
+                        if ch.isalnum() or ch == '-':
+                            input_str += ch
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if btn_confirm.collidepoint(event.pos) and input_str:
+                        return input_str
+                    if btn_back.collidepoint(event.pos):
+                        return None
+
     def _action_join_lobby(self) -> None:
-        code = prompt_ip_entry(self.screen, self.clock)
+        code = self._prompt_lobby_code()
         if not code:
             return
-        clean = str(code).strip().upper().replace(".", "")
+        # normalize to alphanumeric code (remove punctuation except digits/letters)
+        clean = "".join(ch for ch in str(code).strip().upper() if ch.isalnum())
         res = self.online_service.join_lobby(
             player_name=self.setup.player_name,
             lobby_code=clean,
