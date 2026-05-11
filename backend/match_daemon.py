@@ -1874,29 +1874,59 @@ class MatchDaemon:
         target_score: int | None = None,
         player_count: int | None = None,
     ) -> tuple[int, int]:
+        """Return (max_gain, max_loss) RR caps based on target score and player count.
+        
+        RR scale:
+        - 3 rounds: 8-12 RR
+        - 5 rounds: 12-15 RR
+        - 10 rounds: 15-20 RR
+        - 15 rounds: 20-30 RR
+        - 20 rounds: 30-45 RR
+        
+        Larger lobbies scale up the RR by a player multiplier.
+        """
         score_to_win = int(target_score if target_score is not None else 3)
         players_total = int(player_count if player_count is not None else 2)
-        min_target = 3
-        max_target = 20
-        min_win_cap = 12
-        max_win_cap = 45
-        min_lose_cap = 8
-        max_lose_cap = 40
-
-        if max_target <= min_target:
-            return max_win_cap, max_lose_cap
-
-        t = (score_to_win - min_target) / float(max_target - min_target)
-        t = max(0.0, min(1.0, t))
-        base_win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
-        base_lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
-
-        # Larger lobbies should have slightly higher RR swings at the same round target.
-        player_t = (players_total - 2) / 2.0
-        player_t = max(0.0, min(1.0, player_t))
-        win_cap = int(round(base_win_cap * (1.0 + 0.35 * player_t)))
-        lose_cap = int(round(base_lose_cap * (1.0 + 0.30 * player_t)))
-        return win_cap, lose_cap
+        
+        # Map target_score to (min_win, max_win, min_lose, max_lose)
+        # Using linear interpolation between key points
+        key_points = [
+            (3, 8, 12, 8, 12),      # 3 rounds: 8-12 RR
+            (5, 12, 15, 12, 15),    # 5 rounds: 12-15 RR
+            (10, 15, 20, 15, 20),   # 10 rounds: 15-20 RR
+            (15, 20, 30, 20, 30),   # 15 rounds: 20-30 RR
+            (20, 30, 45, 30, 45),   # 20 rounds: 30-45 RR
+        ]
+        
+        # Find the two key points to interpolate between
+        target = max(3, min(20, score_to_win))
+        min_win, max_win, min_lose, max_lose = 8, 12, 8, 12
+        
+        for i in range(len(key_points) - 1):
+            rounds1, min_w1, max_w1, min_l1, max_l1 = key_points[i]
+            rounds2, min_w2, max_w2, min_l2, max_l2 = key_points[i + 1]
+            if target <= rounds1:
+                min_win, max_win, min_lose, max_lose = min_w1, max_w1, min_l1, max_l1
+                break
+            elif target < rounds2:
+                # Interpolate
+                t = (target - rounds1) / float(rounds2 - rounds1)
+                min_win = int(round(min_w1 + (min_w2 - min_w1) * t))
+                max_win = int(round(max_w1 + (max_w2 - max_w1) * t))
+                min_lose = int(round(min_l1 + (min_l2 - min_l1) * t))
+                max_lose = int(round(max_l1 + (max_l2 - max_l1) * t))
+                break
+            else:
+                min_win, max_win, min_lose, max_lose = min_w2, max_w2, min_l2, max_l2
+        
+        # Player count multiplier: 2-player games use base, 3-4 players scale up
+        # 2 players: 1.0x, 3 players: 1.15x, 4 players: 1.3x
+        player_multiplier = 1.0 + (players_total - 2) * 0.15
+        player_multiplier = max(1.0, min(1.3, player_multiplier))
+        
+        gain_cap = int(round(max_win * player_multiplier))
+        loss_cap = int(round(max_lose * player_multiplier))
+        return gain_cap, loss_cap
 
     def _compute_rr_delta(
         self,
@@ -1907,21 +1937,68 @@ class MatchDaemon:
         target_score: int,
         is_draw: bool = False,
     ) -> int:
+        """Compute RR delta for a single player.
+        
+        Only MVP gains RR. Non-MVP players lose based on:
+        - Their scoreboard position (lower position = higher loss)
+        - Their performance stats
+        - Number of players
+        - Target score (rounds)
+        """
         if is_draw:
             return 0
 
+        if local_index < 0 or local_index >= len(match_stats):
+            return 0
+        
         max_gain, max_loss = self._rr_caps_for_target_score(
             target_score,
             player_count=len(match_stats),
         )
         score = self._match_performance_score(match_stats, local_index, winner_index, mvp_index, is_draw=is_draw)
-        won_match = winner_index is not None and local_index == winner_index
-        if won_match:
+        
+        # Only MVP gains RR
+        if local_index == mvp_index:
             gain = int(round(score * float(max_gain)))
             return max(0, min(max_gain, gain))
-
-        loss = int(round((1.0 - score) * float(max_loss)))
-        return -max(0, min(max_loss, loss))
+        
+        # Non-MVP: always loses RR based on scoreboard position
+        # Rank all non-MVP players by performance score
+        non_mvp_scores = []
+        for idx in range(len(match_stats)):
+            if idx == mvp_index:
+                continue
+            s = self._match_performance_score(match_stats, idx, winner_index, mvp_index, is_draw=is_draw)
+            non_mvp_scores.append((idx, s))
+        
+        # Sort by score (descending) to get rank among non-MVPs
+        non_mvp_scores.sort(key=lambda x: x[1], reverse=True)
+        local_rank = None
+        for rank, (idx, _) in enumerate(non_mvp_scores):
+            if idx == local_index:
+                local_rank = rank
+                break
+        
+        if local_rank is None:
+            local_rank = len(non_mvp_scores) - 1
+        
+        # Higher rank (lower position) = higher loss multiplier
+        # Rank 0 (best non-MVP) loses less, highest rank (worst) loses most
+        if len(non_mvp_scores) > 1:
+            rank_factor = local_rank / float(len(non_mvp_scores) - 1)
+        else:
+            rank_factor = 1.0
+        
+        # Loss increases with lower rank, scaled by performance
+        # Base loss = (1 - score) * max_loss
+        # Rank factor scales it: 0 (best non-MVP) = 0.5x, 1.0 (worst) = 1.5x
+        rank_multiplier = 0.5 + rank_factor
+        base_loss = (1.0 - score) * float(max_loss)
+        total_loss = base_loss * rank_multiplier
+        loss = int(round(total_loss))
+        
+        # Ensure at least 1 RR loss, capped at max_loss
+        return -max(1, min(max_loss, loss))
 
     def _tick_physics(self, dt: float) -> None:
         dt = min(MAX_TICK_DT, max(0.0, float(dt)))
@@ -2017,18 +2094,14 @@ class MatchDaemon:
                                 rr_before = 1000
                                 rr_after = 1000
                                 if ranked_mode:
-                                    max_gain, max_loss = self._rr_caps_for_target_score(
+                                    rr_delta = self._compute_rr_delta(
+                                        match_stats,
+                                        idx,
+                                        winner_index,
+                                        mvp_index,
                                         target_score,
-                                        player_count=len(match_stats),
+                                        is_draw=False,
                                     )
-                                    score = self._match_performance_score(match_stats, idx, winner_index, mvp_index, is_draw=False)
-                                    if idx == mvp_index:
-                                        # Only the MVP can gain RR; everyone else loses based on their performance.
-                                        rr_delta = int(round(score * float(max_gain)))
-                                        rr_delta = max(0, min(max_gain, rr_delta))
-                                    else:
-                                        loss = int(round((1.0 - score) * float(max_loss)))
-                                        rr_delta = -max(1, min(max_loss, loss))
                                 else:
                                     rr_delta = 0
                                 if ranked_mode and self.account_store is not None:
