@@ -12,6 +12,7 @@ from typing import Any, Callable
 import pygame
 
 from backend.online_service import OnlineService
+from audio import get_audio
 from host_waiting_screen import host_waiting_screen
 from lan_prompts import (
     draw_lan_backdrop,
@@ -26,7 +27,7 @@ from .exceptions import InternetFallbackLAN
 from .log import get_logger
 from character_manager import available_characters
 logger = get_logger("session_flow")
-from settings import FONT_PATH_BODY, FONT_PATH_HEADING, WINDOW_SIZE
+from settings import FONT_PATH_BODY, FONT_PATH_HEADING, SOUND_MATCH_FOUND, WINDOW_SIZE
 
 from .match_flow import (
     MatchSettings,
@@ -394,6 +395,7 @@ def wait_for_internet_match_finalization(
 ) -> dict[str, Any] | None:
     audio_overlay = SceneAudioOverlay()
     safe_match_id = str(match_id or "").strip()
+    match_found_started_at: float | None = None
     while True:
         dt = clock.tick(60) / 1000.0
 
@@ -416,7 +418,27 @@ def wait_for_internet_match_finalization(
                 match = event.get("match")
                 if isinstance(match, dict) and str(match.get("match_id", "")).strip() == safe_match_id:
                     if match.get("join"):
-                        return match
+                        if match_found_started_at is None:
+                            match_found_started_at = pygame.time.get_ticks() / 1000.0
+                            try:
+                                get_audio().play_sfx(SOUND_MATCH_FOUND, volume=0.95, max_instances=1)
+                            except Exception:
+                                pass
+                        elapsed = (pygame.time.get_ticks() / 1000.0) - match_found_started_at
+                        draw_lobby_panel(
+                            screen,
+                            "MATCH FOUND",
+                            [
+                                "Match assigned. Preparing your game now.",
+                                f"Match {safe_match_id or 'ready'}",
+                                "Please wait...",
+                            ],
+                            accent=(190, 110, 255),
+                            audio_overlay=audio_overlay,
+                        )
+                        if elapsed >= 1.6:
+                            return match
+                        continue
 
         draw_lobby_panel(
             screen,

@@ -513,11 +513,10 @@ class InternetPartyLobbyScreen:
                 poll_timer = 0.0
                 match = self._refresh_updates()
                 if isinstance(match, dict):
-                    is_owner = bool(self._lobby) and str(self._lobby.get("owner", "")).strip() == str(self.setup.player_name).strip()
                     if bool(match.get("pending_config")):
-                        if is_owner:
+                        accepted = self._show_match_found(match)
+                        if accepted:
                             return match
-                        self._set_status("Match found. Waiting for the party leader to finalize setup...", ttl=2.0)
                         continue
                     accepted = self._show_match_found(match)
                     if accepted:
