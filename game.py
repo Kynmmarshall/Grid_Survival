@@ -2606,11 +2606,13 @@ class GameManager:
                 {
                     "username": str(row.get("username", self._resolve_player_label(idx))),
                     "character": player_character,
+                    "rounds_played": int(row.get("rounds_played", 0)),
                     "rounds_won": int(row.get("rounds_won", 0)),
                     "eliminations": int(row.get("eliminations", 0)),
                     "deaths": int(row.get("deaths", 0)),
                     "damage_dealt": int(row.get("damage_dealt", 0)),
                     "damage_taken": int(row.get("damage_taken", 0)),
+                    "survival_time": float(row.get("survival_time", 0.0)),
                 }
             )
         return rows
@@ -2641,7 +2643,6 @@ class GameManager:
         if (
             self.is_network_game
             and self._match_complete
-            and ranked_mode
             and self.account_service
             and self.account_username
         ):

@@ -2104,7 +2104,7 @@ class MatchDaemon:
                                     )
                                 else:
                                     rr_delta = 0
-                                if ranked_mode and self.account_store is not None:
+                                if self.account_store is not None:
                                     try:
                                         profile = self.account_store.get_profile(pname)
                                         if profile is not None:
@@ -2114,9 +2114,9 @@ class MatchDaemon:
                                                 "username": pname,
                                                 "event_type": "stat_delta",
                                                 "payload": {
-                                                    "ranked": True,
-                                                    "rr_delta": int(rr_delta),
-                                                    "rr_after": max(0, int(rr_before + rr_delta)),
+                                                    "ranked": bool(ranked_mode),
+                                                    "rr_delta": int(rr_delta if ranked_mode else 0),
+                                                    "rr_after": max(0, int(rr_before + rr_delta)) if ranked_mode else int(rr_before),
                                                     "damage_dealt": int(max(0, match_stats[idx].get("damage_dealt", 0))),
                                                     "damage_taken": int(max(0, match_stats[idx].get("damage_taken", 0))),
                                                     "eliminations": int(max(0, match_stats[idx].get("eliminations", 0))),
@@ -2134,9 +2134,9 @@ class MatchDaemon:
                                         if profile_after is not None:
                                             rr_after = int(getattr(profile_after, "rr", rr_after))
                                         else:
-                                            rr_after = max(0, rr_before + rr_delta)
+                                            rr_after = max(0, rr_before + rr_delta) if ranked_mode else rr_before
                                     except Exception:
-                                        rr_after = max(0, rr_before + rr_delta)
+                                        rr_after = max(0, rr_before + rr_delta) if ranked_mode else rr_before
                                 elif ranked_mode:
                                     rr_after = max(0, rr_before + rr_delta)
                                 rr_results[pname] = {

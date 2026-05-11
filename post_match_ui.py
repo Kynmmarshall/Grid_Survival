@@ -147,7 +147,7 @@ class MatchSummaryScreen:
         self._font_title = _load_font(FONT_PATH_HEADING, 30, bold=True)
         self._font_header = _load_font(FONT_PATH_BODY, 20, bold=True)
         self._font_body = _load_font(FONT_PATH_BODY, 18)
-        self._font_small = _load_font(FONT_PATH_SMALL, 16)
+        self._font_small = _load_font(FONT_PATH_SMALL, 15)
 
         self._anims: list[SpriteAnimation | None] = []
         self._placeholder_frames: list[pygame.Surface] = []
@@ -234,29 +234,26 @@ class MatchSummaryScreen:
 
         x_player = text_left
         x_char = text_left + int(span * 0.24)
-        x_rounds = text_left + int(span * 0.53)
-        x_kd = text_left + int(span * 0.66)
-        x_dmg_dealt = text_left + int(span * 0.79)
-        x_dmg_taken = text_left + int(span * 0.92)
+        x_stats = text_left + int(span * 0.47)
+        x_damage = text_left + int(span * 0.74)
+        x_survival = text_left + int(span * 0.92)
 
         header_y = table.top + 16
         header_color = (176, 200, 235)
         player_header = self._font_small.render("PLAYER", True, header_color)
         char_header = self._font_small.render("CHAR", True, header_color)
-        rounds_header = self._font_small.render("ROUNDS", True, header_color)
-        kd_header = self._font_small.render("K/D", True, header_color)
-        dealt_header = self._font_small.render("DMG DEALT", True, header_color)
-        taken_header = self._font_small.render("DMG TAKEN", True, header_color)
+        stats_header = self._font_small.render("ROUNDS / K-D", True, header_color)
+        damage_header = self._font_small.render("DMG +/-", True, header_color)
+        survival_header = self._font_small.render("SURV", True, header_color)
 
         screen.blit(player_header, player_header.get_rect(topleft=(x_player, header_y)))
         screen.blit(char_header, char_header.get_rect(topleft=(x_char, header_y)))
-        screen.blit(rounds_header, rounds_header.get_rect(midtop=(x_rounds, header_y)))
-        screen.blit(kd_header, kd_header.get_rect(midtop=(x_kd, header_y)))
-        screen.blit(dealt_header, dealt_header.get_rect(midtop=(x_dmg_dealt, header_y)))
-        screen.blit(taken_header, taken_header.get_rect(midtop=(x_dmg_taken, header_y)))
+        screen.blit(stats_header, stats_header.get_rect(midtop=(x_stats, header_y)))
+        screen.blit(damage_header, damage_header.get_rect(midtop=(x_damage, header_y)))
+        screen.blit(survival_header, survival_header.get_rect(midtop=(x_survival, header_y)))
 
         row_y = table.top + 46
-        row_h = 64
+        row_h = 82
         for idx, row in enumerate(self.players):
             row_rect = pygame.Rect(table.left + 12, row_y, table.width - 24, row_h)
             is_mvp = str(row.get("username", "")) == self.mvp_username
@@ -269,27 +266,36 @@ class MatchSummaryScreen:
             frame_rect = frame.get_rect(center=(row_rect.left + 38, row_rect.centery + 6))
             screen.blit(frame, frame_rect)
 
-            username = str(row.get("username", "-"))[:14]
-            character = str(row.get("character", "-"))[:14]
+            username = str(row.get("username", "-") )[:14]
+            character = str(row.get("character", "-") )[:14]
+            rounds_played = int(row.get("rounds_played", 0))
             rounds_won = int(row.get("rounds_won", 0))
             eliminations = int(row.get("eliminations", 0))
             deaths = int(row.get("deaths", 0))
             dmg_dealt = int(row.get("damage_dealt", 0))
             dmg_taken = int(row.get("damage_taken", 0))
+            survival_time = float(row.get("survival_time", 0.0))
 
             name_text = self._font_body.render(username, True, (240, 245, 255))
             char_text = self._font_body.render(character, True, (195, 220, 250))
-            rounds_text = self._font_body.render(str(rounds_won), True, (230, 236, 250))
-            kd_text = self._font_body.render(f"{eliminations}/{deaths}", True, (230, 236, 250))
-            dealt_text = self._font_body.render(str(dmg_dealt), True, (230, 236, 250))
-            taken_text = self._font_body.render(str(dmg_taken), True, (230, 236, 250))
+            stats_text = self._font_small.render(f"P{rounds_played} / W{rounds_won}   K{eliminations} D{deaths}", True, (230, 236, 250))
+            dmg_text = self._font_small.render(f"+{dmg_dealt} / -{dmg_taken}", True, (230, 236, 250))
+            surv_text = self._font_small.render(f"{survival_time:.1f}s", True, (230, 236, 250))
 
-            screen.blit(name_text, name_text.get_rect(midleft=(x_player, row_rect.centery - 2)))
-            screen.blit(char_text, char_text.get_rect(midleft=(x_char, row_rect.centery - 2)))
-            screen.blit(rounds_text, rounds_text.get_rect(center=(x_rounds, row_rect.centery - 2)))
-            screen.blit(kd_text, kd_text.get_rect(center=(x_kd, row_rect.centery - 2)))
-            screen.blit(dealt_text, dealt_text.get_rect(center=(x_dmg_dealt, row_rect.centery - 2)))
-            screen.blit(taken_text, taken_text.get_rect(center=(x_dmg_taken, row_rect.centery - 2)))
+            top_y = row_rect.centery - 15
+            bottom_y = row_rect.centery + 13
+            screen.blit(name_text, name_text.get_rect(midleft=(x_player, top_y)))
+            screen.blit(char_text, char_text.get_rect(midleft=(x_char, top_y)))
+            screen.blit(stats_text, stats_text.get_rect(midleft=(x_stats, top_y)))
+            screen.blit(dmg_text, dmg_text.get_rect(midleft=(x_damage, top_y)))
+            screen.blit(surv_text, surv_text.get_rect(midleft=(x_survival, top_y)))
+
+            details = self._font_small.render(
+                f"Rounds played: {rounds_played}   Damage dealt: {dmg_dealt}   Damage taken: {dmg_taken}   Survival: {survival_time:.1f}s",
+                True,
+                (175, 190, 218),
+            )
+            screen.blit(details, details.get_rect(midleft=(x_player, bottom_y)))
 
             row_y += row_h + 10
             if row_y + row_h > table.bottom:
