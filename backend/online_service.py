@@ -214,7 +214,7 @@ class OnlineService:
         level_id: int,
         target_score: int,
         player_count: int,
-        characters: list[str],
+        character: str,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -225,7 +225,7 @@ class OnlineService:
                 "level_id": int(level_id),
                 "target_score": int(target_score),
                 "player_count": int(player_count),
-                "characters": [str(item) for item in characters],
+                "character": str(character),
             },
         )
 
