@@ -132,7 +132,7 @@ class PlayerSelectionScreen:
     """Animated character picker with idle/run previews and multi-player flow."""
 
     def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock,
-                 game_mode: str, num_players: int = 1) -> None:
+                 game_mode: str, num_players: int = 1, slot_names: List[str] | None = None) -> None:
         self.screen = screen
         self.clock = clock
         self.game_mode = game_mode
@@ -141,6 +141,11 @@ class PlayerSelectionScreen:
         self.back_requested = False
         self.quit_requested = False
         self._audio_overlay = SceneAudioOverlay()
+        self.slot_names = [str(name).strip() for name in (slot_names or []) if str(name).strip()]
+        if len(self.slot_names) < self.num_players:
+            self.slot_names.extend([f"Player {idx + 1}" for idx in range(len(self.slot_names), self.num_players)])
+        self._status_text = ""
+        self._status_ttl = 0.0
 
         self.mode_title, self.mode_hint = MODE_HEADERS.get(
             game_mode,
@@ -497,7 +502,7 @@ class PlayerSelectionScreen:
                 pygame.draw.rect(self.screen, (255, 255, 255), banner_rect, 2, border_radius=4)
 
                 # Text
-                players_text = " & ".join([f"P{i+1}" for i in locked_slots])
+                players_text = " & ".join([self.slot_names[i] if i < len(self.slot_names) else f"P{i+1}" for i in locked_slots])
                 full_text = f"{players_text} LOCKED IN"
 
                 text_surf = self._font_heading.render(full_text, True, (255, 255, 255))
@@ -513,6 +518,9 @@ class PlayerSelectionScreen:
     def _draw_summary(self) -> None:
         mouse_pos = pygame.mouse.get_pos()
         self._draw_buttons(mouse_pos)
+        if self._status_ttl > 0.0 and self._status_text:
+            status_surf = self._font_small.render(self._status_text, True, (255, 180, 120))
+            self.screen.blit(status_surf, status_surf.get_rect(center=(self.width // 2, self.height - 108)))
 
     def _draw_buttons(self, mouse_pos: tuple) -> None:
         # Back Button (simple style)
@@ -572,9 +580,9 @@ class PlayerSelectionScreen:
 
             # 4. Player Indicator Badge (Floating above)
             if self.current_player < self.num_players:
-                p_idx = self.current_player + 1
                 badge_radius = 18
                 badge_center = (lock_rect.centerx, lock_rect.top - 10)
+                label_name = self.slot_names[self.current_player] if self.current_player < len(self.slot_names) else f"P{self.current_player + 1}"
                 
                 # Badge Glow
                 pygame.draw.circle(self.screen, (0, 0, 0, 100), badge_center, badge_radius + 2)
@@ -583,16 +591,17 @@ class PlayerSelectionScreen:
                 # Cycle colors or specific P1/P2 colors?
                 # P1: Blue, P2: Red, P3: Green, P4: Yellow
                 p_colors = [(60, 140, 255), (255, 60, 60), (60, 255, 100), (255, 220, 40)]
-                p_color = p_colors[(p_idx - 1) % 4]
+                p_color = p_colors[self.current_player % 4]
                 
                 pygame.draw.circle(self.screen, p_color, badge_center, badge_radius)
                 pygame.draw.circle(self.screen, (255,255,255), badge_center, badge_radius, 2)
                 
-                # 'P1' Text
-                p_text = self._font_heading.render(f"P{p_idx}", True, (255, 255, 255))
-                # Scale down slightly
-                ts = pygame.transform.scale(p_text, (int(p_text.get_width()*0.6), int(p_text.get_height()*0.6)))
-                self.screen.blit(ts, ts.get_rect(center=badge_center))
+                # Slot name text
+                p_text = self._font_heading.render(label_name, True, (255, 255, 255))
+                if p_text.get_width() > 88:
+                    scale = 88 / max(1, p_text.get_width())
+                    p_text = pygame.transform.smoothscale(p_text, (int(p_text.get_width() * scale), int(p_text.get_height() * scale)))
+                self.screen.blit(p_text, p_text.get_rect(center=badge_center))
 
     def _trigger_back(self) -> None:
         if self._closing:
@@ -638,6 +647,11 @@ class PlayerSelectionScreen:
         if self.active_index is None or self.current_player >= self.num_players:
             return None
         choice = self.cards[self.active_index]["name"]
+        if choice in self.selections:
+            self._status_text = f"{choice} is already taken"
+            self._status_ttl = 1.4
+            return None
+        self._status_text = ""
         self.selections[self.current_player] = choice
         self.current_player += 1
 

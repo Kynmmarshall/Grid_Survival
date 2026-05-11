@@ -41,6 +41,8 @@ class Lobby:
     created_at: float
     members: dict[str, dict[str, Any]] = field(default_factory=dict)
     queued: bool = False
+    pending_match: dict[str, Any] | None = None
+    match_config: dict[str, Any] | None = None
 
 
 class ControlPlaneState:
@@ -263,7 +265,12 @@ class ControlPlaneState:
                         continue
 
                     bot_count = max(0, target_players - humans)
-                    self._emit_match_found(batch, target_players=target_players, bot_count=bot_count)
+                    self._emit_match_found(
+                        batch,
+                        target_players=target_players,
+                        bot_count=bot_count,
+                        pending_config=True,
+                    )
                     for item in batch:
                         consumed.add(str(item["lobby_code"]))
                     i += 1
@@ -277,9 +284,19 @@ class ControlPlaneState:
             return 0
         return len(lobby.members)
 
-    def _emit_match_found(self, queue_entries: list[dict[str, Any]], *, target_players: int, bot_count: int) -> None:
-        self.match_serial += 1
-        match_id = f"match-{self.match_serial:08d}"
+    def _emit_match_found(
+        self,
+        queue_entries: list[dict[str, Any]],
+        *,
+        target_players: int,
+        bot_count: int,
+        pending_config: bool = False,
+        match_config: dict[str, Any] | None = None,
+        match_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if match_id is None:
+            self.match_serial += 1
+            match_id = f"match-{self.match_serial:08d}"
         players: list[dict[str, Any]] = []
 
         lobbies: list[Lobby] = []
@@ -289,11 +306,17 @@ class ControlPlaneState:
                 lobbies.append(lobby)
 
         if not lobbies:
-            return
+            return None
 
         base_lobby = lobbies[0]
         for lobby in lobbies:
             lobby.queued = False
+            lobby.pending_match = {
+                "match_id": match_id,
+                "target_players": int(target_players),
+                "bot_count": int(bot_count),
+                "players": [],
+            }
             for member_name, member in lobby.members.items():
                 players.append({
                     "name": member_name,
@@ -305,35 +328,117 @@ class ControlPlaneState:
             profile = ["Diamond", "Master", "Apex"][idx % 3]
             players.append({"name": f"BOT-{profile}-{idx + 1}", "bot": True, "profile": profile})
 
-        payload = {
-            "type": "match_found",
-            "match": {
-                "match_id": match_id,
-                "mode": base_lobby.mode,
-                "region": base_lobby.region,
-                "target_score": base_lobby.target_score,
-                "map_id": int(base_lobby.map_pool[0] if base_lobby.map_pool else 1),
-                "players": players,
-                "bot_filled": bot_count > 0,
-                "bot_count": bot_count,
-                "join": MATCH_SERVER_MANAGER.issue_assignment(
-                    match_id=match_id,
-                    payload={
-                        "mode": base_lobby.mode,
-                        "region": base_lobby.region,
-                        "target_score": base_lobby.target_score,
-                        "map_id": int(base_lobby.map_pool[0] if base_lobby.map_pool else 1),
-                        "players": players,
-                        "bot_count": int(bot_count),
-                        "player_count": int(target_players),
-                    },
-                ),
-            },
-        }
+        final_players = [dict(player) for player in players]
+        if isinstance(match_config, dict):
+            requested_characters = match_config.get("characters")
+            if isinstance(requested_characters, list) and requested_characters:
+                used: set[str] = set()
+                roster = []
+                for value in requested_characters:
+                    text = str(value or "").strip()
+                    if text and text not in used:
+                        roster.append(text)
+                        used.add(text)
+                for idx, player in enumerate(final_players):
+                    if idx < len(roster):
+                        player["character"] = roster[idx]
+                    else:
+                        player["character"] = str(player.get("character", player.get("profile", "Caveman")))
+            else:
+                for player in final_players:
+                    player["character"] = str(player.get("character", player.get("profile", "Caveman")))
 
+        for lobby in lobbies:
+            if lobby.pending_match is not None:
+                lobby.pending_match["players"] = [dict(player) for player in final_players]
+
+        match_payload = {
+            "match_id": match_id,
+            "mode": base_lobby.mode,
+            "region": base_lobby.region,
+            "target_score": base_lobby.target_score,
+            "map_id": int(base_lobby.map_pool[0] if base_lobby.map_pool else 1),
+            "players": final_players,
+            "bot_filled": bot_count > 0,
+            "bot_count": bot_count,
+            "pending_config": bool(pending_config),
+            "match_config": dict(match_config) if isinstance(match_config, dict) else None,
+        }
+        if not pending_config:
+            match_payload["join"] = MATCH_SERVER_MANAGER.issue_assignment(
+                match_id=match_id,
+                payload={
+                    "mode": match_payload["mode"],
+                    "region": match_payload["region"],
+                    "target_score": int(match_payload["target_score"]),
+                    "map_id": int(match_payload["map_id"]),
+                    "players": final_players,
+                    "bot_count": int(bot_count),
+                    "player_count": int(target_players),
+                },
+            )
+
+        payload = {"type": "match_found", "match": match_payload}
         for lobby in lobbies:
             for member_name in lobby.members:
                 self._push_update(member_name, payload)
+        return match_payload
+
+    def set_match_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        player = str(payload.get("player", "")).strip()
+        code = str(payload.get("lobby_code", "")).strip().upper()
+        if not player or not code:
+            return {"ok": False, "error": "missing player or lobby_code"}
+
+        with self.lock:
+            lobby = self.lobbies.get(code)
+            if lobby is None or player not in lobby.members:
+                return {"ok": False, "error": "not in lobby"}
+            if lobby.owner != player:
+                return {"ok": False, "error": "only the lobby owner can finalize match config"}
+            if not isinstance(lobby.pending_match, dict):
+                return {"ok": False, "error": "no pending match to finalize"}
+
+            level_id = max(1, int(payload.get("level_id", lobby.map_pool[0] if lobby.map_pool else 1)))
+            target_score = max(1, int(payload.get("target_score", lobby.target_score)))
+            player_count = max(2, min(4, int(payload.get("player_count", lobby.max_players))))
+            characters = payload.get("characters")
+            if not isinstance(characters, list):
+                characters = []
+
+            lobby.target_score = target_score
+            lobby.map_pool = [level_id]
+            lobby.max_players = player_count
+            lobby.match_config = {
+                "level_id": level_id,
+                "target_score": target_score,
+                "player_count": player_count,
+                "characters": [str(item) for item in characters],
+            }
+
+            pending = dict(lobby.pending_match)
+            queue_entries = [
+                {
+                    "lobby_code": code,
+                    "queued_at": time.time(),
+                    "region": lobby.region,
+                    "rating": int(member.get("rating", 1000)),
+                    "name": name,
+                }
+                for name, member in lobby.members.items()
+            ]
+            final_match = self._emit_match_found(
+                queue_entries,
+                target_players=int(pending.get("target_players", player_count)),
+                bot_count=int(pending.get("bot_count", 0)),
+                pending_config=False,
+                match_config=lobby.match_config,
+                match_id=str(pending.get("match_id", "")) or None,
+            )
+            lobby.pending_match = None
+            for member in lobby.members:
+                self._push_update(member, {"type": "match_configured", "lobby": self._serialize_lobby(lobby), "match": final_match})
+            return {"ok": True, "match": final_match, "lobby": self._serialize_lobby(lobby)}
 
     def _serialize_lobby(self, lobby: Lobby | None) -> dict[str, Any] | None:
         if lobby is None:
@@ -347,6 +452,8 @@ class ControlPlaneState:
             "region": lobby.region,
             "max_players": lobby.max_players,
             "queued": bool(lobby.queued),
+            "pending_match": dict(lobby.pending_match) if isinstance(lobby.pending_match, dict) else None,
+            "match_config": dict(lobby.match_config) if isinstance(lobby.match_config, dict) else None,
             "members": [
                 {
                     "name": name,
@@ -435,6 +542,8 @@ class Handler(BaseHTTPRequestHandler):
             out = STATE.join_lobby(payload)
         elif route == "/internet/lobbies/ready":
             out = STATE.set_ready(payload)
+        elif route == "/internet/lobbies/config":
+            out = STATE.set_match_config(payload)
         elif route == "/internet/queue/enqueue":
             out = STATE.enqueue(payload)
         elif route == "/internet/queue/dequeue":

@@ -195,6 +195,29 @@ class OnlineService:
             },
         )
 
+    def set_match_config(
+        self,
+        *,
+        player_name: str,
+        lobby_code: str,
+        level_id: int,
+        target_score: int,
+        player_count: int,
+        characters: list[str],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/internet/lobbies/config",
+            {
+                "player": str(player_name),
+                "lobby_code": str(lobby_code).upper(),
+                "level_id": int(level_id),
+                "target_score": int(target_score),
+                "player_count": int(player_count),
+                "characters": [str(item) for item in characters],
+            },
+        )
+
     def poll_or_ws_updates(self, *, player_name: str) -> dict[str, Any]:
         query = urllib.parse.urlencode({"player": str(player_name)})
         return self._request("GET", f"/internet/updates?{query}")

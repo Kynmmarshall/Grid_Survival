@@ -95,6 +95,16 @@ class InternetPartyLobbyScreen:
             if etype == "match_found":
                 match = event.get("match")
                 if isinstance(match, dict):
+                    is_owner = bool(self._lobby) and str(self._lobby.get("owner", "")).strip() == str(self.setup.player_name).strip()
+                    if bool(match.get("pending_config")) and is_owner:
+                        return match
+                    if not bool(match.get("pending_config")):
+                        return match
+                    self._set_status("Match found. Waiting for party leader to finalize setup...", ttl=2.0)
+                    continue
+            if etype == "match_configured":
+                match = event.get("match")
+                if isinstance(match, dict):
                     return match
             if etype == "queue_joined":
                 self._in_queue = True
@@ -505,6 +515,12 @@ class InternetPartyLobbyScreen:
                 poll_timer = 0.0
                 match = self._refresh_updates()
                 if isinstance(match, dict):
+                    is_owner = bool(self._lobby) and str(self._lobby.get("owner", "")).strip() == str(self.setup.player_name).strip()
+                    if bool(match.get("pending_config")):
+                        if is_owner:
+                            return match
+                        self._set_status("Match found. Waiting for the party leader to finalize setup...", ttl=2.0)
+                        continue
                     accepted = self._show_match_found(match)
                     if accepted:
                         return match

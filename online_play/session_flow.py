@@ -394,7 +394,7 @@ def _connect_internet_match(
     choose_player_count: Callable[[], int | None],
     choose_level: Callable[[], Any | None],
     choose_target_score: Callable[[], int | None],
-    choose_characters: Callable[[int], list[str] | None],
+    choose_characters: Callable[[int, list[str] | None], list[str] | None],
     resolve_level_option: Callable[[int], Any | None],
     toast: Callable[[Any, Any, str], None],
 ) -> OnlineSessionSelection | None:
@@ -413,24 +413,11 @@ def _connect_internet_match(
             return None
         selected_player_count = max(2, min(4, int(selected_player_count)))
 
-        selected_level = choose_level()
-        if selected_level is None:
-            return None
-
-        selected_target_score = choose_target_score()
-        if selected_target_score is None:
-            continue
-        selected_target_score = max(1, int(selected_target_score))
-
-        selected_characters = choose_characters(1)
-        if not selected_characters:
-            return None
-
         lobby_setup = InternetLobbySetup(
             player_name=player_name,
-            character_name=str(selected_characters[0]),
-            level_id=int(selected_level.level_id),
-            target_score=int(selected_target_score),
+            character_name="Caveman",
+            level_id=1,
+            target_score=3,
             player_count=int(selected_player_count),
             rating=int(rating),
         )
@@ -443,6 +430,48 @@ def _connect_internet_match(
         internet_match = party_lobby.run()
         if not internet_match:
             return None
+
+        if bool(internet_match.get("pending_config")):
+            selected_level = choose_level()
+            if selected_level is None:
+                return None
+            selected_target_score = choose_target_score()
+            if selected_target_score is None:
+                continue
+            selected_target_score = max(1, int(selected_target_score))
+
+            assigned_players = internet_match.get("players") if isinstance(internet_match.get("players"), list) else []
+            desired_player_count = max(
+                2,
+                min(
+                    4,
+                    int(
+                        internet_match.get(
+                            "player_count",
+                            len(assigned_players) if assigned_players else selected_player_count,
+                        )
+                    ),
+                ),
+            )
+            participant_names = [str(player.get("name", f"Player {idx + 1}")) for idx, player in enumerate(assigned_players[:desired_player_count]) if isinstance(player, dict)]
+            if len(participant_names) < desired_player_count:
+                participant_names.extend([f"Player {idx + 1}" for idx in range(len(participant_names), desired_player_count)])
+            selected_characters = choose_characters(desired_player_count, participant_names)
+            if not selected_characters:
+                return None
+
+            final_result = online_service.set_match_config(
+                player_name=player_name,
+                lobby_code=str(getattr(party_lobby, "_lobby_code", "")).strip(),
+                level_id=int(selected_level.level_id),
+                target_score=int(selected_target_score),
+                player_count=int(desired_player_count),
+                characters=list(selected_characters),
+            )
+            if not final_result.get("ok"):
+                toast(screen, clock, f"Match config failed: {final_result.get('error', 'unknown')}")
+                continue
+            internet_match = final_result.get("match") if isinstance(final_result.get("match"), dict) else internet_match
 
         join_info = internet_match.get("join") if isinstance(internet_match.get("join"), dict) else {}
         endpoint = str(join_info.get("endpoint", "")).strip()
@@ -484,58 +513,30 @@ def _connect_internet_match(
         )
         network_player_names: list[str] = []
         selected_chars_for_match: list[str] = []
-        available_roster = available_characters() or [str(selected_characters[0])]
-        used_characters: list[str] = []
         local_player_index = 0
-        bot_slots: list[int] = []
         for idx, payload in enumerate(assigned_players[:desired_player_count]):
             if not isinstance(payload, dict):
                 payload = {}
             name = str(payload.get("name", f"Player {idx + 1}"))
             network_player_names.append(name)
-            if bool(payload.get("bot", False)):
-                bot_slots.append(idx)
-                selected_chars_for_match.append("")
-            else:
-                chosen_character = str(payload.get("character", selected_characters[0])).strip() or str(selected_characters[0])
-                selected_chars_for_match.append(chosen_character)
-                used_characters.append(chosen_character)
+            selected_chars_for_match.append(str(payload.get("character", "Caveman")))
             if name == player_name:
                 local_player_index = idx
 
-        def _pick_unique_bot_character() -> str:
-            for candidate in available_roster:
-                if candidate not in used_characters:
-                    used_characters.append(candidate)
-                    return candidate
-            if available_roster:
-                choice = random.choice(available_roster)
-                used_characters.append(choice)
-                return choice
-            return str(selected_characters[0])
-
-        for bot_index in bot_slots:
-            if bot_index < len(selected_chars_for_match):
-                selected_chars_for_match[bot_index] = _pick_unique_bot_character()
-
-        while len(selected_chars_for_match) < desired_player_count:
-            selected_chars_for_match.append(_pick_unique_bot_character())
         while len(network_player_names) < desired_player_count:
             network_player_names.append(f"Player {len(network_player_names) + 1}")
+            selected_chars_for_match.append("Caveman")
 
-        selected_level = (
-            resolve_level_option(int(internet_match.get("map_id", selected_level.level_id)))
-            or selected_level
-        )
-        selected_target_score = max(
-            1,
-            int(internet_match.get("target_score", selected_target_score)),
-        )
+        final_level_id = int(internet_match.get("map_id", 1))
+        final_level = resolve_level_option(final_level_id)
+        if final_level is None:
+            final_level = resolve_level_option(1)
+        final_target_score = max(1, int(internet_match.get("target_score", 3)))
         return OnlineSessionSelection(
             network=internet_network,
             local_player_index=local_player_index,
-            selected_level=selected_level,
-            selected_target_score=selected_target_score,
+            selected_level=final_level,
+            selected_target_score=final_target_score,
             selected_player_count=desired_player_count,
             selected_characters=selected_chars_for_match[:desired_player_count],
             network_player_names=network_player_names[:desired_player_count],
@@ -552,7 +553,7 @@ def run_online_session_setup(
     choose_player_count: Callable[[], int | None],
     choose_level: Callable[[], Any | None],
     choose_target_score: Callable[[], int | None],
-    choose_characters: Callable[[int], list[str] | None],
+    choose_characters: Callable[[int, list[str] | None], list[str] | None],
     resolve_level_option: Callable[[int], Any | None],
     toast: Callable[[Any, Any, str], None] = toast_message,
 ) -> OnlineSessionSelection | None:
