@@ -395,6 +395,22 @@ class MatchDaemon:
             return len(players)
         return max(2, len(session.get("players", {})))
 
+    @staticmethod
+    def _assignment_character_name(assignment: dict[str, Any], player_name: str, fallback: str = "Caveman") -> str:
+        players = assignment.get("payload", {}).get("players", [])
+        if isinstance(players, list):
+            needle = str(player_name).strip().lower()
+            for entry in players:
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name", "")).strip().lower()
+                if needle and name != needle:
+                    continue
+                character = str(entry.get("character", fallback)).strip()
+                if character:
+                    return character
+        return str(fallback)
+
     def _session_ready(self, session: dict) -> bool:
         assigned_players = session.get("assignment", {}).get("payload", {}).get("players", [])
         if not isinstance(assigned_players, list) or not assigned_players:
@@ -656,7 +672,14 @@ class MatchDaemon:
                 session_players = session["players"]
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
                 spawn_y = float(PLAYER_START_POS[1])
-                session_players[player] = {"addr": addr, "x": spawn_x, "y": spawn_y, "last_input": {}, "last_seen": time.time()}
+                session_players[player] = {
+                    "addr": addr,
+                    "x": spawn_x,
+                    "y": spawn_y,
+                    "last_input": {},
+                    "last_seen": time.time(),
+                    "character_name": self._assignment_character_name(assignment, player, "Caveman"),
+                }
                 bot_entries = assignment.get("payload", {}).get("players", [])
                 if isinstance(bot_entries, list) and not session.get("bot_names"):
                     for idx, entry in enumerate(bot_entries):
@@ -664,7 +687,7 @@ class MatchDaemon:
                             continue
                         bot_name = str(entry.get("name", f"BOT-{idx + 1}"))
                         session["bot_names"].append(bot_name)
-                        session["bot_profiles"][bot_name] = str(entry.get("profile", "Bot"))
+                        session["bot_profiles"][bot_name] = str(entry.get("profile", entry.get("character", "Bot")))
                         bot_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(session_players) + len(session["bot_names"]))
                         bot_y = float(PLAYER_START_POS[1])
                         session_players[bot_name] = {
@@ -673,7 +696,8 @@ class MatchDaemon:
                             "y": bot_y,
                             "last_input": {},
                             "bot": True,
-                            "profile": str(entry.get("profile", "Bot")),
+                            "profile": str(entry.get("profile", entry.get("character", "Bot"))),
+                            "character_name": str(entry.get("character", entry.get("profile", "Bot"))),
                         }
                     if session.get("bot_names"):
                         enemy_spawns = self._build_enemy_spawns(session)
@@ -848,6 +872,7 @@ class MatchDaemon:
                     "game_over": False,
                     "match_complete": False,
                     "end_state": None,
+                    "warmup_round_consumed": False,
                 })
                 session_players = session["players"]
                 spawn_x = float(PLAYER_START_POS[0]) + 48.0 * float(len(session_players))
@@ -861,6 +886,7 @@ class MatchDaemon:
                     "last_input": {},
                     "last_seen": time.time(),
                     "tcp_verified": True,  # Mark as TCP-authenticated
+                    "character_name": self._assignment_character_name(assignment, player, "Caveman"),
                 }
                 
                 # Setup bots if first player
@@ -871,7 +897,7 @@ class MatchDaemon:
                             continue
                         bot_name = str(entry.get("name", f"BOT-{idx + 1}"))
                         session["bot_names"].append(bot_name)
-                        session["bot_profiles"][bot_name] = str(entry.get("profile", "Bot"))
+                        session["bot_profiles"][bot_name] = str(entry.get("profile", entry.get("character", "Bot")))
                         bot_x = float(PLAYER_START_POS[0]) + 56.0 * float(len(session_players) + len(session["bot_names"]))
                         bot_y = float(PLAYER_START_POS[1])
                         session_players[bot_name] = {
@@ -880,7 +906,8 @@ class MatchDaemon:
                             "y": bot_y,
                             "last_input": {},
                             "bot": True,
-                            "profile": str(entry.get("profile", "Bot")),
+                            "profile": str(entry.get("profile", entry.get("character", "Bot"))),
+                            "character_name": str(entry.get("character", entry.get("profile", "Bot"))),
                         }
                     if session.get("bot_names"):
                         enemy_spawns = self._build_enemy_spawns(session)
@@ -987,6 +1014,7 @@ class MatchDaemon:
             "round_wins": round_wins[: len(players_list)] if players_list else round_wins,
             "match_complete": bool(session.get("match_complete", False)),
             "end_state": session.get("end_state"),
+            "warmup_round": bool(not session.get("warmup_round_consumed", False) and not session.get("match_complete", False)),
             "players": players_list,
             "hud": {
                 "survival_time": elapsed,
@@ -995,6 +1023,7 @@ class MatchDaemon:
                 "total_players": int(len(players_list)),
                 "round_wins": round_wins[: len(players_list)] if players_list else round_wins,
                 "target_score": target_score,
+                "warmup_round": bool(not session.get("warmup_round_consumed", False) and not session.get("match_complete", False)),
             },
         }
         return snapshot
@@ -1252,6 +1281,7 @@ class MatchDaemon:
         if reset_match:
             session["match_complete"] = False
             session["round_wins"] = [0 for _ in range(max(1, len(session.get("players", {}))))]
+            session["warmup_round_consumed"] = False
 
         tile_manager = session.get("tile_manager")
         if tile_manager is not None:
@@ -1335,6 +1365,13 @@ class MatchDaemon:
         wins = self._ensure_round_wins(session)
         target_score = max(1, int(session.get("assignment", {}).get("payload", {}).get("target_score", 3)))
         session["round_finished"] = True
+
+        # Consume the first completed round as a warm-up so the online match has one load-safe round.
+        if not bool(session.get("warmup_round_consumed", False)):
+            session["warmup_round_consumed"] = True
+            session["game_over"] = False
+            session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
+            return
 
         if len(alive) == 1:
             winner_index, winner_name, winner_entry = alive[0]
@@ -1832,8 +1869,13 @@ class MatchDaemon:
         draw_bonus = 0.03 if is_draw else 0.0
         return self._clamp01(base_score + win_bonus + mvp_bonus + draw_bonus)
 
-    def _rr_caps_for_target_score(self, target_score: int | None = None) -> tuple[int, int]:
+    def _rr_caps_for_target_score(
+        self,
+        target_score: int | None = None,
+        player_count: int | None = None,
+    ) -> tuple[int, int]:
         score_to_win = int(target_score if target_score is not None else 3)
+        players_total = int(player_count if player_count is not None else 2)
         min_target = 3
         max_target = 20
         min_win_cap = 12
@@ -1846,8 +1888,14 @@ class MatchDaemon:
 
         t = (score_to_win - min_target) / float(max_target - min_target)
         t = max(0.0, min(1.0, t))
-        win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
-        lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+        base_win_cap = int(round(min_win_cap + (max_win_cap - min_win_cap) * t))
+        base_lose_cap = int(round(min_lose_cap + (max_lose_cap - min_lose_cap) * t))
+
+        # Larger lobbies should have slightly higher RR swings at the same round target.
+        player_t = (players_total - 2) / 2.0
+        player_t = max(0.0, min(1.0, player_t))
+        win_cap = int(round(base_win_cap * (1.0 + 0.35 * player_t)))
+        lose_cap = int(round(base_lose_cap * (1.0 + 0.30 * player_t)))
         return win_cap, lose_cap
 
     def _compute_rr_delta(
@@ -1862,7 +1910,10 @@ class MatchDaemon:
         if is_draw:
             return 0
 
-        max_gain, max_loss = self._rr_caps_for_target_score(target_score)
+        max_gain, max_loss = self._rr_caps_for_target_score(
+            target_score,
+            player_count=len(match_stats),
+        )
         score = self._match_performance_score(match_stats, local_index, winner_index, mvp_index, is_draw=is_draw)
         won_match = winner_index is not None and local_index == winner_index
         if won_match:
@@ -1965,7 +2016,21 @@ class MatchDaemon:
                                     continue
                                 rr_before = 1000
                                 rr_after = 1000
-                                rr_delta = self._compute_rr_delta(match_stats, idx, winner_index, mvp_index, target_score, is_draw=False) if ranked_mode else 0
+                                if ranked_mode:
+                                    max_gain, max_loss = self._rr_caps_for_target_score(
+                                        target_score,
+                                        player_count=len(match_stats),
+                                    )
+                                    score = self._match_performance_score(match_stats, idx, winner_index, mvp_index, is_draw=False)
+                                    if idx == mvp_index:
+                                        # Only the MVP can gain RR; everyone else loses based on their performance.
+                                        rr_delta = int(round(score * float(max_gain)))
+                                        rr_delta = max(0, min(max_gain, rr_delta))
+                                    else:
+                                        loss = int(round((1.0 - score) * float(max_loss)))
+                                        rr_delta = -max(1, min(max_loss, loss))
+                                else:
+                                    rr_delta = 0
                                 if ranked_mode and self.account_store is not None:
                                     try:
                                         profile = self.account_store.get_profile(pname)
@@ -1979,10 +2044,10 @@ class MatchDaemon:
                                                     "ranked": True,
                                                     "rr_delta": int(rr_delta),
                                                     "rr_after": max(0, int(rr_before + rr_delta)),
-                                                    "damage_dealt": 0,
-                                                    "damage_taken": 0,
-                                                    "eliminations": 0,
-                                                    "deaths": 0,
+                                                    "damage_dealt": int(max(0, match_stats[idx].get("damage_dealt", 0))),
+                                                    "damage_taken": int(max(0, match_stats[idx].get("damage_taken", 0))),
+                                                    "eliminations": int(max(0, match_stats[idx].get("eliminations", 0))),
+                                                    "deaths": int(max(0, match_stats[idx].get("deaths", 0))),
                                                     "rounds_played": int(max(0, match_stats[idx].get("rounds_played", 0))),
                                                     "rounds_won": int(max(0, match_stats[idx].get("rounds_won", 0))),
                                                     "matches_played": 1,

@@ -99,6 +99,7 @@ class GameHUD:
         self.total_players = 1
         self.round_wins: list[int] = []
         self.target_score = 1
+        self.warmup_round = False
 
         # Timer urgency pulse
         self._pulse_timer = 0.0
@@ -153,6 +154,8 @@ class GameHUD:
         self._draw_mute_button(surface, is_muted)
         self._draw_volume_panel(surface, is_muted, volume)
         self._draw_player_cards(surface, players)
+        if self.warmup_round and self.total_players > 1:
+            self._draw_warmup_banner(surface)
         if self.total_players > 1:
             self._draw_alive_panel(surface)
 
@@ -280,6 +283,27 @@ class GameHUD:
         vy = ly + label_surf.get_height() + HUD_PANEL_PADDING_V
         surface.blit(value_surf, (vx, vy))
 
+    def _draw_warmup_banner(self, surface: pygame.Surface):
+        label_surf = self._font_label.render("WARM-UP ROUND", True, HUD_TIMER_URGENT_COLOR)
+        value_surf = self._font_value.render("NO RR WILL COUNT THIS ROUND", True, HUD_VALUE_COLOR)
+
+        panel_w = max(label_surf.get_width(), value_surf.get_width()) + HUD_PANEL_PADDING_H * 2
+        panel_h = label_surf.get_height() + value_surf.get_height() + HUD_PANEL_PADDING_V * 3
+        panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
+        panel_rect.centerx = WINDOW_SIZE[0] // 2
+        panel_rect.top = 92
+
+        _draw_panel(surface, panel_rect, HUD_PANEL_BG, HUD_TIMER_URGENT_COLOR,
+                    HUD_PANEL_BORDER_WIDTH, HUD_PANEL_RADIUS, glow=True)
+
+        lx = panel_rect.centerx - label_surf.get_width() // 2
+        ly = panel_rect.top + HUD_PANEL_PADDING_V
+        surface.blit(label_surf, (lx, ly))
+
+        vx = panel_rect.centerx - value_surf.get_width() // 2
+        vy = ly + label_surf.get_height() + HUD_PANEL_PADDING_V
+        surface.blit(value_surf, (vx, vy))
+
     def _draw_alive_panel(self, surface: pygame.Surface):
         """Alive counter panel — bottom-right."""
         alive_color = self._alive_color()
@@ -338,6 +362,9 @@ class GameHUD:
         self.round_wins = [int(max(0, value)) for value in round_wins]
         self.target_score = max(1, int(target_score))
 
+    def set_warmup_round(self, warmup_round: bool):
+        self.warmup_round = bool(warmup_round)
+
     def snapshot_state(self) -> dict:
         """Serialize HUD values for LAN clients."""
         return {
@@ -348,6 +375,7 @@ class GameHUD:
             "total_players": int(self.total_players),
             "round_wins": [int(value) for value in self.round_wins],
             "target_score": int(self.target_score),
+            "warmup_round": bool(self.warmup_round),
         }
 
     def apply_snapshot(self, snapshot: dict | None):
@@ -364,6 +392,7 @@ class GameHUD:
         if isinstance(wins, list):
             self.round_wins = [int(max(0, value)) for value in wins]
         self.target_score = max(1, int(snapshot.get("target_score", self.target_score)))
+        self.warmup_round = bool(snapshot.get("warmup_round", self.warmup_round))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

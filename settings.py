@@ -437,6 +437,7 @@ SOUND_PLAYER_JUMP = str(ASSETS_DIR / "Audio" / "SFX" / "jump.wav")
 # Character power audio cues
 POWER_SFX_DIR = ASSETS_DIR / "Audio" / "sfx_generated"
 SOUND_POWER_READY = str(POWER_SFX_DIR / "power_ready.wav")
+SOUND_MATCH_FOUND = str(POWER_SFX_DIR / "match_found.wav")
 SOUND_POWER_UNAVAILABLE = str(POWER_SFX_DIR / "power_unavailable.wav")
 SOUND_POWER_CAVEMAN = str(POWER_SFX_DIR / "power_caveman_smash.wav")
 SOUND_POWER_NINJA_DASH = str(POWER_SFX_DIR / "power_ninja_dash.wav")

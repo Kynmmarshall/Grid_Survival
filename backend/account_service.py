@@ -250,6 +250,7 @@ class AccountService:
         mvp_count: int = 0,
         ranked: bool = True,
         sync_now: bool = True,
+        queue_sync: bool = True,
     ) -> AccountProfile | None:
         profile = self.get_profile(username)
         if profile is None:
@@ -343,8 +344,9 @@ class AccountService:
             "mvp_count": int(max(0, mvp_count)),
             "updated_at": now,
         }
-        self._queue_sync_event(profile.username, "stat_delta", sync_payload)
-        if sync_now:
+        if queue_sync:
+            self._queue_sync_event(profile.username, "stat_delta", sync_payload)
+        if sync_now and queue_sync:
             self.sync_pending(profile.username)
         return self.get_profile(profile.username)
 
@@ -500,7 +502,7 @@ class AccountService:
 
         return leaderboard
 
-    def sync_pending(self, username: str | None = None) -> bool:
+    def sync_pending(self, username: str | None = None, pull_profile: bool = True) -> bool:
         """Attempt to push queued updates to VPS and pull latest profile data."""
         if not self._has_remote():
             return False
@@ -544,7 +546,7 @@ class AccountService:
                         (int(row["id"]),),
                     )
 
-        if username:
+        if username and pull_profile:
             self._pull_remote_profile(username)
 
         return any_success

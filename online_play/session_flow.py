@@ -470,13 +470,25 @@ def _connect_internet_match(
             continue
 
         assigned_players = internet_match.get("players") if isinstance(internet_match.get("players"), list) else []
+        desired_player_count = max(
+            2,
+            min(
+                4,
+                int(
+                    internet_match.get(
+                        "player_count",
+                        len(assigned_players) if assigned_players else selected_player_count,
+                    )
+                ),
+            ),
+        )
         network_player_names: list[str] = []
         selected_chars_for_match: list[str] = []
         available_roster = available_characters() or [str(selected_characters[0])]
         used_characters: list[str] = []
         local_player_index = 0
         bot_slots: list[int] = []
-        for idx, payload in enumerate(assigned_players[:2]):
+        for idx, payload in enumerate(assigned_players[:desired_player_count]):
             if not isinstance(payload, dict):
                 payload = {}
             name = str(payload.get("name", f"Player {idx + 1}"))
@@ -506,9 +518,9 @@ def _connect_internet_match(
             if bot_index < len(selected_chars_for_match):
                 selected_chars_for_match[bot_index] = _pick_unique_bot_character()
 
-        while len(selected_chars_for_match) < 2:
+        while len(selected_chars_for_match) < desired_player_count:
             selected_chars_for_match.append(_pick_unique_bot_character())
-        while len(network_player_names) < 2:
+        while len(network_player_names) < desired_player_count:
             network_player_names.append(f"Player {len(network_player_names) + 1}")
 
         selected_level = (
@@ -524,9 +536,9 @@ def _connect_internet_match(
             local_player_index=local_player_index,
             selected_level=selected_level,
             selected_target_score=selected_target_score,
-            selected_player_count=selected_player_count,
-            selected_characters=selected_chars_for_match[:2],
-            network_player_names=network_player_names[:2],
+            selected_player_count=desired_player_count,
+            selected_characters=selected_chars_for_match[:desired_player_count],
+            network_player_names=network_player_names[:desired_player_count],
             requires_match_start=False,
         )
 
