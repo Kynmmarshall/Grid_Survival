@@ -132,7 +132,9 @@ class PlayerSelectionScreen:
     """Animated character picker with idle/run previews and multi-player flow."""
 
     def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock,
-                 game_mode: str, num_players: int = 1, slot_names: List[str] | None = None) -> None:
+                 game_mode: str, num_players: int = 1, slot_names: List[str] | None = None,
+                 initial_selections: List[str | None] | None = None,
+                 current_player_index: int | None = None) -> None:
         self.screen = screen
         self.clock = clock
         self.game_mode = game_mode
@@ -181,8 +183,15 @@ class PlayerSelectionScreen:
         self._bg_gradient = self._create_gradient()
 
         # Selection state
-        self.current_player = 0
         self.selections: List[Optional[str]] = [None] * self.num_players
+        for idx, selection in enumerate(list(initial_selections or [])[: self.num_players]):
+            text = str(selection).strip() if selection is not None else ""
+            self.selections[idx] = text or None
+        if current_player_index is not None and 0 <= int(current_player_index) < self.num_players:
+            self.current_player = int(current_player_index)
+        else:
+            self.current_player = self._find_next_empty_slot(0)
+        self._single_slot_mode = current_player_index is not None
         self.active_index: Optional[int] = 0 if self.cards else None
         self.hover_index: Optional[int] = None
 
@@ -622,6 +631,12 @@ class PlayerSelectionScreen:
     def _locked_slots_for(self, character_name: str) -> List[int]:
         return [idx for idx, choice in enumerate(self.selections) if choice == character_name]
 
+    def _find_next_empty_slot(self, start_index: int) -> int:
+        for idx in range(max(0, int(start_index)), self.num_players):
+            if self.selections[idx] is None:
+                return idx
+        return self.num_players
+
     def _move_active(self, delta: int) -> None:
         if not self.cards:
             return
@@ -653,7 +668,11 @@ class PlayerSelectionScreen:
             return None
         self._status_text = ""
         self.selections[self.current_player] = choice
-        self.current_player += 1
+        if self._single_slot_mode:
+            selections = [name or self.characters[0] for name in self.selections]
+            self._fade(False)
+            return selections
+        self.current_player = self._find_next_empty_slot(self.current_player + 1)
 
         if self.current_player >= self.num_players:
             selections = [name or self.characters[0] for name in self.selections]
@@ -664,10 +683,8 @@ class PlayerSelectionScreen:
         return None
 
     def _undo_selection(self) -> None:
-        if self.current_player == 0:
-            self.selections[0] = None
+        if self.current_player >= self.num_players:
             return
-        self.current_player -= 1
         previous = self.selections[self.current_player]
         self.selections[self.current_player] = None
         if previous and previous in self.characters:

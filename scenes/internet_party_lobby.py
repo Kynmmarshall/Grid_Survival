@@ -333,9 +333,11 @@ class InternetPartyLobbyScreen:
                 name = str(member.get("name", f"Player {idx + 1}"))
                 ready = bool(member.get("ready", False))
                 rating = int(member.get("rating", 1000))
+                character = str(member.get("character", "")).strip()
                 dot = (120, 232, 170) if ready else (236, 160, 136)
                 pygame.draw.circle(self.screen, dot, (members_rect.left + 16, y + 11), 6)
-                line = self._font_small.render(f"{name}  RR:{rating}  {'READY' if ready else 'WAITING'}", True, (228, 236, 252))
+                character_text = f"  {character}" if character else ""
+                line = self._font_small.render(f"{name}{character_text}  RR:{rating}  {'READY' if ready else 'WAITING'}", True, (228, 236, 252))
                 self.screen.blit(line, (members_rect.left + 28, y))
                 y += 26
 

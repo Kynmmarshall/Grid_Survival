@@ -384,6 +384,53 @@ def _run_host_level_selection(
         )
 
 
+def wait_for_internet_match_finalization(
+    screen,
+    clock,
+    online_service: OnlineService,
+    player_name: str,
+    match_id: str,
+    toast: Callable[[Any, Any, str], None],
+) -> dict[str, Any] | None:
+    audio_overlay = SceneAudioOverlay()
+    safe_match_id = str(match_id or "").strip()
+    while True:
+        dt = clock.tick(60) / 1000.0
+
+        for event in pygame.event.get():
+            if audio_overlay.handle_event(event):
+                continue
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return None
+
+        res = online_service.poll_or_ws_updates(player_name=player_name)
+        if res.get("ok"):
+            for event in res.get("events") or []:
+                if not isinstance(event, dict):
+                    continue
+                if str(event.get("type", "")) != "match_found":
+                    continue
+                match = event.get("match")
+                if isinstance(match, dict) and str(match.get("match_id", "")).strip() == safe_match_id:
+                    if match.get("join"):
+                        return match
+
+        draw_lobby_panel(
+            screen,
+            "FINALIZING MATCH",
+            [
+                "Waiting for all players to confirm characters.",
+                f"Match {safe_match_id or 'pending'}",
+                "Press ESC to cancel.",
+            ],
+            accent=(166, 120, 255),
+            audio_overlay=audio_overlay,
+        )
+
+
 def _connect_internet_match(
     screen,
     clock,
@@ -394,7 +441,7 @@ def _connect_internet_match(
     choose_player_count: Callable[[], int | None],
     choose_level: Callable[[], Any | None],
     choose_target_score: Callable[[], int | None],
-    choose_characters: Callable[[int, list[str] | None], list[str] | None],
+    choose_characters: Callable[[int, list[str] | None, list[str] | None, int | None], list[str] | None],
     resolve_level_option: Callable[[int], Any | None],
     toast: Callable[[Any, Any, str], None],
 ) -> OnlineSessionSelection | None:
@@ -432,14 +479,6 @@ def _connect_internet_match(
             return None
 
         if bool(internet_match.get("pending_config")):
-            selected_level = choose_level()
-            if selected_level is None:
-                return None
-            selected_target_score = choose_target_score()
-            if selected_target_score is None:
-                continue
-            selected_target_score = max(1, int(selected_target_score))
-
             assigned_players = internet_match.get("players") if isinstance(internet_match.get("players"), list) else []
             desired_player_count = max(
                 2,
@@ -453,25 +492,81 @@ def _connect_internet_match(
                     ),
                 ),
             )
-            participant_names = [str(player.get("name", f"Player {idx + 1}")) for idx, player in enumerate(assigned_players[:desired_player_count]) if isinstance(player, dict)]
-            if len(participant_names) < desired_player_count:
-                participant_names.extend([f"Player {idx + 1}" for idx in range(len(participant_names), desired_player_count)])
-            selected_characters = choose_characters(desired_player_count, participant_names)
+            participant_names: list[str] = []
+            initial_selections: list[str | None] = []
+            local_player_index = 0
+            for idx, payload in enumerate(assigned_players[:desired_player_count]):
+                if not isinstance(payload, dict):
+                    payload = {}
+                name = str(payload.get("name", f"Player {idx + 1}"))
+                participant_names.append(name)
+                character = str(payload.get("character", "")).strip()
+                initial_selections.append(character or None)
+                if name == player_name:
+                    local_player_index = idx
+            while len(participant_names) < desired_player_count:
+                participant_names.append(f"Player {len(participant_names) + 1}")
+                initial_selections.append(None)
+
+            lobby_owner = str((getattr(party_lobby, "_lobby", {}) or {}).get("owner", "")).strip()
+            is_owner = lobby_owner == str(player_name).strip()
+
+            chosen_level = None
+            if is_owner:
+                chosen_level = choose_level()
+                if chosen_level is None:
+                    return None
+
+            selected_characters = choose_characters(
+                desired_player_count,
+                participant_names,
+                initial_selections,
+                local_player_index,
+            )
             if not selected_characters:
                 return None
 
-            final_result = online_service.set_match_config(
-                player_name=player_name,
-                lobby_code=str(getattr(party_lobby, "_lobby_code", "")).strip(),
-                level_id=int(selected_level.level_id),
-                target_score=int(selected_target_score),
-                player_count=int(desired_player_count),
-                characters=list(selected_characters),
-            )
+            local_character = str(selected_characters[local_player_index]).strip() if local_player_index < len(selected_characters) else ""
+            if not local_character:
+                toast(screen, clock, "Select a character for your slot.")
+                continue
+
+            if is_owner:
+                final_result = online_service.set_match_config(
+                    player_name=player_name,
+                    lobby_code=str(getattr(party_lobby, "_lobby_code", "")).strip(),
+                    level_id=int(chosen_level.level_id),
+                    target_score=int(internet_match.get("target_score", 3)),
+                    player_count=int(desired_player_count),
+                    character=local_character,
+                )
+            else:
+                final_result = online_service.set_character(
+                    player_name=player_name,
+                    lobby_code=str(getattr(party_lobby, "_lobby_code", "")).strip(),
+                    character=local_character,
+                )
             if not final_result.get("ok"):
                 toast(screen, clock, f"Match config failed: {final_result.get('error', 'unknown')}")
                 continue
-            internet_match = final_result.get("match") if isinstance(final_result.get("match"), dict) else internet_match
+
+            internet_match = final_result.get("match") if isinstance(final_result.get("match"), dict) else None
+            if not isinstance(internet_match, dict) or not internet_match.get("join"):
+                wait_match_id = ""
+                if isinstance(final_result.get("match"), dict):
+                    wait_match_id = str(final_result["match"].get("match_id", "")).strip()
+                if not wait_match_id and isinstance(internet_match, dict):
+                    wait_match_id = str(internet_match.get("match_id", "")).strip()
+                internet_match = wait_for_internet_match_finalization(
+                    screen,
+                    clock,
+                    online_service,
+                    player_name,
+                    wait_match_id,
+                    toast,
+                )
+                if not internet_match:
+                    continue
 
         join_info = internet_match.get("join") if isinstance(internet_match.get("join"), dict) else {}
         endpoint = str(join_info.get("endpoint", "")).strip()
@@ -553,7 +648,7 @@ def run_online_session_setup(
     choose_player_count: Callable[[], int | None],
     choose_level: Callable[[], Any | None],
     choose_target_score: Callable[[], int | None],
-    choose_characters: Callable[[int, list[str] | None], list[str] | None],
+    choose_characters: Callable[[int, list[str] | None, list[str] | None, int | None], list[str] | None],
     resolve_level_option: Callable[[int], Any | None],
     toast: Callable[[Any, Any, str], None] = toast_message,
 ) -> OnlineSessionSelection | None:

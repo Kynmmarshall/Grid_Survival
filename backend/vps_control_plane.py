@@ -13,6 +13,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from character_manager import available_characters
 from backend.vps_match_server import MatchServerManager
 from backend.match_daemon import run_daemon_from_manager
 
@@ -107,6 +108,7 @@ class ControlPlaneState:
                 "ready": False,
                 "rating": rating,
                 "joined_at": time.time(),
+                "character": "",
             }
             self.lobbies[code] = lobby
             self.player_lobby[player] = code
@@ -131,6 +133,7 @@ class ControlPlaneState:
                 "ready": False,
                 "rating": rating,
                 "joined_at": time.time(),
+                "character": "",
             }
             self.player_lobby[player] = code
 
@@ -154,6 +157,35 @@ class ControlPlaneState:
             for member in lobby.members:
                 self._push_update(member, {"type": "lobby_updated", "lobby": self._serialize_lobby(lobby)})
             return {"ok": True, "lobby": self._serialize_lobby(lobby)}
+
+    def set_character(self, payload: dict[str, Any]) -> dict[str, Any]:
+        player = str(payload.get("player", "")).strip()
+        code = str(payload.get("lobby_code", "")).strip().upper()
+        character = str(payload.get("character", "")).strip()
+        if not player or not code or not character:
+            return {"ok": False, "error": "missing player, lobby_code or character"}
+
+        with self.lock:
+            lobby = self.lobbies.get(code)
+            if lobby is None or player not in lobby.members:
+                return {"ok": False, "error": "not in lobby"}
+
+            used = {
+                str(member.get("character", "")).strip().lower()
+                for name, member in lobby.members.items()
+                if name != player
+            }
+            if character.lower() in used:
+                return {"ok": False, "error": f"{character} is already taken"}
+
+            lobby.members[player]["character"] = character
+            pending = self._maybe_finalize_lobby_match(lobby)
+            for member in lobby.members:
+                self._push_update(member, {"type": "lobby_updated", "lobby": self._serialize_lobby(lobby)})
+            payload_out: dict[str, Any] = {"ok": True, "lobby": self._serialize_lobby(lobby)}
+            if pending is not None:
+                payload_out["match"] = pending
+            return payload_out
 
     def enqueue(self, payload: dict[str, Any]) -> dict[str, Any]:
         player = str(payload.get("player", "")).strip()
@@ -309,6 +341,7 @@ class ControlPlaneState:
             return None
 
         base_lobby = lobbies[0]
+        used_characters: set[str] = set()
         for lobby in lobbies:
             lobby.queued = False
             lobby.pending_match = {
@@ -318,35 +351,30 @@ class ControlPlaneState:
                 "players": [],
             }
             for member_name, member in lobby.members.items():
-                players.append({
+                character = str(member.get("character", "")).strip()
+                player_entry = {
                     "name": member_name,
                     "bot": False,
                     "rating": int(member.get("rating", 1000)),
-                })
-
-        for idx in range(bot_count):
-            profile = ["Diamond", "Master", "Apex"][idx % 3]
-            players.append({"name": f"BOT-{profile}-{idx + 1}", "bot": True, "profile": profile})
+                    "character": character if character else ("" if pending_config else "Caveman"),
+                }
+                if character:
+                    used_characters.add(character.lower())
+                players.append(player_entry)
 
         final_players = [dict(player) for player in players]
-        if isinstance(match_config, dict):
-            requested_characters = match_config.get("characters")
-            if isinstance(requested_characters, list) and requested_characters:
-                used: set[str] = set()
-                roster = []
-                for value in requested_characters:
-                    text = str(value or "").strip()
-                    if text and text not in used:
-                        roster.append(text)
-                        used.add(text)
-                for idx, player in enumerate(final_players):
-                    if idx < len(roster):
-                        player["character"] = roster[idx]
-                    else:
-                        player["character"] = str(player.get("character", player.get("profile", "Caveman")))
-            else:
-                for player in final_players:
-                    player["character"] = str(player.get("character", player.get("profile", "Caveman")))
+        if not pending_config:
+            for idx in range(bot_count):
+                profile = ["Diamond", "Master", "Apex"][idx % 3]
+                bot_character = self._choose_bot_character(used_characters)
+                used_characters.add(bot_character.lower())
+                final_players.append({"name": f"BOT-{profile}-{idx + 1}", "bot": True, "profile": profile, "character": bot_character})
+
+        if not pending_config:
+            for player in final_players:
+                if str(player.get("character", "")).strip():
+                    continue
+                player["character"] = str(player.get("profile", "Caveman")) if bool(player.get("bot")) else "Caveman"
 
         for lobby in lobbies:
             if lobby.pending_match is not None:
@@ -384,6 +412,15 @@ class ControlPlaneState:
                 self._push_update(member_name, payload)
         return match_payload
 
+    def _choose_bot_character(self, used_characters: set[str]) -> str:
+        pool = [name for name in available_characters() if name.lower() not in used_characters]
+        if pool:
+            return random.choice(pool)
+        fallback_pool = available_characters()
+        if fallback_pool:
+            return random.choice(fallback_pool)
+        return "Caveman"
+
     def set_match_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         player = str(payload.get("player", "")).strip()
         code = str(payload.get("lobby_code", "")).strip().upper()
@@ -400,45 +437,63 @@ class ControlPlaneState:
                 return {"ok": False, "error": "no pending match to finalize"}
 
             level_id = max(1, int(payload.get("level_id", lobby.map_pool[0] if lobby.map_pool else 1)))
-            target_score = max(1, int(payload.get("target_score", lobby.target_score)))
-            player_count = max(2, min(4, int(payload.get("player_count", lobby.max_players))))
-            characters = payload.get("characters")
-            if not isinstance(characters, list):
-                characters = []
+            leader_character = str(payload.get("character", payload.get("leader_character", ""))).strip()
 
-            lobby.target_score = target_score
+            if leader_character:
+                lobby.members[player]["character"] = leader_character
+
             lobby.map_pool = [level_id]
-            lobby.max_players = player_count
             lobby.match_config = {
                 "level_id": level_id,
-                "target_score": target_score,
-                "player_count": player_count,
-                "characters": [str(item) for item in characters],
+                "target_score": int(lobby.target_score),
+                "player_count": int(lobby.max_players),
+                "leader_character": leader_character or str(lobby.members[player].get("character", "")).strip(),
             }
 
             pending = dict(lobby.pending_match)
-            queue_entries = [
-                {
-                    "lobby_code": code,
-                    "queued_at": time.time(),
-                    "region": lobby.region,
-                    "rating": int(member.get("rating", 1000)),
-                    "name": name,
-                }
-                for name, member in lobby.members.items()
-            ]
-            final_match = self._emit_match_found(
+            queue_entries = [{"lobby_code": code, "queued_at": time.time(), "region": lobby.region, "rating": int(lobby.members[player].get("rating", 1000))}]
+            staged_match = self._emit_match_found(
                 queue_entries,
-                target_players=int(pending.get("target_players", player_count)),
+                target_players=int(pending.get("target_players", lobby.max_players)),
                 bot_count=int(pending.get("bot_count", 0)),
-                pending_config=False,
+                pending_config=True,
                 match_config=lobby.match_config,
                 match_id=str(pending.get("match_id", "")) or None,
             )
-            lobby.pending_match = None
+            if staged_match is not None:
+                lobby.pending_match["players"] = [dict(player) for player in staged_match.get("players", []) if isinstance(player, dict)]
             for member in lobby.members:
-                self._push_update(member, {"type": "match_configured", "lobby": self._serialize_lobby(lobby), "match": final_match})
-            return {"ok": True, "match": final_match, "lobby": self._serialize_lobby(lobby)}
+                self._push_update(member, {"type": "match_configured", "lobby": self._serialize_lobby(lobby), "match": staged_match})
+            pending_match = self._maybe_finalize_lobby_match(lobby)
+            if pending_match is not None:
+                return {"ok": True, "match": pending_match, "lobby": self._serialize_lobby(lobby)}
+            return {"ok": True, "match": staged_match, "lobby": self._serialize_lobby(lobby)}
+
+    def _maybe_finalize_lobby_match(self, lobby: Lobby) -> dict[str, Any] | None:
+        if not isinstance(lobby.pending_match, dict) or not isinstance(lobby.match_config, dict):
+            return None
+
+        all_selected = True
+        for member in lobby.members.values():
+            if not str(member.get("character", "")).strip():
+                all_selected = False
+                break
+        if not all_selected:
+            return None
+
+        pending = dict(lobby.pending_match)
+        queue_entries = [{"lobby_code": lobby.code, "queued_at": time.time(), "region": lobby.region, "rating": int(next(iter(lobby.members.values()), {}).get("rating", 1000))}]
+        final_match = self._emit_match_found(
+            queue_entries,
+            target_players=int(pending.get("target_players", lobby.max_players)),
+            bot_count=int(pending.get("bot_count", 0)),
+            pending_config=False,
+            match_config=lobby.match_config,
+            match_id=str(pending.get("match_id", "")) or None,
+        )
+        lobby.pending_match = None
+        lobby.match_config = None
+        return final_match
 
     def _serialize_lobby(self, lobby: Lobby | None) -> dict[str, Any] | None:
         if lobby is None:
@@ -459,6 +514,7 @@ class ControlPlaneState:
                     "name": name,
                     "ready": bool(data.get("ready", False)),
                     "rating": int(data.get("rating", 1000)),
+                    "character": str(data.get("character", "")).strip(),
                 }
                 for name, data in lobby.members.items()
             ],
@@ -542,6 +598,8 @@ class Handler(BaseHTTPRequestHandler):
             out = STATE.join_lobby(payload)
         elif route == "/internet/lobbies/ready":
             out = STATE.set_ready(payload)
+        elif route == "/internet/lobbies/character":
+            out = STATE.set_character(payload)
         elif route == "/internet/lobbies/config":
             out = STATE.set_match_config(payload)
         elif route == "/internet/queue/enqueue":

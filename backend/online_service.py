@@ -166,6 +166,17 @@ class OnlineService:
             },
         )
 
+    def set_character(self, *, player_name: str, lobby_code: str, character: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/internet/lobbies/character",
+            {
+                "player": str(player_name),
+                "lobby_code": str(lobby_code).upper(),
+                "character": str(character),
+            },
+        )
+
     def queue(
         self,
         *,

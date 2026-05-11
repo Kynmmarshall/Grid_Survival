@@ -286,13 +286,20 @@ def main():
                         sys.exit()
                     return selected
 
-                def _choose_characters(count: int, participant_names: list[str] | None = None):
+                def _choose_characters(
+                    count: int,
+                    participant_names: list[str] | None = None,
+                    initial_selections: list[str | None] | None = None,
+                    current_player_index: int | None = None,
+                ):
                     char_select = PlayerSelectionScreen(
                         screen,
                         clock,
                         game_mode,
                         num_players=max(1, int(count)),
                         slot_names=list(participant_names or []),
+                        initial_selections=list(initial_selections or []),
+                        current_player_index=current_player_index,
                     )
                     selected = char_select.run()
                     if not selected and getattr(char_select, "quit_requested", False):
