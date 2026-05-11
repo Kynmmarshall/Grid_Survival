@@ -95,13 +95,9 @@ class InternetPartyLobbyScreen:
             if etype == "match_found":
                 match = event.get("match")
                 if isinstance(match, dict):
-                    is_owner = bool(self._lobby) and str(self._lobby.get("owner", "")).strip() == str(self.setup.player_name).strip()
-                    if bool(match.get("pending_config")) and is_owner:
+                    if bool(match.get("pending_config")):
                         return match
-                    if not bool(match.get("pending_config")):
-                        return match
-                    self._set_status("Match found. Waiting for party leader to finalize setup...", ttl=2.0)
-                    continue
+                    return match
             if etype == "match_configured":
                 match = event.get("match")
                 if isinstance(match, dict):
