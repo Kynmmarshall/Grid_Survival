@@ -33,7 +33,8 @@ def _parse_port(value: str, default: int = 8000) -> int:
     return default
 
 
-DB_PATH = Path(_first_env("GRID_SURVIVAL_VPS_DB", "DB_NAME", default="vps_accounts.db"))
+DEFAULT_DB_PATH = Path(__file__).resolve().parent / "vps_accounts.db"
+DB_PATH = Path(_first_env("GRID_SURVIVAL_VPS_DB", "DB_NAME", default=str(DEFAULT_DB_PATH)))
 HOST = _first_env("GRID_SURVIVAL_VPS_HOST", "DB_HOST", default="0.0.0.0")
 PORT = _parse_port(_first_env("GRID_SURVIVAL_VPS_PORT", "DB_PORT", default="8000"), default=8000)
 
