@@ -79,6 +79,7 @@ class ControlPlaneState:
         region = str(payload.get("region") or "global").lower()
         max_players = max(2, min(4, int(payload.get("max_players", 2))))
         rating = int(payload.get("rating", 1000))
+        character_name = str(payload.get("character_name", "Caveman")).strip() or "Caveman"
 
         with self.lock:
             if player in self.player_lobby:
@@ -104,6 +105,7 @@ class ControlPlaneState:
             lobby.members[player] = {
                 "ready": False,
                 "rating": rating,
+                "character": character_name,
                 "joined_at": time.time(),
             }
             self.lobbies[code] = lobby
@@ -115,6 +117,7 @@ class ControlPlaneState:
         player = str(payload.get("player", "")).strip()
         code = str(payload.get("lobby_code", "")).strip().upper()
         rating = int(payload.get("rating", 1000))
+        character_name = str(payload.get("character_name", "Caveman")).strip() or "Caveman"
         if not player or not code:
             return {"ok": False, "error": "missing player or lobby_code"}
 
@@ -128,6 +131,7 @@ class ControlPlaneState:
             lobby.members[player] = {
                 "ready": False,
                 "rating": rating,
+                "character": character_name,
                 "joined_at": time.time(),
             }
             self.player_lobby[player] = code
@@ -298,12 +302,13 @@ class ControlPlaneState:
                 players.append({
                     "name": member_name,
                     "bot": False,
+                    "character": str(member.get("character", "Caveman")).strip() or "Caveman",
                     "rating": int(member.get("rating", 1000)),
                 })
 
         for idx in range(bot_count):
             profile = ["Diamond", "Master", "Apex"][idx % 3]
-            players.append({"name": f"BOT-{profile}-{idx + 1}", "bot": True, "profile": profile})
+            players.append({"name": f"BOT-{profile}-{idx + 1}", "bot": True, "character": "Bot", "profile": profile})
 
         payload = {
             "type": "match_found",

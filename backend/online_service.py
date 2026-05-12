@@ -123,6 +123,7 @@ class OnlineService:
         self,
         *,
         player_name: str,
+        character_name: str | None = None,
         mode: str,
         target_score: int,
         map_pool: list[int],
@@ -130,29 +131,35 @@ class OnlineService:
         max_players: int,
         rating: int,
     ) -> dict[str, Any]:
+        payload = {
+            "player": str(player_name),
+            "mode": str(mode),
+            "target_score": int(target_score),
+            "map_pool": [int(x) for x in map_pool],
+            "region": str(region),
+            "max_players": int(max_players),
+            "rating": int(rating),
+        }
+        if character_name:
+            payload["character_name"] = str(character_name)
         return self._request(
             "POST",
             "/internet/lobbies/create",
-            {
-                "player": str(player_name),
-                "mode": str(mode),
-                "target_score": int(target_score),
-                "map_pool": [int(x) for x in map_pool],
-                "region": str(region),
-                "max_players": int(max_players),
-                "rating": int(rating),
-            },
+            payload,
         )
 
-    def join_lobby(self, *, player_name: str, lobby_code: str, rating: int = 1000) -> dict[str, Any]:
+    def join_lobby(self, *, player_name: str, lobby_code: str, character_name: str | None = None, rating: int = 1000) -> dict[str, Any]:
+        payload = {
+            "player": str(player_name),
+            "lobby_code": str(lobby_code).upper(),
+            "rating": int(rating),
+        }
+        if character_name:
+            payload["character_name"] = str(character_name)
         return self._request(
             "POST",
             "/internet/lobbies/join",
-            {
-                "player": str(player_name),
-                "lobby_code": str(lobby_code).upper(),
-                "rating": int(rating),
-            },
+            payload,
         )
 
     def set_ready(self, *, player_name: str, lobby_code: str, ready: bool) -> dict[str, Any]:

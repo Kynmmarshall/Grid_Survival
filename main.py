@@ -395,6 +395,8 @@ def main():
                             except Exception:
                                 pass
                         break
+                    
+                    # Extract characters and names from match_setup in correct order
                     selected_characters = [
                         str(player.get("character", selected_characters[0]))
                         for player in match_setup["players"]
@@ -403,7 +405,7 @@ def main():
                         str(player.get("name", f"Player {idx + 1}"))
                         for idx, player in enumerate(match_setup["players"])
                     ]
-                    local_player_index = int(match_setup["local_player_index"])
+                    local_player_index = int(match_setup.get("local_player_index", 0))
                     selected_level = resolve_level_option(
                         int(match_setup.get("level_id", selected_level.level_id))
                     ) or selected_level

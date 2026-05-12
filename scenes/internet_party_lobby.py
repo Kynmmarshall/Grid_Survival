@@ -107,6 +107,7 @@ class InternetPartyLobbyScreen:
     def _action_create_lobby(self) -> None:
         res = self.online_service.create_lobby(
             player_name=self.setup.player_name,
+            character_name=self.setup.character_name,
             mode="ranked",
             target_score=int(self.setup.target_score),
             map_pool=[int(self.setup.level_id)],
@@ -216,6 +217,7 @@ class InternetPartyLobbyScreen:
         res = self.online_service.join_lobby(
             player_name=self.setup.player_name,
             lobby_code=clean,
+            character_name=self.setup.character_name,
             rating=int(self.setup.rating),
         )
         if not res.get("ok"):
