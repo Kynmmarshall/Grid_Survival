@@ -124,18 +124,277 @@ Network Protocol & UDP (port 5555) \\
 \caption{Server Specifications for Small-Scale Online Play (100–500 concurrent players)}
 \end{table}
 
+\section{Game Modes}
+
+Grid Survival supports four distinct gameplay modes, each optimized for different player counts and network environments:
+
+\subsection{Campaign Mode (Single-Player vs. AI)}
+
+Campaign Mode allows a single player to compete against AI-controlled opponents in a series of matches. This mode is ideal for:
+\begin{itemize}
+    \item Learning the game mechanics without pressure
+    \item Practicing character strategies
+    \item Unlocking secret characters and achievements
+    \item Solo entertainment
+\end{itemize}
+
+\textbf{Features:}
+\begin{itemize}
+    \item 3–4 AI opponents with adjustable difficulty (Easy, Normal, Hard)
+    \item Progression system with unlockable rewards
+    \item Best of 3, 5, or 7 match format
+    \item Local match history and statistics
+\end{itemize}
+
+\subsection{Local Multiplayer}
+
+Local Multiplayer enables 2–4 players to compete on the same machine using shared keyboards, mice, or gamepads. Ideal for:
+\begin{itemize}
+    \item Classroom tournaments
+    \item Campus game hall competitions
+    \item Couch gaming sessions
+    \item Party events
+\end{itemize}
+
+\textbf{Features:}
+\begin{itemize}
+    \item Split-screen or windowed display modes
+    \item Full character and power-up availability
+    \item Remappable controls for each player
+    \item Real-time scoreboard and HUD
+    \item Best-of-series match support
+\end{itemize}
+
+\subsection{LAN Multiplayer}
+
+LAN Multiplayer connects multiple machines over a Local Area Network (campus network, office network, or home router). Ideal for:
+\begin{itemize}
+    \item Campus tournaments and events
+    \item LAN parties
+    \item Classroom competitions
+    \item Small-scale social gaming
+\end{itemize}
+
+\textbf{Technical Details:}
+\begin{itemize}
+    \item Host discovers clients automatically via UDP broadcast
+    \item No internet connection required
+    \item Latency: Typically 1–50 ms on a stable LAN
+    \item Supports up to 4 players per match (expandable with multiple match instances)
+    \item Persistent lobby chat and team management
+\end{itemize}
+
+\subsection{Online Multiplayer}
+
+Online Multiplayer connects players over the internet via our dedicated VPS infrastructure. Ideal for:
+\begin{itemize}
+    \item Global player base
+    \item Ranked competitive matches
+    \item Asynchronous matchmaking (queue system)
+    \item Persistent player accounts and statistics
+\end{itemize}
+
+\textbf{Technical Details:}
+\begin{itemize}
+    \item Authoritative server architecture (cheat-proof)
+    \item Server-side snapshot replication for smooth client-side interpolation
+    \item Automatic match discovery and lobby creation
+    \item Latency tolerance: Playable up to 150 ms ping
+    \item Player account system with rating (RR), win/loss tracking, and leaderboards
+    \item Support for 100–500 concurrent players (scales with server resources)
+\end{itemize}
+
+\section{System Requirements}
+
+\subsection{Player Machine Requirements}
+
+Players require different system specifications depending on desired performance and visual quality:
+
+\subsubsection{Minimum Specifications (30 FPS, Low Quality)}
+
+To run Grid Survival at playable frame rates with minimal graphics fidelity:
+
+\begin{table}[h]
+\centering
+\rowcolors{2}{lightgray}{white}
+\begin{tabularx}{\textwidth}{|>{\columncolor{primary!15}}X|X|}
+\hline
+\rowcolor{primary}\textcolor{white}{\textbf{Component}} & \textcolor{white}{\textbf{Requirement}} \\
+\hline
+Processor & Intel Core i3 (6th Gen) or AMD Ryzen 3 1200 \\
+\hline
+RAM & 4 GB \\
+\hline
+GPU & Intel UHD Graphics 530 or equivalent \\
+\hline
+Storage & 2 GB SSD \\
+\hline
+Display & 1280×720 resolution, 60 Hz \\
+\hline
+Network & 5 Mbps (LAN/Online) \\
+\hline
+Operating System & Windows 10 (Build 19041+), Windows 11, Ubuntu 20.04+ \\
+\hline
+\end{tabularx}
+\caption{Minimum System Specifications}
+\end{table}
+
 \subsection{On-Campus Installation}
 
 For local deployment in the school game hall:
 
 \begin{itemize}
-    \item \textbf{Computer Specification:} Desktop/Laptop with minimum 4 CPUs, 8 GB RAM, SSD 250 GB
+    \item \textbf{Computer Specification:} Two Desktop/Laptop with minimum 4 CPUs, 4 GB RAM, SSD 2 GB
     \item \textbf{Display Setup:} Two monitors for multiplayer viewing
     \item \textbf{Input Devices:} Two keyboards (shared setup)
     \item \textbf{Input Devices:} Two mouses (shared setup)
     \item \textbf{Network:} Stable LAN connection (1 Gbps recommended)
     \item \textbf{Location:} School game hall or computer lab
 \end{itemize}
+
+\section{Project Budget and Infrastructure Costs}
+
+This section details the financial and technical investments required to deploy and operate Grid Survival online, including AI tooling for development and VPS infrastructure for operations.
+
+\subsection{VPS Infrastructure for Online Multiplayer}
+
+Grid Survival Online mode requires a dedicated Virtual Private Server to host authoritative game servers, matchmaking lobby, and player account database. Below is the detailed specification and cost breakdown:
+
+\subsubsection{VPS Specifications and Rental Agreement}
+
+\begin{table}[h]
+\centering
+\rowcolors{2}{lightgray}{white}
+\begin{tabularx}{\textwidth}{|>{\columncolor{primary!15}}X|X|}
+\hline
+\rowcolor{primary}\textcolor{white}{\textbf{Specification}} & \textcolor{white}{\textbf{Configuration}} \\
+\hline
+Provider & CONTABO (contabo.com) \\
+\hline
+Instance Type & VPS M (Virtual Private Server) \\
+\hline
+vCPU Allocation & 4 vCPU @ 3.0+ GHz \\
+\hline
+RAM & 8 GB DDR4 \\
+\hline
+Storage & 160 GB SSD (NVMe) \\
+\hline
+Bandwidth Allocation & Unlimited \\
+\hline
+Region & Frankfurt, Germany (Europe) \\
+\hline
+Operating System & Ubuntu 22.04 LTS \\
+\hline
+Public IPv4 Addresses & 1 static IP \& 1 IPv6 /64 \\
+\hline
+Uptime Guarantee & 99.9\% SLA \\
+\hline
+\end{tabularx}
+\caption{VPS Configuration and Technical Specifications (CONTABO VPS M)}
+\end{table}
+
+\subsubsection{VPS Rental Costs}
+
+\begin{table}[h]
+\centering
+\rowcolors{2}{lightgray}{white}
+\begin{tabularx}{\textwidth}{|>{\columncolor{primary!15}}X|X|X|}
+\hline
+\rowcolor{primary}\textcolor{white}{\textbf{Billing Period}} & \textcolor{white}{\textbf{Monthly Cost}} & \textcolor{white}{\textbf{Annual Cost}} \\
+\hline
+Monthly (\$15/month) & USD 15.00 & USD 180.00 \\
+\hline
+Annual pre-paid & – & USD 96.00 \\
+\hline
+\end{tabularx}
+\caption{VPS Rental Pricing (CONTABO VPS M — Frankfurt Data Center)}
+\end{table}
+
+\textbf{Current Project Agreement:}
+\begin{itemize}
+    \item \textbf{Billing Period:} Monthly at USD 9.00/month
+    \item \textbf{Duration (Project Phase):} 3 months (March–May 2026)
+    \item \textbf{Project Phase Total Cost:} USD 27.00
+    \item \textbf{Planned Extended Duration:} 12 months (Beyond May 2026) at USD 96.00/year (annual pre-paid rate)
+    \item \textbf{Extended Phase Total Cost:} USD 96.00
+\end{itemize}
+
+\subsubsection{Additional VPS Operational Costs}
+
+\begin{table}[h]
+\centering
+\rowcolors{2}{lightgray}{white}
+\begin{tabularx}{\textwidth}{|>{\columncolor{primary!15}}X|X|}
+\hline
+\rowcolor{primary}\textcolor{white}{\textbf{Item}} & \textcolor{white}{\textbf{Cost}} \\
+\hline
+Domain Registration (gridsurvival.duckdns.org) & Free (DuckDNS DDNS service) \\
+\hline
+SSL/TLS Certificate & Free (Let's Encrypt automation) \\
+\hline
+Database Backups (automated) & Included with VPS \\
+\hline
+Bandwidth Overage & Free (CONTABO provides unlimited bandwidth) \\
+\hline
+Monitoring \& Alerting Tools & Free (CONTABO API + cron scripts) \\
+\hline
+\end{tabularx}
+\caption{Additional VPS Operational Costs}
+\end{table}
+
+\subsection{Total Project Budget Summary}
+
+\begin{table}[h]
+\centering
+\rowcolors{2}{lightgray}{white}
+\begin{tabularx}{\textwidth}{|>{\columncolor{primary!15}}X|X|X|}
+\hline
+\rowcolor{primary}\textcolor{white}{\textbf{Category}} & \textcolor{white}{\textbf{Project Phase (3 mo)}} & \textcolor{white}{\textbf{Year 1 (12 mo)}} \\
+\hline
+AI Tooling (3 developers × USD 10/month) & USD 90.00 & USD 360.00 \\
+\hline
+VPS Infrastructure Rental (CONTABO) & USD 27.00 & USD 96.00 (annual pre-paid) \\
+\hline
+VPS Operational Overhead & Free & Free (unlimited bandwidth included) \\
+\hline
+\textbf{Total Estimated Cost} & \textbf{USD 117.00} & \textbf{USD 456.00} \\
+\hline
+\end{tabularx}
+\caption{Project Budget Summary (AI Tooling + CONTABO VPS M)}
+\end{table}
+
+\textbf{Budget Notes:}
+\begin{itemize}
+    \item All costs are in USD; conversions to other currencies may apply depending on funding source
+    \item Team member labor (development time) is not included; this section covers infrastructure and operational hosting costs only
+    \item AI tooling estimate assumes 3 developers using subscriptions at USD 10/month
+    \item VPS costs are sustainable for small-to-medium player bases (100–500 concurrent players)
+    \item Scaling to larger player counts (1000+ concurrent) will require infrastructure upgrade to an enterprise-tier server (estimated USD 50–100/month)
+    \item All financial transactions are documented and receipts are retained for institutional audit purposes
+\end{itemize}
+
+\subsection{Total Expenditures Already Spent}
+
+As of May 2026, the project has already incurred the following direct costs:
+
+\begin{table}[h]
+\centering
+\rowcolors{2}{lightgray}{white}
+\begin{tabularx}{\textwidth}{|>{\columncolor{primary!15}}X|X|}
+\hline
+\rowcolor{primary}\textcolor{white}{\textbf{Expense Item}} & \textcolor{white}{\textbf{Amount Already Spent}} \\
+\hline
+AI Tooling (3 developers × USD 10/month × 3 months) & USD 90.00 \\
+\hline
+VPS Infrastructure Rental (CONTABO, 3 months) & USD 27.00 \\
+\hline
+\textbf{Total Expenditures Already Spent} & \textbf{USD 117.00} \\
+\hline
+\end{tabularx}
+\caption{Total Project Expenditures Already Spent (As of May 2026)}
+\end{table}
+
+\newpage
 
 \section{Team Composition and Roles}
 
