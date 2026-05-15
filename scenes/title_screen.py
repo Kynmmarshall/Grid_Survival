@@ -942,10 +942,10 @@ class TitleScreen:
         waiting_for_key = False
         clock = pygame.time.Clock()
 
-        action_names = ["up", "down", "left", "right", "jump", "power"]
+        action_names = ["up", "down", "left", "right", "jump", "power", "shoot"]
 
         panel_w = 540
-        panel_h = 420
+        panel_h = 458
         panel_x = (self.width - panel_w) // 2
         panel_y = (self.height - panel_h) // 2
         panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)

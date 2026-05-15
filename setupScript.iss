@@ -2,9 +2,9 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "Grid Survival"
-#define MyAppVersion "1.2"
+#define MyAppVersion "2.1"
 #define MyAppPublisher "GridSurvival, Inc."
-#define MyAppURL "https://pickmydish.duckdns.org:6060"
+#define MyAppURL "https://gridsurvival.duckdns.org"
 #define MyAppExeName "Grid Survival.exe"
 #define MyAppAssocName MyAppName + " File"
 #define MyAppAssocExt ".exe"
