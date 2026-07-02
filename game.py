@@ -111,6 +111,7 @@ class GameManager:
         self._pending_remote_power_uses_by_index: dict[int, int] = {}
         self._remote_input_states_by_index: dict[int, dict] = {}
         self._remote_player_index_by_sender: dict[tuple[str, int], int] = {}
+        self._network_last_shoot_by_index: dict[int, bool] = {}
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = 1 / 60
         self._snapshot_interval = 1 / 60
@@ -130,6 +131,7 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._last_client_projectile_snapshot_time = -1.0
         self._network_world_delta = (0, 0)
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
@@ -557,6 +559,13 @@ class GameManager:
                     )
                 if power_requested:
                     player.try_use_power(self)
+                shoot_now = bool(player_input.get("shoot"))
+                if shoot_now and not self._network_last_shoot_by_index.get(idx, False):
+                    dx = (1.0 if player_input.get("right") else 0.0) - (1.0 if player_input.get("left") else 0.0)
+                    dy = (1.0 if player_input.get("down") else 0.0) - (1.0 if player_input.get("up") else 0.0)
+                    shoot_direction = pygame.Vector2(dx, dy) if (dx != 0 or dy != 0) else None
+                    self.projectile_manager.fire(player, shoot_direction)
+                self._network_last_shoot_by_index[idx] = shoot_now
                 player.update_from_input_state(
                     dt,
                     player_input,
@@ -717,6 +726,7 @@ class GameManager:
         self.tile_manager.advance_visuals(dt)
         self.hazard_manager.advance_visuals(dt)
         self.orb_manager.advance_visuals(dt)
+        self.projectile_manager.update(dt, self)
         if self.pacman_enemy_manager:
             self.pacman_enemy_manager.advance_visuals(dt)
         if self.elimination_screen:
@@ -1110,6 +1120,23 @@ class GameManager:
         }
 
     def _build_network_dynamic_world_snapshot(self) -> dict:
+        proj_list = None
+        try:
+            proj_list = [
+                {
+                    "x": float(p.position.x),
+                    "y": float(p.position.y),
+                    "vx": float(p.velocity.x),
+                    "vy": float(p.velocity.y),
+                    "kind": p.kind.name if getattr(p, "kind", None) is not None else "ROCK",
+                    "age": float(getattr(p, "age", 0.0)),
+                    "lifetime": float(getattr(p, "lifetime", 0.0)),
+                }
+                for p in getattr(self.projectile_manager, "_projectiles", [])
+                if getattr(p, "alive", False)
+            ]
+        except Exception:
+            proj_list = None
         return {
             "time_since_start": float(self._time_since_start),
             "round_seq": int(self._network_round_seq),
@@ -1122,6 +1149,7 @@ class GameManager:
                 if self.pacman_enemy_manager
                 else None
             ),
+            "projectiles": proj_list,
         }
 
     @staticmethod
@@ -1146,12 +1174,14 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._last_client_projectile_snapshot_time = -1.0
         self._network_world_delta = (0, 0)
 
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
         self.orb_manager.reset()
+        self.projectile_manager.reset()
         if self.pacman_enemy_manager:
             self.pacman_enemy_manager.reset()
 
@@ -2689,6 +2719,7 @@ class GameManager:
         self._pending_remote_power_uses_by_index = {}
         self._remote_input_states_by_index = {}
         self._remote_player_index_by_sender = {}
+        self._network_last_shoot_by_index = {}
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = self._snapshot_interval
         self._world_dynamic_snapshot_send_timer = 0.0
@@ -2701,6 +2732,7 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._last_client_projectile_snapshot_time = -1.0
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
         self._client_last_local_input = self._empty_network_input_state()
