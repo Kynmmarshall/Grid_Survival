@@ -190,6 +190,26 @@ class InternetSessionClient(NetworkClient):
 
         max_attempts = max(1, int(attempts))
         for attempt in range(max_attempts):
+            # Try the TCP handshake first, same as the initial connect_to_match
+            # (PHASE 1) -- some networks/firewalls only ever let the TCP path
+            # through, so a UDP-only reconnect can silently never reach the
+            # server even though the original connection worked.
+            tcp_auth_ok = False
+            try:
+                if hasattr(self, "transport") and hasattr(self.transport, "_tcp_handshake"):
+                    if self.transport._tcp_handshake(
+                        self._last_host, self._last_port, self.match_token, self.player_name
+                    ):
+                        self.session_id = self.transport.session_id
+                        tcp_auth_ok = True
+            except Exception:
+                pass
+
+            if tcp_auth_ok and self.connect_to_host(self._last_host, self._last_port):
+                self.request_resync("reconnect")
+                self._last_auth_ok = True
+                return True
+
             if self.connect_to_host(self._last_host, self._last_port):
                 auth_sent = self.send_message(
                     "internet_auth",

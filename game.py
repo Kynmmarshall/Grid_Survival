@@ -2598,14 +2598,24 @@ class GameManager:
                 self._guest_rr = rr_after
                 ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
                 if self.account_service and self.account_username:
+                    # apply_stat_delta only knows how to add a delta to the
+                    # LOCALLY cached profile.rr, not set an absolute value. The
+                    # local cache and the server's RR can legitimately differ
+                    # between matches (queued/async sync), so to converge the
+                    # local cache to the server-authoritative rr_after we must
+                    # reconcile against the local value here -- but that
+                    # reconciliation delta must stay internal to this DB call
+                    # and never be shown to the player (that was the bug behind
+                    # the reported +1000 RR: the huge reconciliation delta was
+                    # returned as-is instead of the small server-computed one
+                    # already captured in rr_delta above).
+                    reconcile_delta = rr_delta
                     profile_before = self.account_service.get_profile(self.account_username)
                     if profile_before is not None:
-                        current_local_rr = int(profile_before.rr)
-                        rr_before = int(authoritative.get("rr_before", current_local_rr)) if isinstance(authoritative, dict) else current_local_rr
-                        rr_delta = int(rr_after - current_local_rr)
+                        reconcile_delta = int(rr_after - int(profile_before.rr))
                     updated = self.account_service.apply_stat_delta(
                         self.account_username,
-                        rr_delta=rr_delta,
+                        rr_delta=reconcile_delta,
                         damage_dealt=damage_dealt_delta,
                         damage_taken=damage_taken_delta,
                         eliminations=eliminations_delta,

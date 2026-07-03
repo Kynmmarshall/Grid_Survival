@@ -51,7 +51,13 @@ class RemoteAccountStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        # WAL mode lets readers/writers proceed concurrently instead of
+        # exclusive-locking the whole file, and a shorter busy_timeout keeps a
+        # single contended write from blocking match_daemon's global session
+        # lock (held while this call happens) for the sqlite3 default of 5s.
+        conn = sqlite3.connect(self.db_path, timeout=2.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=2000")
         conn.row_factory = sqlite3.Row
         return conn
 
