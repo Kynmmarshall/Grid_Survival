@@ -743,6 +743,10 @@ class Player:
             "eliminated": bool(self._eliminated),
             "extra_lives": int(self._extra_lives),
             "death_fade_alpha": int(self._death_fade_alpha),
+            "health": int(self.health),
+            "max_health": int(self.max_health),
+            "projectile_cooldown_remaining": float(getattr(self, "projectile_cooldown_remaining", 0.0)),
+            "projectile_cooldown_total": float(getattr(self, "projectile_cooldown_total", 0.0)),
         }
 
     def apply_snapshot_state(self, snapshot: dict[str, Any]):
@@ -775,6 +779,14 @@ class Player:
         self._active_orb_label = snapshot.get("active_orb_label")
         self._extra_lives = int(snapshot.get("extra_lives", self._extra_lives))
         self._death_fade_alpha = int(snapshot.get("death_fade_alpha", self._death_fade_alpha))
+        self.max_health = int(snapshot.get("max_health", self.max_health))
+        self.health = int(snapshot.get("health", self.health))
+        self.projectile_cooldown_remaining = float(
+            snapshot.get("projectile_cooldown_remaining", getattr(self, "projectile_cooldown_remaining", 0.0))
+        )
+        self.projectile_cooldown_total = float(
+            snapshot.get("projectile_cooldown_total", getattr(self, "projectile_cooldown_total", 0.0))
+        )
         self._active_orb_timer = float(snapshot.get("active_orb_timer", self._active_orb_timer))
         self._active_orb_indefinite = bool(
             snapshot.get("active_orb_indefinite", self._active_orb_indefinite)
