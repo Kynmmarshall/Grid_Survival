@@ -96,6 +96,10 @@ BOT_CANDIDATE_DIRECTIONS = (
 class _PlayerProxy:
     def __init__(self, name: str, entry: dict[str, Any], *, bot: bool = False):
         self.name = str(name)
+        # Stable identity for ProjectileManager's cooldown tracking: this
+        # proxy itself is recreated fresh every physics tick, so id(self)
+        # changes constantly (see ProjectileManager._owner_key).
+        self.uid = str(name)
         self._entry = entry
         self.position = pygame.Vector2(float(entry.get("x", 0.0)), float(entry.get("y", 0.0)))
         self.rect = pygame.Rect(0, 0, 48, 48)
@@ -320,6 +324,8 @@ class _PlayerProxy:
         self._entry["eliminated"] = bool(self._eliminated)
         self._entry["health"] = int(self.health)
         self._entry["max_health"] = int(self.max_health)
+        self._entry["projectile_cooldown_remaining"] = float(getattr(self, "projectile_cooldown_remaining", 0.0))
+        self._entry["projectile_cooldown_total"] = float(getattr(self, "projectile_cooldown_total", 0.0))
         self._entry["state"] = str(self.state)
         self._entry["facing"] = str(self.facing)
         self._entry["falling"] = bool(self.falling)
@@ -532,6 +538,8 @@ class MatchDaemon:
             "death_fade_alpha": int(entry.get("death_fade_alpha", 255)),
             "health": int(entry.get("health", 4)),
             "max_health": int(entry.get("max_health", 4)),
+            "projectile_cooldown_remaining": float(entry.get("projectile_cooldown_remaining", 0.0)),
+            "projectile_cooldown_total": float(entry.get("projectile_cooldown_total", 0.0)),
         }
 
     def _configure_tile_manager(self, tile_manager: TMXTileManager, level) -> None:
@@ -1509,19 +1517,25 @@ class MatchDaemon:
 
         if len(alive) == 1:
             winner_index, winner_name, winner_entry = alive[0]
-            if winner_index >= len(wins):
-                wins.extend([0] * (winner_index + 1 - len(wins)))
-            wins[winner_index] += 1
-            if wins[winner_index] >= target_score:
-                session["pending_end_state"] = {
-                    "type": "victory",
-                    "winner_name": str(winner_name),
-                    "winner_character": str(winner_entry.get("character_name", "Caveman")),
-                    "survival_time": float(time.time() - session.get("start_time", time.time())),
-                }
-                session["game_over"] = False
-                session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
-                return
+            # A bot outlasting every human isn't a meaningful ranked result --
+            # crediting it a round win skewed every human's RR that round (RR
+            # scoring keys off winner_index, so humans all got scored as
+            # losers) and could let a bot "win" the match outright. Treat this
+            # as a no-decision round instead: no round point, just reset.
+            if not bool(winner_entry.get("bot", False)):
+                if winner_index >= len(wins):
+                    wins.extend([0] * (winner_index + 1 - len(wins)))
+                wins[winner_index] += 1
+                if wins[winner_index] >= target_score:
+                    session["pending_end_state"] = {
+                        "type": "victory",
+                        "winner_name": str(winner_name),
+                        "winner_character": str(winner_entry.get("character_name", "Caveman")),
+                        "survival_time": float(time.time() - session.get("start_time", time.time())),
+                    }
+                    session["game_over"] = False
+                    session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
+                    return
 
         session["game_over"] = False
         session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
@@ -2499,6 +2513,18 @@ class MatchDaemon:
                 if orb_manager is not None and not session.get("round_finished"):
                     orb_manager.update(dt, session.get("walkable_bounds"), current_proxies, self)
 
+                if proj_mgr is not None:
+                    # Pull cooldown state by stable uid (see ProjectileManager
+                    # ._owner_key) rather than relying on the manager pushing
+                    # onto whichever proxy object it cached at fire()-time --
+                    # this tick's proxy is a different object, so a push would
+                    # never actually reach it and the cooldown UI would never
+                    # sync to clients.
+                    for proxy in current_proxies:
+                        remaining, total = proj_mgr.get_shoot_cooldown_state(proxy.uid)
+                        proxy.projectile_cooldown_remaining = remaining
+                        proxy.projectile_cooldown_total = total
+
                 for proxy in current_proxies:
                     proxy.sync_back()
 
@@ -2546,7 +2572,15 @@ class MatchDaemon:
             print(f"[DEBUG] MatchDaemon.run -> bound to {self.bind_addr}:{self.bind_port}", flush=True)
         except Exception:
             pass
-        s.settimeout(0.05)
+        # Previously 0.05s: the physics tick ran directly off however often
+        # recvfrom() woke up, so with N clients each sending input at up to
+        # 60 Hz the tick interval swung wildly between ~0ms (packet storms)
+        # and 50ms (idle), producing uneven simulation pacing that read as
+        # jitter on clients regardless of how smoothly they interpolated it.
+        # A short timeout here just keeps the loop responsive to incoming
+        # packets; actual physics pacing now comes from the fixed-step
+        # accumulator below.
+        s.settimeout(0.01)
         self.sock = s
 
         # Start TCP server thread for handshakes
@@ -2559,26 +2593,41 @@ class MatchDaemon:
         last_tick = time.time()
         # Tiles rarely change (crumble timers are on the order of seconds), so
         # rebuilding/broadcasting the full tile layout doesn't need to ride
-        # the same 10 Hz cadence as player positions/hazards/orbs -- doing so
+        # the same fast cadence as player positions/hazards/orbs -- doing so
         # was needlessly rebuilding the full layout every cycle and causing
         # clients to re-erase/re-rebuild their walkable mask (and log it) far
         # more often than the tile state actually changes.
         WORLD_SNAPSHOT_INTERVAL = 0.25
+        # Fixed-step physics: always advance the simulation in constant
+        # 1/60s slices (an "optimal" 60 Hz tick rate per netcode convention),
+        # regardless of how irregularly the loop itself gets to run. This is
+        # what makes snapshots come from an evenly-paced simulation instead
+        # of one that lurches with network I/O timing.
+        PHYSICS_TICK_DT = 1.0 / 60.0
+        MAX_TICKS_PER_FRAME = 8  # avoid a spiral of death after a long stall
+        tick_accumulator = 0.0
+        # Player positions/hazards/orbs/projectiles now broadcast at 20 Hz
+        # (was 10 Hz) -- still well under the 60 Hz sim rate to keep
+        # bandwidth sane, but frequent enough that ability pickups/hits and
+        # movement don't read as laggy before client interpolation smooths it.
+        SNAPSHOT_SEND_INTERVAL = 0.05
         try:
             while self.running:
                 now = time.time()
-                dt = now - last_tick
+                frame_dt = now - last_tick
                 last_tick = now
-                # Tick physics
-                self._tick_physics(dt)
+                tick_accumulator = min(tick_accumulator + frame_dt, PHYSICS_TICK_DT * MAX_TICKS_PER_FRAME)
+                while tick_accumulator >= PHYSICS_TICK_DT:
+                    self._tick_physics(PHYSICS_TICK_DT)
+                    tick_accumulator -= PHYSICS_TICK_DT
 
                 # Cleanup stale sessions every 10 seconds
                 if now - last_cleanup >= 10.0:
                     last_cleanup = now
                     self._cleanup_stale_sessions(now)
 
-                # Send snapshots at 10 Hz
-                if now - last_snapshot_send >= 0.1:
+                # Send snapshots
+                if now - last_snapshot_send >= SNAPSHOT_SEND_INTERVAL:
                     last_snapshot_send = now
                     send_world_snapshot = now - last_world_snapshot_send >= WORLD_SNAPSHOT_INTERVAL
                     if send_world_snapshot:
