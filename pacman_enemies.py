@@ -559,10 +559,28 @@ class PacmanEnemyManager:
         return victims
 
     def advance_visuals(self, dt: float) -> None:
-        """Advance animation timers on clients between host snapshots."""
+        """Advance animation timers, and lightly dead-reckon position, on
+        clients between host snapshots so chasers don't appear to pause.
+
+        Only straight-line motion along the last known direction is
+        replicated (not the AI's target-seeking/repathing, which relies on
+        host-only randomness and would diverge); the next snapshot corrects
+        any drift.
+        """
+        max_step = 10.0
         for enemy in self.enemies:
             enemy._anim_time += dt
             if isinstance(enemy, MonsterEnemy):
+                if (
+                    not enemy.is_dying
+                    and enemy._activation_timer <= 0.0
+                    and enemy._direction.length_squared() > 0.0
+                ):
+                    delta = enemy._direction.normalize() * enemy.speed * dt
+                    if delta.length_squared() > max_step * max_step:
+                        delta.scale_to_length(max_step)
+                    enemy.position += delta
+                    enemy.rect.center = (round(enemy.position.x), round(enemy.position.y))
                 anim = enemy.animations.get(enemy.current_state)
                 if anim is None and "idle" in enemy.animations:
                     enemy.current_state = "idle"

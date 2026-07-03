@@ -899,6 +899,17 @@ class Player:
                 self.on_ground = False
                 self._start_fall(walkable_bounds)
 
+    def _advance_jump_arc(self, dt: float) -> None:
+        """Advance only the vertical (z) half of jump physics via gravity.
+
+        Used to extrapolate a networked remote player's jump height between
+        host snapshots, since the arc is pure gravity and doesn't depend on
+        the input we don't have (unlike horizontal air control).
+        """
+        self.z_velocity -= PLAYER_JUMP_GRAVITY * dt
+        self.z_velocity = max(-PLAYER_MAX_FALL_SPEED, self.z_velocity)
+        self.z = max(0.0, self.z + self.z_velocity * dt)
+
     def draws_behind_map(self) -> bool:
         return (self.falling or self.drowning) and self.fall_draw_behind
 

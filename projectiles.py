@@ -34,13 +34,13 @@ class ProjectileKind(Enum):
 
 _KIND_SETTINGS: dict[ProjectileKind, dict] = {
     ProjectileKind.ROCK: {
-        "speed": 220, "radius": 12, "color": (160, 120, 70),
+        "speed": 290, "radius": 12, "color": (160, 120, 70),
         "glow": (210, 170, 110), "knockback": 320,
         "cooldown": 3.0, "lifetime": 2.0, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
     },
     ProjectileKind.BOULDER: {
-        "speed": 160, "radius": 15, "color": (130, 100, 60),
+        "speed": 290, "radius": 15, "color": (130, 100, 60),
         "glow": (180, 140, 90), "knockback": 320,
         "cooldown": 3.0, "lifetime": 2.0, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
