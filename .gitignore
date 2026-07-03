@@ -28,3 +28,13 @@ Thumbs.db
 
 # Tiled session/project files (optional - remove if you want them tracked)
 tiles/*.tiled-session
+# Environment Variables & Secrets
+.env
+backend/.env
+
+# Local Databases & Server State
+Grid_SurvivalDB
+backend/vps_accounts.db
+
+# Server Automation Scripts
+update.sh
