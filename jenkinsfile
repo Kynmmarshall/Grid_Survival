@@ -1,0 +1,172 @@
+pipeline {
+    // No pipeline-wide agent: PyInstaller can't cross-compile a Windows .exe
+    // from Linux, and Inno Setup (ISCC.exe) is Windows-only, so the build has
+    // to run on a Windows agent while deployment targets the Ubuntu VPS
+    // hosting /var/www/. Each stage below picks its own agent instead.
+    //
+    // Prerequisite: register a Windows Jenkins agent (labeled "windows") on
+    // the machine that has Python, the packages in requirements.txt,
+    // PyInstaller, and Inno Setup 6 installed.
+    //
+    // Prerequisite (one-time, on the Ubuntu VPS): this site is served by
+    // nginx, which ignores .htaccess entirely, so add this to the site's
+    // server block (e.g. /etc/nginx/sites-available/gridsurvival) once, then
+    // `sudo nginx -t && sudo systemctl reload nginx` -- the pipeline does not
+    // touch nginx config on every deploy:
+    //
+    //   server {
+    //       ...
+    //       location ~* \.(html|htm|js|json)$ {
+    //           add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+    //           add_header Pragma "no-cache" always;
+    //           add_header Expires "0" always;
+    //       }
+    //   }
+    agent none
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    // Webhook triggers
+    triggers {
+        githubPush()
+    }
+
+    stages {
+        stage('Checkout Main Branch') {
+            agent { label 'windows' }
+            steps {
+                // Ensure workspace is clean and we checkout the latest main
+                deleteDir()
+                checkout([$class: 'GitSCM',
+                    branches: [[name: 'refs/heads/main']],
+                    userRemoteConfigs: [[url: 'https://github.com/Kynmmarshall/Grid_Survival.git']],
+                    extensions: [[$class: 'CleanBeforeCheckout'], [$class: 'CloneOption', noTags: false, shallow: false]]
+                ])
+                bat '''
+                    echo === Git diagnostics ===
+                    git fetch --all
+                    echo Remote refs for origin/main:
+                    git ls-remote origin refs/heads/main
+                    echo Local HEAD:
+                    git rev-parse --short HEAD
+                    echo Last commit:
+                    git log -1 --pretty=oneline
+                    git reset --hard origin/main
+                    echo After reset, HEAD:
+                    git rev-parse --short HEAD
+                '''
+            }
+        }
+
+        stage('Install Python Dependencies') {
+            agent { label 'windows' }
+            steps {
+                bat '''
+                    echo === Installing/Updating Python Dependencies ===
+                    python -m pip install --upgrade pip
+                    python -m pip install -r requirements.txt
+                    python -m pip install pyinstaller opencv-python
+                '''
+            }
+        }
+
+        stage('Build Game (PyInstaller)') {
+            agent { label 'windows' }
+            steps {
+                bat '''
+                    echo === Building Release Version (--onedir) ===
+                    if exist build rmdir /s /q build
+                    if exist dist rmdir /s /q dist
+                    python -m PyInstaller --onedir --noconsole --icon=icon.ico --add-data "assets;assets" --add-data "tiles;tiles" --hidden-import=cv2 --hidden-import=numpy main.py
+                '''
+            }
+        }
+
+        stage('Build Installer (Inno Setup)') {
+            agent { label 'windows' }
+            steps {
+                bat '''
+                    echo === Building Installer ===
+                    rem setupScript.iss expects dist\\main\\Grid Survival.exe; PyInstaller
+                    rem names the onedir build's exe after the entry script (main.exe).
+                    copy /Y "dist\\main\\main.exe" "dist\\main\\Grid Survival.exe"
+                    if exist Output rmdir /s /q Output
+                    "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" setupScript.iss
+                '''
+            }
+            post {
+                success {
+                    // Hand the installer off to the deploy stage, which runs
+                    // on a different node (the Ubuntu VPS/controller).
+                    stash name: 'installer', includes: 'Output/*.exe'
+                }
+            }
+        }
+
+        stage('Deploy Installer') {
+            // Anything but the Windows build agent -- this is the Ubuntu box
+            // that actually hosts /var/www/GridSurvivalWebsite/.
+            //
+            // GridSurvivalWebsite is its own hand-maintained Node.js/PM2 site
+            // (its own git repo, server.js, update.sh, real pages) -- this
+            // pipeline must NOT touch index.html/style.css/server.js/etc.
+            // Its only job here is to drop the freshly built installer into
+            // the site's existing assets/download/ folder.
+            agent { label '!windows' }
+            when {
+                expression { currentBuild.result != 'FAILURE' }
+            }
+            steps {
+                unstash 'installer'
+                sh '''#!/bin/bash
+                    echo "=== Deploying installer ==="
+                    DOWNLOAD_DIR="/var/www/GridSurvivalWebsite/assets/download"
+                    mkdir -p "$DOWNLOAD_DIR"
+
+                    INSTALLER_SRC=$(find Output -maxdepth 1 -name "*.exe" | head -n 1)
+                    if [ -z "$INSTALLER_SRC" ]; then
+                        echo "❌ Installer .exe not found in Output/!"
+                        exit 1
+                    fi
+
+                    cp "$INSTALLER_SRC" "$DOWNLOAD_DIR/Grid-Survival.exe"
+                    echo "✅ Installer copied to $DOWNLOAD_DIR/Grid-Survival.exe"
+                    ls -lh "$DOWNLOAD_DIR/Grid-Survival.exe"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                node('windows') {
+                    archiveArtifacts artifacts: 'Output/*.exe', fingerprint: true, allowEmptyArchive: true
+                }
+            }
+        }
+        success {
+            echo '🎉 Build successful! New version deployed to website.'
+            script {
+                node('!windows') {
+                    sh '''
+                        echo "Build ${BUILD_NUMBER} completed successfully!\\nBuild URL: ${BUILD_URL}" | mail -s "SUCCESS: Grid Survival Build ${BUILD_NUMBER}" kynmmarshall@gmail.com || echo "Email failed, but build succeeded"
+                    '''
+                }
+            }
+        }
+        failure {
+            echo '❌ Build failed! Check the logs for errors.'
+            script {
+                node('!windows') {
+                    sh '''
+                        echo "Build ${BUILD_NUMBER} failed. Check: ${BUILD_URL}" | mail -s "FAILURE: Grid Survival Build ${BUILD_NUMBER}" kynmmarshall@gmail.com || echo "Email failed"
+                    '''
+                }
+            }
+        }
+    }
+}
