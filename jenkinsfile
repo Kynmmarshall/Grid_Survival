@@ -65,10 +65,13 @@ pipeline {
             agent { label 'windows' }
             steps {
                 bat '''
-                    echo === Installing/Updating Python Dependencies ===
-                    python -m pip install --upgrade pip
-                    python -m pip install -r requirements.txt
-                    python -m pip install pyinstaller opencv-python
+                    echo === Setting up virtual environment ===
+                    if exist venv rmdir /s /q venv
+                    python -m venv venv
+                    echo === Installing/Updating Python Dependencies (in venv) ===
+                    venv\\Scripts\\python.exe -m pip install --upgrade pip
+                    venv\\Scripts\\python.exe -m pip install -r requirements.txt
+                    venv\\Scripts\\python.exe -m pip install pyinstaller opencv-python
                 '''
             }
         }
@@ -80,7 +83,7 @@ pipeline {
                     echo === Building Release Version (--onedir) ===
                     if exist build rmdir /s /q build
                     if exist dist rmdir /s /q dist
-                    python -m PyInstaller --onedir --noconsole --icon=icon.ico --add-data "assets;assets" --add-data "tiles;tiles" --hidden-import=cv2 --hidden-import=numpy main.py
+                    venv\\Scripts\\python.exe -m PyInstaller --onedir --noconsole --icon=icon.ico --add-data "assets;assets" --add-data "tiles;tiles" --hidden-import=cv2 --hidden-import=numpy main.py
                 '''
             }
         }
