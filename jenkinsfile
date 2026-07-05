@@ -118,44 +118,67 @@ pipeline {
                     "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" setupScript.iss
                 '''
             }
-            post {
-                success {
-                    // Hand the installer off to the deploy stage, which runs
-                    // on a different node (the Ubuntu VPS/controller).
-                    stash name: 'installer', includes: 'Output/*.exe'
-                }
-            }
         }
 
         stage('Deploy Installer') {
-            // Anything but the Windows build agent -- this is the Ubuntu box
-            // that actually hosts /var/www/GridSurvivalWebsite/.
+            // Uploads directly from the Windows agent to the Ubuntu VPS via
+            // scp (SSH key auth, see jenkins-agent's C:\jenkins-agent\.ssh\),
+            // instead of Jenkins' stash/unstash -- stash is an opaque zip
+            // copy through the controller with no visibility into transfer
+            // progress. Doing our own scp + polling the remote file's
+            // growing size lets us log real MB-uploaded/remaining progress.
             //
             // GridSurvivalWebsite is its own hand-maintained Node.js/PM2 site
             // (its own git repo, server.js, update.sh, real pages) -- this
             // pipeline must NOT touch index.html/style.css/server.js/etc.
             // Its only job here is to drop the freshly built installer into
             // the site's existing assets/download/ folder.
-            agent { label '!windows' }
+            agent { label 'windows' }
             when {
                 expression { currentBuild.result != 'FAILURE' }
             }
             steps {
-                unstash 'installer'
-                sh '''#!/bin/bash
-                    echo "=== Deploying installer ==="
-                    DOWNLOAD_DIR="/var/www/GridSurvivalWebsite/assets/download"
-                    mkdir -p "$DOWNLOAD_DIR"
+                powershell '''
+                    $ErrorActionPreference = "Stop"
+                    $sshKey = "C:\\jenkins-agent\\.ssh\\id_ed25519"
+                    $remote = "root@38.242.246.126"
+                    $remoteDir = "/var/www/GridSurvivalWebsite/assets/download"
+                    $remoteTmp = "$remoteDir/Grid-Survival.exe.uploading"
+                    $remoteFinal = "$remoteDir/Grid-Survival.exe"
+                    $sshOpts = @("-i", $sshKey, "-o", "StrictHostKeyChecking=accept-new")
 
-                    INSTALLER_SRC=$(find Output -maxdepth 1 -name "*.exe" | head -n 1)
-                    if [ -z "$INSTALLER_SRC" ]; then
-                        echo "❌ Installer .exe not found in Output/!"
-                        exit 1
-                    fi
+                    $installer = Get-ChildItem -Path "Output" -Filter "*.exe" | Select-Object -First 1
+                    if (-not $installer) { throw "No installer .exe found in Output/" }
 
-                    cp "$INSTALLER_SRC" "$DOWNLOAD_DIR/Grid-Survival.exe"
-                    echo "✅ Installer copied to $DOWNLOAD_DIR/Grid-Survival.exe"
-                    ls -lh "$DOWNLOAD_DIR/Grid-Survival.exe"
+                    $totalBytes = $installer.Length
+                    $totalMB = [math]::Round($totalBytes / 1MB, 2)
+                    Write-Output "=== Uploading $($installer.Name) ($totalMB MB) to $remote ==="
+
+                    & ssh @sshOpts $remote "mkdir -p '$remoteDir'"
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to prepare remote download directory" }
+
+                    $scpArgs = $sshOpts + @($installer.FullName, "${remote}:${remoteTmp}")
+                    $proc = Start-Process -FilePath "scp" -ArgumentList $scpArgs -PassThru -NoNewWindow
+
+                    while (-not $proc.HasExited) {
+                        Start-Sleep -Seconds 3
+                        $statCmd = "stat -c%s '$remoteTmp' 2>/dev/null || echo 0"
+                        $remoteSizeRaw = & ssh @sshOpts $remote $statCmd
+                        $remoteSize = 0L
+                        [int64]::TryParse(($remoteSizeRaw | Select-Object -Last 1).Trim(), [ref]$remoteSize) | Out-Null
+                        $remoteMB = [math]::Round($remoteSize / 1MB, 2)
+                        $remainMB = [math]::Round([math]::Max(0, $totalBytes - $remoteSize) / 1MB, 2)
+                        $pct = if ($totalBytes -gt 0) { [math]::Round(($remoteSize / $totalBytes) * 100, 1) } else { 100 }
+                        Write-Output "Uploaded: $remoteMB MB / $totalMB MB ($pct%) -- Remaining: $remainMB MB"
+                    }
+
+                    if ($proc.ExitCode -ne 0) { throw "scp failed with exit code $($proc.ExitCode)" }
+
+                    Write-Output "=== Upload finished, finalizing on remote ==="
+                    $finalizeCmd = "mv '$remoteTmp' '$remoteFinal' && ls -lh '$remoteFinal'"
+                    & ssh @sshOpts $remote $finalizeCmd
+                    if ($LASTEXITCODE -ne 0) { throw "Failed to finalize remote file" }
+                    Write-Output "Deployed to ${remote}:${remoteFinal}"
                 '''
             }
         }
