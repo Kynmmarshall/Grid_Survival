@@ -49,6 +49,13 @@ pipeline {
             agent { label 'windows' }
             steps {
                 bat '''
+                    rem The Jenkins Windows agent runs as a service under
+                    rem NT AUTHORITY\\SYSTEM, but the workspace folder is owned
+                    rem by the interactive user account -- git refuses to touch
+                    rem a repo it doesn't consider "owned" by the current user
+                    rem unless told to trust it. This is a dedicated CI agent,
+                    rem so blanket-trusting is fine.
+                    git config --global --add safe.directory "*"
                     if not exist .git (
                         echo === No existing repo in workspace, cloning once ===
                         git clone --depth 1 --branch main https://github.com/Kynmmarshall/Grid_Survival.git .
