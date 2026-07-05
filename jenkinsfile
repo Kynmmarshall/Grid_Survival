@@ -42,12 +42,21 @@ pipeline {
                 deleteDir()
                 checkout([$class: 'GitSCM',
                     branches: [[name: 'refs/heads/main']],
-                    userRemoteConfigs: [[url: 'https://github.com/Kynmmarshall/Grid_Survival.git']],
-                    extensions: [[$class: 'CleanBeforeCheckout'], [$class: 'CloneOption', noTags: false, shallow: false]]
+                    userRemoteConfigs: [[url: 'https://github.com/Kynmmarshall/Grid_Survival.git', refspec: '+refs/heads/main:refs/remotes/origin/main']],
+                    extensions: [
+                        [$class: 'CleanBeforeCheckout'],
+                        // Shallow + single-branch: CI only needs the current
+                        // main snapshot, not full history. The previous
+                        // (shallow: false, all-branches) config was fetching
+                        // every historical revision of every binary asset in
+                        // the repo -- 7000+ objects, 150-300 KiB/s, getting
+                        // killed mid-transfer (git exit 130) well before it
+                        // could ever finish.
+                        [$class: 'CloneOption', noTags: true, shallow: true, depth: 1, honorRefspec: true]
+                    ]
                 ])
                 bat '''
                     echo === Git diagnostics ===
-                    git fetch --all
                     echo Remote refs for origin/main:
                     git ls-remote origin refs/heads/main
                     echo Local HEAD:
