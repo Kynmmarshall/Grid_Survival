@@ -139,7 +139,13 @@ pipeline {
             }
             steps {
                 powershell '''
-                    $ErrorActionPreference = "Stop"
+                    # Deliberately not "Stop": PowerShell 5.1 treats ANY
+                    # stderr line from a native command (ssh/scp) as a
+                    # terminating error under that preference, even benign
+                    # ones like ssh's "Permanently added ... known hosts"
+                    # notice -- real failures are still caught explicitly
+                    # below via $LASTEXITCODE/$proc.ExitCode checks.
+                    $ErrorActionPreference = "Continue"
                     $sshKey = "C:\\jenkins-agent\\.ssh\\id_ed25519"
                     $remote = "root@38.242.246.126"
                     $remoteDir = "/var/www/GridSurvivalWebsite/assets/download"
