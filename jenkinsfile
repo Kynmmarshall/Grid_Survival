@@ -163,8 +163,14 @@ pipeline {
                     & ssh @sshOpts $remote "mkdir -p '$remoteDir'"
                     if ($LASTEXITCODE -ne 0) { throw "Failed to prepare remote download directory" }
 
-                    $scpArgs = $sshOpts + @($installer.FullName, "${remote}:${remoteTmp}")
-                    $proc = Start-Process -FilePath "scp" -ArgumentList $scpArgs -PassThru -NoNewWindow
+                    # Start-Process -ArgumentList does NOT auto-quote array
+                    # elements containing spaces the way PowerShell's native
+                    # "&" splatting does -- it just space-joins them, which
+                    # split the installer's path (it has a space in "Grid
+                    # Survival Setup.exe") into two separate arguments. Build
+                    # one pre-quoted string instead.
+                    $scpArgList = ($sshOpts -join ' ') + " `"$($installer.FullName)`" ${remote}:${remoteTmp}"
+                    $proc = Start-Process -FilePath "scp" -ArgumentList $scpArgList -PassThru -NoNewWindow
 
                     while (-not $proc.HasExited) {
                         Start-Sleep -Seconds 3
