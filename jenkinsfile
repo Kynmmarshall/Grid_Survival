@@ -110,10 +110,31 @@ pipeline {
             steps {
                 bat '''
                     echo === Building Installer ===
+                    rem A prior build that got aborted/killed mid-compile can
+                    rem leave ISCC.exe (or the compiled installer itself, if
+                    rem it was ever run) still holding Output\\Grid Survival
+                    rem Setup.exe open, which then denies access to both
+                    rem deleting it and writing a fresh copy. Kill stragglers
+                    rem and retry the cleanup with a short delay before
+                    rem giving up, rather than failing the whole build on a
+                    rem transient lock.
+                    taskkill /F /IM "ISCC.exe" /T >nul 2>&1
+                    taskkill /F /IM "Grid Survival Setup.exe" /T >nul 2>&1
+
                     rem setupScript.iss expects dist\\main\\Grid Survival.exe; PyInstaller
                     rem names the onedir build's exe after the entry script (main.exe).
                     copy /Y "dist\\main\\main.exe" "dist\\main\\Grid Survival.exe"
-                    if exist Output rmdir /s /q Output
+
+                    if exist Output (
+                        for /L %%i in (1,1,5) do (
+                            rmdir /s /q Output >nul 2>&1
+                            if not exist Output goto :output_cleaned
+                            echo Output folder still locked, retrying in 3s (attempt %%i/5)...
+                            timeout /t 3 /nobreak >nul
+                        )
+                    )
+                    :output_cleaned
+
                     "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" setupScript.iss
                 '''
             }
