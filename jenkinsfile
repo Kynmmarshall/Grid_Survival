@@ -173,15 +173,32 @@ pipeline {
                     $proc = Start-Process -FilePath "scp" -ArgumentList $scpArgList -PassThru -NoNewWindow
 
                     while (-not $proc.HasExited) {
-                        Start-Sleep -Seconds 3
-                        $statCmd = "stat -c%s '$remoteTmp' 2>/dev/null || echo 0"
-                        $remoteSizeRaw = & ssh @sshOpts $remote $statCmd
-                        $remoteSize = 0L
-                        [int64]::TryParse(($remoteSizeRaw | Select-Object -Last 1).Trim(), [ref]$remoteSize) | Out-Null
-                        $remoteMB = [math]::Round($remoteSize / 1MB, 2)
-                        $remainMB = [math]::Round([math]::Max(0, $totalBytes - $remoteSize) / 1MB, 2)
-                        $pct = if ($totalBytes -gt 0) { [math]::Round(($remoteSize / $totalBytes) * 100, 1) } else { 100 }
-                        Write-Output "Uploaded: $remoteMB MB / $totalMB MB ($pct%) -- Remaining: $remainMB MB"
+                        # 15s (not 3s): polling opens a brand-new SSH
+                        # connection each time, and hammering that every few
+                        # seconds for a multi-minute transfer previously
+                        # tripped the VPS's SSH connection rate-limiting
+                        # (common hardening, e.g. "ufw limit ssh"), which then
+                        # crashed the whole build on a null-handling bug below.
+                        Start-Sleep -Seconds 15
+                        try {
+                            $statCmd = "stat -c%s '$remoteTmp' 2>/dev/null || echo 0"
+                            $remoteSizeRaw = & ssh @sshOpts $remote $statCmd
+                            $remoteSize = 0L
+                            $lastLine = $remoteSizeRaw | Select-Object -Last 1
+                            if ($lastLine) {
+                                [int64]::TryParse($lastLine.ToString().Trim(), [ref]$remoteSize) | Out-Null
+                            }
+                            $remoteMB = [math]::Round($remoteSize / 1MB, 2)
+                            $remainMB = [math]::Round([math]::Max(0, $totalBytes - $remoteSize) / 1MB, 2)
+                            $pct = if ($totalBytes -gt 0) { [math]::Round(($remoteSize / $totalBytes) * 100, 1) } else { 100 }
+                            Write-Output "Uploaded: $remoteMB MB / $totalMB MB ($pct%) -- Remaining: $remainMB MB"
+                        } catch {
+                            # A transient polling hiccup (or rate-limit) isn't
+                            # fatal -- the actual scp transfer is a separate,
+                            # already-established connection and may well
+                            # still be running fine. Just skip this update.
+                            Write-Output "(progress check skipped: $($_.Exception.Message))"
+                        }
                     }
 
                     if ($proc.ExitCode -ne 0) { throw "scp failed with exit code $($proc.ExitCode)" }
