@@ -36,36 +36,33 @@ pipeline {
 
     stages {
         stage('Checkout Main Branch') {
+            // No deleteDir()/fresh checkout here on purpose: this repo is
+            // large enough (binary game assets across many commits) that a
+            // full re-clone every build was timing out / getting killed
+            // mid-transfer. Instead, reuse whatever repo already sits in the
+            // workspace and just fetch+reset to the latest main -- for the
+            // very first run, seed the workspace once by copying an already-
+            // cloned checkout of this repo into the Windows agent's
+            // workspace directory yourself (see the customWorkspace/remote
+            // root dir configured on the "windows" node) so this stage finds
+            // an existing .git to update instead of cloning from scratch.
             agent { label 'windows' }
             steps {
-                // Ensure workspace is clean and we checkout the latest main
-                deleteDir()
-                checkout([$class: 'GitSCM',
-                    branches: [[name: 'refs/heads/main']],
-                    userRemoteConfigs: [[url: 'https://github.com/Kynmmarshall/Grid_Survival.git', refspec: '+refs/heads/main:refs/remotes/origin/main']],
-                    extensions: [
-                        [$class: 'CleanBeforeCheckout'],
-                        // Shallow + single-branch: CI only needs the current
-                        // main snapshot, not full history. The previous
-                        // (shallow: false, all-branches) config was fetching
-                        // every historical revision of every binary asset in
-                        // the repo -- 7000+ objects, 150-300 KiB/s, getting
-                        // killed mid-transfer (git exit 130) well before it
-                        // could ever finish.
-                        [$class: 'CloneOption', noTags: true, shallow: true, depth: 1, honorRefspec: true]
-                    ]
-                ])
                 bat '''
-                    echo === Git diagnostics ===
-                    echo Remote refs for origin/main:
-                    git ls-remote origin refs/heads/main
+                    if not exist .git (
+                        echo === No existing repo in workspace, cloning once ===
+                        git clone --depth 1 --branch main https://github.com/Kynmmarshall/Grid_Survival.git .
+                    ) else (
+                        echo === Existing repo found, updating to latest main ===
+                        git remote set-url origin https://github.com/Kynmmarshall/Grid_Survival.git
+                        git fetch --depth 1 origin main
+                        git checkout -B main origin/main
+                        git reset --hard origin/main
+                    )
                     echo Local HEAD:
                     git rev-parse --short HEAD
                     echo Last commit:
                     git log -1 --pretty=oneline
-                    git reset --hard origin/main
-                    echo After reset, HEAD:
-                    git rev-parse --short HEAD
                 '''
             }
         }
