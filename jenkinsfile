@@ -201,6 +201,14 @@ pipeline {
                         }
                     }
 
+                    # .HasExited can flip true slightly before .ExitCode is
+                    # reliably populated if the process was never explicitly
+                    # waited on -- WaitForExit() here is a no-op timing-wise
+                    # (it already exited) but forces .NET to synchronize the
+                    # real exit code instead of reading a stale/null value
+                    # (which made $null -ne 0 true and failed a build that
+                    # had actually uploaded the file successfully).
+                    $proc.WaitForExit()
                     if ($proc.ExitCode -ne 0) { throw "scp failed with exit code $($proc.ExitCode)" }
 
                     Write-Output "=== Upload finished, finalizing on remote ==="
