@@ -46,7 +46,7 @@ class PacmanEnemy:
         self._float_phase = random.uniform(0.0, math.tau)
         self._feet_mask = None
         self._feet_mask_count = 0
-        self.max_health = 3
+        self.max_health = 2
         self.health = self.max_health
 
     def take_damage(self, amount: int = 1) -> bool:
@@ -408,7 +408,7 @@ class MonsterEnemy(PacmanEnemy):
     """Sprite-based enemy using Monster assets."""
     def __init__(self, position, monster_type: int, speed: float = PACMAN_GHOST_SPEED):
         super().__init__(position, (255, 255, 255), speed)
-        self.max_health = 2
+        self.max_health = 1
         self.health = self.max_health
         self.monster_type = monster_type
         
