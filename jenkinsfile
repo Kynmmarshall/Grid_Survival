@@ -144,7 +144,7 @@ pipeline {
                     # terminating error under that preference, even benign
                     # ones like ssh's "Permanently added ... known hosts"
                     # notice -- real failures are still caught explicitly
-                    # below via $LASTEXITCODE/$proc.ExitCode checks.
+                    # below via $LASTEXITCODE/job-state checks.
                     $ErrorActionPreference = "Continue"
                     $sshKey = "C:\\jenkins-agent\\.ssh\\id_ed25519"
                     $remote = "root@38.242.246.126"
@@ -163,16 +163,21 @@ pipeline {
                     & ssh @sshOpts $remote "mkdir -p '$remoteDir'"
                     if ($LASTEXITCODE -ne 0) { throw "Failed to prepare remote download directory" }
 
-                    # Start-Process -ArgumentList does NOT auto-quote array
-                    # elements containing spaces the way PowerShell's native
-                    # "&" splatting does -- it just space-joins them, which
-                    # split the installer's path (it has a space in "Grid
-                    # Survival Setup.exe") into two separate arguments. Build
-                    # one pre-quoted string instead.
-                    $scpArgList = ($sshOpts -join ' ') + " `"$($installer.FullName)`" ${remote}:${remoteTmp}"
-                    $proc = Start-Process -FilePath "scp" -ArgumentList $scpArgList -PassThru -NoNewWindow
+                    # Run scp in a background job rather than Start-Process:
+                    # Start-Process's .ExitCode came back unreliable (null)
+                    # in this service-account context even after
+                    # WaitForExit(), repeatedly failing builds whose uploads
+                    # had actually fully succeeded. Start-Job's -ArgumentList
+                    # also passes the installer's path as a real string
+                    # (no command-line re-quoting), sidestepping the earlier
+                    # space-in-filename issue too.
+                    $job = Start-Job -ScriptBlock {
+                        param($sshKeyArg, $remoteArg, $localPath, $remoteDest)
+                        & scp -i $sshKeyArg -o StrictHostKeyChecking=accept-new $localPath "${remoteArg}:${remoteDest}"
+                        if ($LASTEXITCODE -ne 0) { throw "scp exited with code $LASTEXITCODE" }
+                    } -ArgumentList $sshKey, $remote, $installer.FullName, $remoteTmp
 
-                    while (-not $proc.HasExited) {
+                    while ($job.State -eq 'Running') {
                         # 15s (not 3s): polling opens a brand-new SSH
                         # connection each time, and hammering that every few
                         # seconds for a multi-minute transfer previously
@@ -201,15 +206,12 @@ pipeline {
                         }
                     }
 
-                    # .HasExited can flip true slightly before .ExitCode is
-                    # reliably populated if the process was never explicitly
-                    # waited on -- WaitForExit() here is a no-op timing-wise
-                    # (it already exited) but forces .NET to synchronize the
-                    # real exit code instead of reading a stale/null value
-                    # (which made $null -ne 0 true and failed a build that
-                    # had actually uploaded the file successfully).
-                    $proc.WaitForExit()
-                    if ($proc.ExitCode -ne 0) { throw "scp failed with exit code $($proc.ExitCode)" }
+                    Wait-Job $job | Out-Null
+                    $jobOutput = Receive-Job $job -ErrorAction SilentlyContinue 2>&1
+                    $jobState = $job.State
+                    Remove-Job $job -Force
+                    if ($jobOutput) { $jobOutput | ForEach-Object { Write-Output $_ } }
+                    if ($jobState -ne 'Completed') { throw "scp job did not complete successfully (state: $jobState)" }
 
                     Write-Output "=== Upload finished, finalizing on remote ==="
                     $finalizeCmd = "mv '$remoteTmp' '$remoteFinal' && ls -lh '$remoteFinal'"
