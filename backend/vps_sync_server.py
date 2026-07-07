@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import signal
+import threading
 import time
 import urllib.parse
 from http import HTTPStatus
@@ -32,7 +33,8 @@ def _parse_port(value: str, default: int = 8000) -> int:
     return default
 
 
-DB_PATH = Path(_first_env("GRID_SURVIVAL_VPS_DB", "DB_NAME", default="vps_accounts.db"))
+DEFAULT_DB_PATH = Path(__file__).resolve().parent / "vps_accounts.db"
+DB_PATH = Path(_first_env("GRID_SURVIVAL_VPS_DB", "DB_NAME", default=str(DEFAULT_DB_PATH)))
 HOST = _first_env("GRID_SURVIVAL_VPS_HOST", "DB_HOST", default="0.0.0.0")
 PORT = _parse_port(_first_env("GRID_SURVIVAL_VPS_PORT", "DB_PORT", default="8000"), default=8000)
 
@@ -49,7 +51,13 @@ class RemoteAccountStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        # WAL mode lets readers/writers proceed concurrently instead of
+        # exclusive-locking the whole file, and a shorter busy_timeout keeps a
+        # single contended write from blocking match_daemon's global session
+        # lock (held while this call happens) for the sqlite3 default of 5s.
+        conn = sqlite3.connect(self.db_path, timeout=2.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=2000")
         conn.row_factory = sqlite3.Row
         return conn
 

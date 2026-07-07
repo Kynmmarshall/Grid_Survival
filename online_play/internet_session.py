@@ -81,14 +81,17 @@ class InternetSessionClient(NetworkClient):
         return clean
 
     def connect_to_match(self, *, endpoint: str, token: str, player_name: str) -> bool:
+        print(f"[ONLINE] connect_to_match: endpoint={endpoint!r} player={player_name!r}", flush=True)
         parsed = self._parse_endpoint(endpoint)
         if parsed is None:
             self.last_error = f"Invalid match endpoint: {endpoint}"
+            print(f"[ONLINE] connect_to_match: FAILED - {self.last_error}", flush=True)
             return False
 
         host, port = parsed
         host = self._normalize_match_host(host)
-        
+        print(f"[ONLINE] connect_to_match: resolved target {host}:{port}", flush=True)
+
         # Store for later use
         self.match_endpoint = str(endpoint)
         self.match_token = str(token)
@@ -96,7 +99,7 @@ class InternetSessionClient(NetworkClient):
         self._last_host = host
         self._last_port = int(port)
         self._last_auth_ok = False
-        
+
         try:
             self._logger.debug(
                 "connect_to_match -> endpoint=%s parsed=%s token_set=%s player=%s",
@@ -109,26 +112,36 @@ class InternetSessionClient(NetworkClient):
             pass
 
         # === PHASE 1: Try TCP handshake (most reliable through firewalls) ===
+        # Note: this branch is currently unreachable in practice -- nothing
+        # ever sets self.transport on this class, so hasattr() is always
+        # False. Left as-is (not this task's scope to fix), but logged so
+        # it's visible if that ever changes.
         tcp_auth_ok = False
         try:
             if hasattr(self, 'transport') and hasattr(self.transport, '_tcp_handshake'):
+                print("[ONLINE] connect_to_match: attempting TCP handshake...", flush=True)
                 if self.transport._tcp_handshake(host, port, token, player_name):
                     self.session_id = self.transport.session_id
                     self._last_auth_ok = True
                     tcp_auth_ok = True
-        except Exception:
-            pass
-        
+                    print("[ONLINE] connect_to_match: TCP handshake OK", flush=True)
+        except Exception as exc:
+            print(f"[ONLINE] connect_to_match: TCP handshake attempt raised {exc}", flush=True)
+
         if tcp_auth_ok:
             if self.connect_to_host(host, port):
                 return True
-        
+
         # === PHASE 2: Try clean UDP hello from scratch ===
+        print(f"[ONLINE] connect_to_match: attempting UDP hello to {host}:{port} (up to 3 tries)...", flush=True)
         connected = False
         for attempt in range(1, 4):
+            print(f"[ONLINE] connect_to_match: UDP hello attempt {attempt}/3...", flush=True)
             if self.connect_to_host(host, port):
                 connected = True
+                print(f"[ONLINE] connect_to_match: UDP hello succeeded on attempt {attempt}", flush=True)
                 break
+            print(f"[ONLINE] connect_to_match: UDP hello attempt {attempt} failed: {self.last_error}", flush=True)
             if attempt < 3:
                 time.sleep(0.35)
 
@@ -138,12 +151,15 @@ class InternetSessionClient(NetworkClient):
                 lower = str(self.last_error).lower()
                 if any(x in lower for x in ["econnrefused", "connection refused", "winerror 10061", "refused"]):
                     self._logger.warning("Internet connection refused; triggering LAN fallback")
+                    print("[ONLINE] connect_to_match: connection refused, falling back to LAN", flush=True)
                     raise InternetFallbackLAN("Internet connect refused; fallback to LAN")
-            
+
             self.last_error = "Failed to connect via TCP or UDP"
+            print(f"[ONLINE] connect_to_match: FAILED - {self.last_error}", flush=True)
             return False
 
         # === PHASE 3: Send internet_auth and wait for confirmation ===
+        print("[ONLINE] connect_to_match: sending internet_auth, waiting for server response...", flush=True)
         if not self.send_message(
             "internet_auth",
             token=token,
@@ -151,6 +167,7 @@ class InternetSessionClient(NetworkClient):
             resume=False,
         ):
             self.last_error = "Failed to send internet_auth"
+            print(f"[ONLINE] connect_to_match: FAILED - {self.last_error}", flush=True)
             self.disconnect()
             return False
 
@@ -160,14 +177,17 @@ class InternetSessionClient(NetworkClient):
                 if message.get("type") == "internet_auth_ok":
                     self.session_id = str(message.get("session_id", "")) or None
                     self._last_auth_ok = True
+                    print(f"[ONLINE] connect_to_match: internet_auth_ok, session_id={self.session_id}", flush=True)
                     return True
                 if message.get("type") == "internet_auth_error":
                     self.last_error = str(message.get("error", "auth rejected"))
+                    print(f"[ONLINE] connect_to_match: FAILED - server rejected auth: {self.last_error}", flush=True)
                     self.disconnect()
                     return False
             time.sleep(0.02)
 
         self.last_error = "Timed out waiting for internet_auth_ok"
+        print(f"[ONLINE] connect_to_match: FAILED - {self.last_error}", flush=True)
         self.disconnect()
         return False
 
@@ -190,6 +210,26 @@ class InternetSessionClient(NetworkClient):
 
         max_attempts = max(1, int(attempts))
         for attempt in range(max_attempts):
+            # Try the TCP handshake first, same as the initial connect_to_match
+            # (PHASE 1) -- some networks/firewalls only ever let the TCP path
+            # through, so a UDP-only reconnect can silently never reach the
+            # server even though the original connection worked.
+            tcp_auth_ok = False
+            try:
+                if hasattr(self, "transport") and hasattr(self.transport, "_tcp_handshake"):
+                    if self.transport._tcp_handshake(
+                        self._last_host, self._last_port, self.match_token, self.player_name
+                    ):
+                        self.session_id = self.transport.session_id
+                        tcp_auth_ok = True
+            except Exception:
+                pass
+
+            if tcp_auth_ok and self.connect_to_host(self._last_host, self._last_port):
+                self.request_resync("reconnect")
+                self._last_auth_ok = True
+                return True
+
             if self.connect_to_host(self._last_host, self._last_port):
                 auth_sent = self.send_message(
                     "internet_auth",

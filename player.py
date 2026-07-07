@@ -743,6 +743,10 @@ class Player:
             "eliminated": bool(self._eliminated),
             "extra_lives": int(self._extra_lives),
             "death_fade_alpha": int(self._death_fade_alpha),
+            "health": int(self.health),
+            "max_health": int(self.max_health),
+            "projectile_cooldown_remaining": float(getattr(self, "projectile_cooldown_remaining", 0.0)),
+            "projectile_cooldown_total": float(getattr(self, "projectile_cooldown_total", 0.0)),
         }
 
     def apply_snapshot_state(self, snapshot: dict[str, Any]):
@@ -775,6 +779,14 @@ class Player:
         self._active_orb_label = snapshot.get("active_orb_label")
         self._extra_lives = int(snapshot.get("extra_lives", self._extra_lives))
         self._death_fade_alpha = int(snapshot.get("death_fade_alpha", self._death_fade_alpha))
+        self.max_health = int(snapshot.get("max_health", self.max_health))
+        self.health = int(snapshot.get("health", self.health))
+        self.projectile_cooldown_remaining = float(
+            snapshot.get("projectile_cooldown_remaining", getattr(self, "projectile_cooldown_remaining", 0.0))
+        )
+        self.projectile_cooldown_total = float(
+            snapshot.get("projectile_cooldown_total", getattr(self, "projectile_cooldown_total", 0.0))
+        )
         self._active_orb_timer = float(snapshot.get("active_orb_timer", self._active_orb_timer))
         self._active_orb_indefinite = bool(
             snapshot.get("active_orb_indefinite", self._active_orb_indefinite)
@@ -886,6 +898,17 @@ class Player:
                 # Landed in a pit -> start falling
                 self.on_ground = False
                 self._start_fall(walkable_bounds)
+
+    def _advance_jump_arc(self, dt: float) -> None:
+        """Advance only the vertical (z) half of jump physics via gravity.
+
+        Used to extrapolate a networked remote player's jump height between
+        host snapshots, since the arc is pure gravity and doesn't depend on
+        the input we don't have (unlike horizontal air control).
+        """
+        self.z_velocity -= PLAYER_JUMP_GRAVITY * dt
+        self.z_velocity = max(-PLAYER_MAX_FALL_SPEED, self.z_velocity)
+        self.z = max(0.0, self.z + self.z_velocity * dt)
 
     def draws_behind_map(self) -> bool:
         return (self.falling or self.drowning) and self.fall_draw_behind

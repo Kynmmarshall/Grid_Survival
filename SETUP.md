@@ -1,6 +1,6 @@
 # Grid Survival - Multi-PC Setup Guide
 
-This guide helps you run Grid Survival on a new machine and connect to the online VPS.
+This guide helps you run Grid Survival on a new machine and connect to the online VPS..
 
 ## Quick Start (5 minutes)
 

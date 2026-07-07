@@ -111,6 +111,7 @@ class GameManager:
         self._pending_remote_power_uses_by_index: dict[int, int] = {}
         self._remote_input_states_by_index: dict[int, dict] = {}
         self._remote_player_index_by_sender: dict[tuple[str, int], int] = {}
+        self._network_last_shoot_by_index: dict[int, bool] = {}
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = 1 / 60
         self._snapshot_interval = 1 / 60
@@ -130,6 +131,7 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._last_client_projectile_snapshot_time = -1.0
         self._network_world_delta = (0, 0)
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
@@ -141,6 +143,7 @@ class GameManager:
         self._client_snapshot_gap = self._snapshot_interval
         self._client_prediction_enabled = True
         self._client_remote_extrapolation_cap = 1 / 6
+        self._client_prev_player_flags: dict[int, tuple[bool, bool, bool]] = {}
         self._net_quality_font = pygame.font.Font(None, 18)
         self._ping_average_window = 10.0
         self._ping_samples: list[int] = []
@@ -557,6 +560,13 @@ class GameManager:
                     )
                 if power_requested:
                     player.try_use_power(self)
+                shoot_now = bool(player_input.get("shoot"))
+                if shoot_now and not self._network_last_shoot_by_index.get(idx, False):
+                    dx = (1.0 if player_input.get("right") else 0.0) - (1.0 if player_input.get("left") else 0.0)
+                    dy = (1.0 if player_input.get("down") else 0.0) - (1.0 if player_input.get("up") else 0.0)
+                    shoot_direction = pygame.Vector2(dx, dy) if (dx != 0 or dy != 0) else None
+                    self.projectile_manager.fire(player, shoot_direction)
+                self._network_last_shoot_by_index[idx] = shoot_now
                 player.update_from_input_state(
                     dt,
                     player_input,
@@ -711,12 +721,29 @@ class GameManager:
         if isinstance(local_input, dict):
             self._client_last_local_input = dict(local_input)
 
+        # Fire local feedback (sfx/splash) for state transitions that host
+        # snapshots just applied, so the client hears/sees falls and deaths
+        # the moment they happen instead of only seeing the sprite move.
+        for idx, player in enumerate(self.players):
+            now_falling = bool(player.falling)
+            now_drowning = bool(player.drowning)
+            now_eliminated = player in self.eliminated_players
+            prev = self._client_prev_player_flags.get(idx)
+            if prev is not None:
+                was_falling, was_drowning, _was_eliminated = prev
+                if now_falling and not was_falling:
+                    self.audio.play_sfx(SOUND_PLAYER_FALL)
+                if now_drowning and not was_drowning:
+                    self.water.trigger_splash(player.rect.centerx)
+            self._client_prev_player_flags[idx] = (now_falling, now_drowning, now_eliminated)
+
         self.water.update(dt)
         # Advance tile crumbling/warning animations locally so they are smooth
         # between host snapshots without running host-only random tile selection.
         self.tile_manager.advance_visuals(dt)
         self.hazard_manager.advance_visuals(dt)
         self.orb_manager.advance_visuals(dt)
+        self.projectile_manager.update(dt, self)
         if self.pacman_enemy_manager:
             self.pacman_enemy_manager.advance_visuals(dt)
         if self.elimination_screen:
@@ -744,26 +771,51 @@ class GameManager:
                 local_player.power.update(dt, local_player)
             predicted_local = True
 
+        def _dead_reckon_horizontal(p, dead_dt: float) -> None:
+            # Lightweight dead-reckoning between snapshots reduces visible
+            # stepping when packets arrive unevenly.
+            delta = pygame.Vector2(p.velocity) * dead_dt
+            max_step = 18.0
+            if delta.length_squared() > max_step * max_step:
+                delta.scale_to_length(max_step)
+            if delta.length_squared() > 0.0:
+                if self.walkable_mask is not None and hasattr(p, "_attempt_move"):
+                    p._attempt_move(delta, self.walkable_mask)
+                else:
+                    p.position += delta
+                p.rect.center = (round(p.position.x), round(p.position.y))
+
         extrapolation_dt = min(max(0.0, float(dt)), self._client_remote_extrapolation_cap)
         for player in self.players:
             player._eliminated = player in self.eliminated_players
+            drown_animation_handled = False
 
             if player is not local_player and not player._eliminated:
-                # Lightweight dead-reckoning between snapshots reduces visible
-                # stepping when packets arrive unevenly.
-                if not player.falling and not player.drowning and str(getattr(player, "state", "")) != "death":
-                    delta = pygame.Vector2(player.velocity) * extrapolation_dt
-                    max_step = 18.0
-                    if delta.length_squared() > max_step * max_step:
-                        delta.scale_to_length(max_step)
-                    if delta.length_squared() > 0.0:
-                        if self.walkable_mask is not None and hasattr(player, "_attempt_move"):
-                            player._attempt_move(delta, self.walkable_mask)
-                        else:
-                            player.position += delta
-                        player.rect.center = (round(player.position.x), round(player.position.y))
+                if player.falling:
+                    # Fall physics are deterministic (gravity + terminal speed,
+                    # no input), so mirror them locally instead of freezing the
+                    # player until the next snapshot arrives.
+                    player._update_fall(extrapolation_dt)
+                    player.rect.center = (round(player.position.x), round(player.position.y))
+                elif player.drowning:
+                    # Also deterministic (hold-then-sink), and updates its own
+                    # animation timer internally.
+                    player._update_drown(extrapolation_dt)
+                    player.rect.center = (round(player.position.x), round(player.position.y))
+                    drown_animation_handled = True
+                elif player.jumping:
+                    # The jump arc's vertical half is pure gravity (no input
+                    # needed), so extrapolate height locally while dead-reckoning
+                    # the ground position as usual; avoids the jump visually
+                    # "pausing" mid-air between snapshots.
+                    player._advance_jump_arc(extrapolation_dt)
+                    _dead_reckon_horizontal(player, extrapolation_dt)
+                elif str(getattr(player, "state", "")) != "death":
+                    _dead_reckon_horizontal(player, extrapolation_dt)
 
             if predicted_local and player is local_player:
+                continue
+            if drown_animation_handled:
                 continue
             player.current_animation.update(dt)
 
@@ -1110,6 +1162,23 @@ class GameManager:
         }
 
     def _build_network_dynamic_world_snapshot(self) -> dict:
+        proj_list = None
+        try:
+            proj_list = [
+                {
+                    "x": float(p.position.x),
+                    "y": float(p.position.y),
+                    "vx": float(p.velocity.x),
+                    "vy": float(p.velocity.y),
+                    "kind": p.kind.name if getattr(p, "kind", None) is not None else "ROCK",
+                    "age": float(getattr(p, "age", 0.0)),
+                    "lifetime": float(getattr(p, "lifetime", 0.0)),
+                }
+                for p in getattr(self.projectile_manager, "_projectiles", [])
+                if getattr(p, "alive", False)
+            ]
+        except Exception:
+            proj_list = None
         return {
             "time_since_start": float(self._time_since_start),
             "round_seq": int(self._network_round_seq),
@@ -1122,6 +1191,7 @@ class GameManager:
                 if self.pacman_enemy_manager
                 else None
             ),
+            "projectiles": proj_list,
         }
 
     @staticmethod
@@ -1146,12 +1216,15 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._last_client_projectile_snapshot_time = -1.0
         self._network_world_delta = (0, 0)
+        self._client_prev_player_flags = {}
 
         self.tile_manager.reset()
         self.walkable_mask = self.original_walkable_mask.copy() if self.original_walkable_mask else None
         self.hazard_manager.reset()
         self.orb_manager.reset()
+        self.projectile_manager.reset()
         if self.pacman_enemy_manager:
             self.pacman_enemy_manager.reset()
 
@@ -2525,14 +2598,24 @@ class GameManager:
                 self._guest_rr = rr_after
                 ranked_mode = self._is_ranked_mode() if ranked_mode_override is None else bool(ranked_mode_override)
                 if self.account_service and self.account_username:
+                    # apply_stat_delta only knows how to add a delta to the
+                    # LOCALLY cached profile.rr, not set an absolute value. The
+                    # local cache and the server's RR can legitimately differ
+                    # between matches (queued/async sync), so to converge the
+                    # local cache to the server-authoritative rr_after we must
+                    # reconcile against the local value here -- but that
+                    # reconciliation delta must stay internal to this DB call
+                    # and never be shown to the player (that was the bug behind
+                    # the reported +1000 RR: the huge reconciliation delta was
+                    # returned as-is instead of the small server-computed one
+                    # already captured in rr_delta above).
+                    reconcile_delta = rr_delta
                     profile_before = self.account_service.get_profile(self.account_username)
                     if profile_before is not None:
-                        current_local_rr = int(profile_before.rr)
-                        rr_before = int(authoritative.get("rr_before", current_local_rr)) if isinstance(authoritative, dict) else current_local_rr
-                        rr_delta = int(rr_after - current_local_rr)
+                        reconcile_delta = int(rr_after - int(profile_before.rr))
                     updated = self.account_service.apply_stat_delta(
                         self.account_username,
-                        rr_delta=rr_delta,
+                        rr_delta=reconcile_delta,
                         damage_dealt=damage_dealt_delta,
                         damage_taken=damage_taken_delta,
                         eliminations=eliminations_delta,
@@ -2690,6 +2773,7 @@ class GameManager:
         self._pending_remote_power_uses_by_index = {}
         self._remote_input_states_by_index = {}
         self._remote_player_index_by_sender = {}
+        self._network_last_shoot_by_index = {}
         self._authoritative_network_inputs = None
         self._snapshot_send_timer = self._snapshot_interval
         self._world_dynamic_snapshot_send_timer = 0.0
@@ -2702,10 +2786,12 @@ class GameManager:
         self._last_client_hazard_snapshot_time = -1.0
         self._last_client_orb_snapshot_time = -1.0
         self._last_client_pacman_snapshot_time = -1.0
+        self._last_client_projectile_snapshot_time = -1.0
         self._last_client_snapshot_round_seq = -1
         self._last_client_world_snapshot_round_seq = -1
         self._client_last_local_input = self._empty_network_input_state()
         self._client_snapshot_gap = self._snapshot_interval
+        self._client_prev_player_flags = {}
         if reset_match:
             self._last_applied_match_result_id = None
             self._network_authoritative_rr_results = {}

@@ -31,11 +31,15 @@ from network import (
     PKT_FRAGMENT,
     PKT_HELLO,
     PKT_HELLO_ACK,
+    PKT_KEEPALIVE,
 )
 from settings import (
     MAP_PATH,
     PLAYER_FALL_GRAVITY,
     PLAYER_FALL_MAX_SPEED,
+    PLAYER_JUMP_GRAVITY,
+    PLAYER_JUMP_VELOCITY,
+    PLAYER_MAX_FALL_SPEED,
     PLAYER_SPEED,
     PLAYER_START_POS,
     WINDOW_SIZE,
@@ -92,11 +96,17 @@ BOT_CANDIDATE_DIRECTIONS = (
 class _PlayerProxy:
     def __init__(self, name: str, entry: dict[str, Any], *, bot: bool = False):
         self.name = str(name)
+        # Stable identity for ProjectileManager's cooldown tracking: this
+        # proxy itself is recreated fresh every physics tick, so id(self)
+        # changes constantly (see ProjectileManager._owner_key).
+        self.uid = str(name)
         self._entry = entry
         self.position = pygame.Vector2(float(entry.get("x", 0.0)), float(entry.get("y", 0.0)))
         self.rect = pygame.Rect(0, 0, 48, 48)
         self.rect.center = (round(self.position.x), round(self.position.y))
         self._eliminated = bool(entry.get("eliminated", False))
+        self.max_health = int(entry.get("max_health", 4))
+        self.health = int(entry.get("health", self.max_health))
         self.state = str(entry.get("state", "idle"))
         self.facing = str(entry.get("facing", "down"))
         self.velocity = pygame.Vector2(
@@ -148,6 +158,19 @@ class _PlayerProxy:
 
     def has_void_walk(self) -> bool:
         return self._void_walk_timer > 0.0
+
+    def take_damage(self, amount: int = 1) -> bool:
+        """Reduce health, mirroring player.py's Player.take_damage.
+
+        Was previously missing entirely, so projectiles.py's
+        `_apply_hit_to_player` (which gates elimination on
+        `hasattr(player, "take_damage")`) silently skipped damage/elimination
+        for every projectile hit taken over the Internet/VPS daemon -- shots
+        only ever knocked players back, never killed them.
+        """
+        self.health = max(0, self.health - int(amount))
+        self._entry["health"] = self.health
+        return self.health <= 0
 
     def has_extra_life(self) -> bool:
         return self._lives > 0
@@ -244,6 +267,44 @@ class _PlayerProxy:
         self.position.y += self.fall_velocity * dt
         self.velocity.update(0.0, self.fall_velocity)
 
+    def start_jump(self) -> None:
+        if self.jumping or self.falling or self.state == "death":
+            return
+        self.jumping = True
+        self.z_velocity = PLAYER_JUMP_VELOCITY
+        self.on_ground = False
+
+    def update_jump(self, dt: float, move_vector: pygame.Vector2, walkable_mask, speed: float) -> None:
+        """Mirror of player.py's Player._update_jump: pure-gravity z arc plus
+        horizontal air control, so the daemon actually simulates jumping
+        instead of leaving `jumping`/`z` permanently False/0 for clients."""
+        self.z_velocity -= PLAYER_JUMP_GRAVITY * dt
+        self.z_velocity = max(-PLAYER_MAX_FALL_SPEED, self.z_velocity)
+        self.z += self.z_velocity * dt
+
+        if move_vector.length_squared() > 0:
+            move_vector = move_vector.normalize()
+            self.position += move_vector * speed * dt
+            self.velocity = move_vector * speed
+            if abs(move_vector.y) >= abs(move_vector.x):
+                self.facing = "down" if move_vector.y > 0 else "up"
+            else:
+                self.facing = "right" if move_vector.x > 0 else "left"
+            self.state = "run"
+        else:
+            self.velocity.update(0, 0)
+            self.state = "idle"
+
+        if self.z <= 0:
+            self.z = 0.0
+            self.z_velocity = 0.0
+            self.jumping = False
+            if self.is_over_platform(self.position, walkable_mask):
+                self.on_ground = True
+            else:
+                self.on_ground = False
+                self.start_fall()
+
     def die(self) -> None:
         if self.state == "death":
             return
@@ -261,6 +322,10 @@ class _PlayerProxy:
         self._entry["x"] = float(self.position.x)
         self._entry["y"] = float(self.position.y)
         self._entry["eliminated"] = bool(self._eliminated)
+        self._entry["health"] = int(self.health)
+        self._entry["max_health"] = int(self.max_health)
+        self._entry["projectile_cooldown_remaining"] = float(getattr(self, "projectile_cooldown_remaining", 0.0))
+        self._entry["projectile_cooldown_total"] = float(getattr(self, "projectile_cooldown_total", 0.0))
         self._entry["state"] = str(self.state)
         self._entry["facing"] = str(self.facing)
         self._entry["falling"] = bool(self.falling)
@@ -471,6 +536,10 @@ class MatchDaemon:
             "eliminated": bool(entry.get("eliminated", False)),
             "extra_lives": int(entry.get("extra_lives", 0)),
             "death_fade_alpha": int(entry.get("death_fade_alpha", 255)),
+            "health": int(entry.get("health", 4)),
+            "max_health": int(entry.get("max_health", 4)),
+            "projectile_cooldown_remaining": float(entry.get("projectile_cooldown_remaining", 0.0)),
+            "projectile_cooldown_total": float(entry.get("projectile_cooldown_total", 0.0)),
         }
 
     def _configure_tile_manager(self, tile_manager: TMXTileManager, level) -> None:
@@ -727,6 +796,11 @@ class MatchDaemon:
                         }
                         idx += 1
                 self._initialize_session_world(session)
+                # _initialize_session_world() no-ops on an already-initialized
+                # session, so a player/bot joining after the first one would
+                # otherwise never have their naive index-based spawn (x, y)
+                # validated against the walkable mask.
+                self._ensure_players_on_walkable_surface(session, session.get("walkable_mask"))
 
             seq = self._next_seq()
             # Reply with ok and session id (reuse token as session id).
@@ -780,6 +854,22 @@ class MatchDaemon:
                 for entry in players.values():
                     if entry.get("addr") == addr:
                         entry["last_seen"] = time.time()
+
+    def _handle_keepalive(self, addr: tuple[str, int]) -> None:
+        """Refresh last_seen for a client's periodic keepalive packet.
+
+        Previously PKT_KEEPALIVE had no handler at all here, so an idle
+        client (not actively pressing input) depended entirely on its rate-
+        limited input_state resends to stay under CLIENT_TIMEOUT; a slow
+        frame or send hiccup could silently let the server stop sending that
+        client snapshots.
+        """
+        now = time.time()
+        with self._lock:
+            for session in self._sessions.values():
+                for entry in session.get("players", {}).values():
+                    if entry.get("addr") == addr:
+                        entry["last_seen"] = now
 
     def _handle_disconnect(self, addr: tuple[str, int]) -> None:
         now = time.time()
@@ -914,6 +1004,7 @@ class MatchDaemon:
                         session["enemy_manager"] = PacmanEnemyManager(enemy_spawns)
                 
                 self._initialize_session_world(session)
+                self._ensure_players_on_walkable_surface(session, session.get("walkable_mask"))
                 self._tcp_addr_to_session[addr] = token
             
             # Send internet_auth_ok
@@ -1065,6 +1156,29 @@ class MatchDaemon:
                 int(round(float(getattr(tile, "pixel_y", PLAYER_START_POS[1])) + float(getattr(tile, "tile_height", 0)) * 0.5)),
             )
 
+    def _ensure_players_on_walkable_surface(self, session: dict, walkable_mask) -> None:
+        """Snap any player whose raw spawn (x, y) formula landed off the
+        walkable platform onto the nearest intact tile. Unlike LAN's game.py
+        (_ensure_players_on_walkable_surface/_force_safe_spawns), the daemon
+        previously assigned spawns via pure index-based arithmetic with no
+        mask check at all, so a 3rd/4th player or a bot could spawn over the
+        void.
+        """
+        if walkable_mask is None:
+            return
+        occupied: set[tuple[int, int]] = set()
+        for name, entry in session.get("players", {}).items():
+            try:
+                proxy = _PlayerProxy(name, entry)
+            except Exception:
+                continue
+            if not proxy.is_over_platform(proxy.position, walkable_mask):
+                fixed = self._nearest_intact_tile_position(session, proxy.position, occupied)
+                if fixed is not None:
+                    entry["x"] = float(fixed[0])
+                    entry["y"] = float(fixed[1])
+            occupied.add((int(round(float(entry.get("x", 0.0)))), int(round(float(entry.get("y", 0.0))))))
+
     def _nearest_intact_tile_position(
         self,
         session: dict,
@@ -1195,6 +1309,7 @@ class MatchDaemon:
         session["map_scale_x"] = scale_x
         session["map_scale_y"] = scale_y
         session["map_offset"] = map_offset
+        self._ensure_players_on_walkable_surface(session, walkable_mask)
         enemy_count = self._pacman_enemy_count(session)
         session["enemy_manager"] = (
             PacmanEnemyManager(self._build_enemy_spawns(session, enemy_count))
@@ -1347,7 +1462,9 @@ class MatchDaemon:
             entry["eliminated"] = False
             entry["state"] = "idle"
             entry["death_fade_alpha"] = 255
+            entry["health"] = int(entry.get("max_health", 4))
             entry["last_input"] = {}
+        self._ensure_players_on_walkable_surface(session, session.get("walkable_mask"))
 
         enemy_count = self._pacman_enemy_count(session)
         session["enemy_manager"] = (
@@ -1400,19 +1517,25 @@ class MatchDaemon:
 
         if len(alive) == 1:
             winner_index, winner_name, winner_entry = alive[0]
-            if winner_index >= len(wins):
-                wins.extend([0] * (winner_index + 1 - len(wins)))
-            wins[winner_index] += 1
-            if wins[winner_index] >= target_score:
-                session["pending_end_state"] = {
-                    "type": "victory",
-                    "winner_name": str(winner_name),
-                    "winner_character": str(winner_entry.get("character_name", "Caveman")),
-                    "survival_time": float(time.time() - session.get("start_time", time.time())),
-                }
-                session["game_over"] = False
-                session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
-                return
+            # A bot outlasting every human isn't a meaningful ranked result --
+            # crediting it a round win skewed every human's RR that round (RR
+            # scoring keys off winner_index, so humans all got scored as
+            # losers) and could let a bot "win" the match outright. Treat this
+            # as a no-decision round instead: no round point, just reset.
+            if not bool(winner_entry.get("bot", False)):
+                if winner_index >= len(wins):
+                    wins.extend([0] * (winner_index + 1 - len(wins)))
+                wins[winner_index] += 1
+                if wins[winner_index] >= target_score:
+                    session["pending_end_state"] = {
+                        "type": "victory",
+                        "winner_name": str(winner_name),
+                        "winner_character": str(winner_entry.get("character_name", "Caveman")),
+                        "survival_time": float(time.time() - session.get("start_time", time.time())),
+                    }
+                    session["game_over"] = False
+                    session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
+                    return
 
         session["game_over"] = False
         session["round_restart_at"] = time.time() + ROUND_RESTART_DELAY
@@ -2058,6 +2181,7 @@ class MatchDaemon:
                                 spawn_y = float(PLAYER_START_POS[1])
                                 players[bot_name] = {"addr": None, "x": spawn_x, "y": spawn_y, "last_input": {}, "bot": True, "profile": "Bot"}
                                 idx += 1
+                            self._ensure_players_on_walkable_surface(session, session.get("walkable_mask"))
                 if not self._session_ready(session):
                     session["start_time"] = time.time()
                     continue
@@ -2239,6 +2363,7 @@ class MatchDaemon:
                     down = bool(inp.get("down"))
                     left = bool(inp.get("left"))
                     right = bool(inp.get("right"))
+                    jump_pressed = bool(inp.get("jump"))
                     if proxy.falling:
                         proxy.update_fall(dt)
                         if proxy.position.y > WINDOW_SIZE[1] + 100:
@@ -2263,30 +2388,38 @@ class MatchDaemon:
                     if down:
                         move_vector.y += 1.0
 
-                    left_playable = False
-                    if move_vector.length_squared() > 0.0:
-                        move_vector = move_vector.normalize()
-                        proxy.velocity = move_vector * speed
-                        if abs(move_vector.y) >= abs(move_vector.x):
-                            proxy.facing = "down" if move_vector.y > 0 else "up"
-                        else:
-                            proxy.facing = "right" if move_vector.x > 0 else "left"
-                        left_playable = not proxy.attempt_move(proxy.velocity * dt, walkable_mask)
-                        proxy.state = "run"
-                    else:
-                        proxy.velocity.update(0, 0)
-                        proxy.state = "idle"
-                        left_playable = not proxy.is_over_platform(proxy.position, walkable_mask)
+                    if not proxy.jumping and jump_pressed and proxy.on_ground and proxy._freeze_timer <= 0.0:
+                        proxy.start_jump()
 
-                    if left_playable:
-                        proxy.start_fall()
-                        proxy.update_fall(dt)
-                        if proxy.position.y > WINDOW_SIZE[1] + 100:
-                            self._eliminate_proxy(proxy, "fell off")
+                    if proxy.jumping:
+                        # Mirrors player.py's Player._update_jump: was previously
+                        # entirely unimplemented here, so `jumping`/`z` sent to
+                        # clients stayed permanently False/0 (see _PlayerProxy).
+                        proxy.update_jump(dt, move_vector, walkable_mask, speed)
+                    else:
+                        left_playable = False
+                        if move_vector.length_squared() > 0.0:
+                            move_vector = move_vector.normalize()
+                            proxy.velocity = move_vector * speed
+                            if abs(move_vector.y) >= abs(move_vector.x):
+                                proxy.facing = "down" if move_vector.y > 0 else "up"
+                            else:
+                                proxy.facing = "right" if move_vector.x > 0 else "left"
+                            left_playable = not proxy.attempt_move(proxy.velocity * dt, walkable_mask)
+                            proxy.state = "run"
+                        else:
+                            proxy.velocity.update(0, 0)
+                            proxy.state = "idle"
+                            left_playable = not proxy.is_over_platform(proxy.position, walkable_mask)
+
+                        if left_playable:
+                            proxy.start_fall()
+                            proxy.update_fall(dt)
+                            if proxy.position.y > WINDOW_SIZE[1] + 100:
+                                self._eliminate_proxy(proxy, "fell off")
 
                     proxy.rect.center = (round(proxy.position.x), round(proxy.position.y))
                     # Handle shoot input edge (spawn projectiles on press)
-                    inp = entry.get("last_input") or {}
                     try:
                         shoot_now = bool(inp.get("shoot", False))
                     except Exception:
@@ -2380,6 +2513,18 @@ class MatchDaemon:
                 if orb_manager is not None and not session.get("round_finished"):
                     orb_manager.update(dt, session.get("walkable_bounds"), current_proxies, self)
 
+                if proj_mgr is not None:
+                    # Pull cooldown state by stable uid (see ProjectileManager
+                    # ._owner_key) rather than relying on the manager pushing
+                    # onto whichever proxy object it cached at fire()-time --
+                    # this tick's proxy is a different object, so a push would
+                    # never actually reach it and the cooldown UI would never
+                    # sync to clients.
+                    for proxy in current_proxies:
+                        remaining, total = proj_mgr.get_shoot_cooldown_state(proxy.uid)
+                        proxy.projectile_cooldown_remaining = remaining
+                        proxy.projectile_cooldown_total = total
+
                 for proxy in current_proxies:
                     proxy.sync_back()
 
@@ -2427,7 +2572,15 @@ class MatchDaemon:
             print(f"[DEBUG] MatchDaemon.run -> bound to {self.bind_addr}:{self.bind_port}", flush=True)
         except Exception:
             pass
-        s.settimeout(0.05)
+        # Previously 0.05s: the physics tick ran directly off however often
+        # recvfrom() woke up, so with N clients each sending input at up to
+        # 60 Hz the tick interval swung wildly between ~0ms (packet storms)
+        # and 50ms (idle), producing uneven simulation pacing that read as
+        # jitter on clients regardless of how smoothly they interpolated it.
+        # A short timeout here just keeps the loop responsive to incoming
+        # packets; actual physics pacing now comes from the fixed-step
+        # accumulator below.
+        s.settimeout(0.01)
         self.sock = s
 
         # Start TCP server thread for handshakes
@@ -2435,28 +2588,54 @@ class MatchDaemon:
         tcp_thread.start()
 
         last_snapshot_send = 0.0
+        last_world_snapshot_send = 0.0
         last_cleanup = 0.0
         last_tick = time.time()
+        # Tiles rarely change (crumble timers are on the order of seconds), so
+        # rebuilding/broadcasting the full tile layout doesn't need to ride
+        # the same fast cadence as player positions/hazards/orbs -- doing so
+        # was needlessly rebuilding the full layout every cycle and causing
+        # clients to re-erase/re-rebuild their walkable mask (and log it) far
+        # more often than the tile state actually changes.
+        WORLD_SNAPSHOT_INTERVAL = 0.25
+        # Fixed-step physics: always advance the simulation in constant
+        # 1/60s slices (an "optimal" 60 Hz tick rate per netcode convention),
+        # regardless of how irregularly the loop itself gets to run. This is
+        # what makes snapshots come from an evenly-paced simulation instead
+        # of one that lurches with network I/O timing.
+        PHYSICS_TICK_DT = 1.0 / 60.0
+        MAX_TICKS_PER_FRAME = 8  # avoid a spiral of death after a long stall
+        tick_accumulator = 0.0
+        # Player positions/hazards/orbs/projectiles now broadcast at 20 Hz
+        # (was 10 Hz) -- still well under the 60 Hz sim rate to keep
+        # bandwidth sane, but frequent enough that ability pickups/hits and
+        # movement don't read as laggy before client interpolation smooths it.
+        SNAPSHOT_SEND_INTERVAL = 0.05
         try:
             while self.running:
                 now = time.time()
-                dt = now - last_tick
+                frame_dt = now - last_tick
                 last_tick = now
-                # Tick physics
-                self._tick_physics(dt)
+                tick_accumulator = min(tick_accumulator + frame_dt, PHYSICS_TICK_DT * MAX_TICKS_PER_FRAME)
+                while tick_accumulator >= PHYSICS_TICK_DT:
+                    self._tick_physics(PHYSICS_TICK_DT)
+                    tick_accumulator -= PHYSICS_TICK_DT
 
                 # Cleanup stale sessions every 10 seconds
                 if now - last_cleanup >= 10.0:
                     last_cleanup = now
                     self._cleanup_stale_sessions(now)
 
-                # Send snapshots at 10 Hz
-                if now - last_snapshot_send >= 0.1:
+                # Send snapshots
+                if now - last_snapshot_send >= SNAPSHOT_SEND_INTERVAL:
                     last_snapshot_send = now
+                    send_world_snapshot = now - last_world_snapshot_send >= WORLD_SNAPSHOT_INTERVAL
+                    if send_world_snapshot:
+                        last_world_snapshot_send = now
                     with self._lock:
                         for session in list(self._sessions.values()):
                             snap = self._build_snapshot(session)
-                            world_snapshot = self._build_world_snapshot(session)
+                            world_snapshot = self._build_world_snapshot(session) if send_world_snapshot else None
                             dynamic_snapshot = self._build_world_dynamic_snapshot(session)
                             for pname, entry in session.get("players", {}).items():
                                 addr = entry.get("addr")
@@ -2470,8 +2649,9 @@ class MatchDaemon:
 
                                 seq = self._next_seq()
                                 self._send_packet(addr, PKT_DATA, seq, 0, "snapshot", snap)
-                                seq = self._next_seq()
-                                self._send_packet(addr, PKT_DATA, seq, 0, "world_snapshot", world_snapshot)
+                                if world_snapshot is not None:
+                                    seq = self._next_seq()
+                                    self._send_packet(addr, PKT_DATA, seq, 0, "world_snapshot", world_snapshot)
                                 if dynamic_snapshot is not None:
                                     seq = self._next_seq()
                                     self._send_packet(addr, PKT_DATA, seq, 0, "world_dynamic_snapshot", dynamic_snapshot)
@@ -2499,6 +2679,9 @@ class MatchDaemon:
                     continue
                 if kind == PKT_DISCONNECT:
                     self._handle_disconnect(addr)
+                    continue
+                if kind == PKT_KEEPALIVE:
+                    self._handle_keepalive(addr)
                     continue
                 if kind == PKT_DATA:
                     self._handle_data(addr, packet)

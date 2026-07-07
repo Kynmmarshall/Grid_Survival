@@ -90,14 +90,18 @@ class OnlineService:
         url = f"{self._base_url}{path}"
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=body, headers=self._headers(), method=method)
+        print(f"[ONLINE] {method} {path} -> {url}", flush=True)
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
                 if not raw:
+                    print(f"[ONLINE] {method} {path}: OK (empty body)", flush=True)
                     return {"ok": True}
                 data = json.loads(raw)
                 if isinstance(data, dict):
+                    print(f"[ONLINE] {method} {path}: OK ok={data.get('ok', True)}", flush=True)
                     return data
+                print(f"[ONLINE] {method} {path}: OK (non-dict body)", flush=True)
                 return {"ok": True, "data": data}
         except urllib.error.HTTPError as exc:
             try:
@@ -106,14 +110,17 @@ class OnlineService:
             except Exception:
                 parsed = {}
             message = parsed.get("error") if isinstance(parsed, dict) else None
+            print(f"[ONLINE] {method} {path}: HTTP {exc.code} error={message or 'none'}", flush=True)
             return {
                 "ok": False,
                 "error": str(message or f"http {exc.code}"),
                 "status": int(exc.code),
             }
         except urllib.error.URLError as exc:
+            print(f"[ONLINE] {method} {path}: network error: {exc.reason}", flush=True)
             return {"ok": False, "error": f"network: {exc.reason}"}
         except Exception as exc:
+            print(f"[ONLINE] {method} {path}: unexpected error: {exc}", flush=True)
             return {"ok": False, "error": str(exc)}
 
     def health(self) -> dict[str, Any]:

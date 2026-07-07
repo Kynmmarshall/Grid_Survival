@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import random
 from enum import Enum, auto
+from typing import Any
 
 import pygame
 
@@ -34,13 +35,13 @@ class ProjectileKind(Enum):
 
 _KIND_SETTINGS: dict[ProjectileKind, dict] = {
     ProjectileKind.ROCK: {
-        "speed": 220, "radius": 12, "color": (160, 120, 70),
+        "speed": 290, "radius": 12, "color": (160, 120, 70),
         "glow": (210, 170, 110), "knockback": 320,
         "cooldown": 3.0, "lifetime": 2.0, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
     },
     ProjectileKind.BOULDER: {
-        "speed": 160, "radius": 15, "color": (130, 100, 60),
+        "speed": 290, "radius": 15, "color": (130, 100, 60),
         "glow": (180, 140, 90), "knockback": 320,
         "cooldown": 3.0, "lifetime": 2.0, "pierce": False,
         "spread_count": 1, "spread_deg": 0,
@@ -296,8 +297,8 @@ class ProjectileManager:
 
     def __init__(self) -> None:
         self._projectiles: list[Projectile] = []
-        self._shoot_cooldowns: dict[int, float] = {}
-        self._cooldown_owners: dict[int, object] = {}
+        self._shoot_cooldowns: dict[Any, float] = {}
+        self._cooldown_owners: dict[Any, object] = {}
         self._audio = get_audio()
 
     @staticmethod
@@ -315,6 +316,16 @@ class ProjectileManager:
         except Exception:
             pass
 
+    @staticmethod
+    def _owner_key(owner) -> Any:
+        # Prefer a stable identity (e.g. a player name) over id(owner):
+        # callers like the Internet-mode daemon recreate a fresh proxy object
+        # every tick, so id(owner) changes constantly and (since CPython
+        # commonly reuses freed addresses) can even collide between two
+        # different players' proxies across ticks, corrupting cooldown state.
+        uid = getattr(owner, "uid", None)
+        return uid if uid is not None else id(owner)
+
     def fire(self, owner, direction: pygame.Vector2 | None = None) -> bool:
         """Fire projectile(s) from owner in their facing direction.
 
@@ -329,7 +340,7 @@ class ProjectileManager:
                 "up": pygame.Vector2(0, -1),
             }.get(facing, pygame.Vector2(1, 0))
 
-        owner_id = id(owner)
+        owner_id = self._owner_key(owner)
         if self._shoot_cooldowns.get(owner_id, 0.0) > 0:
             return False
 
@@ -499,12 +510,25 @@ class ProjectileManager:
 
     def get_shoot_cooldown_fraction(self, owner) -> float:
         """Return 0.0 if ready to shoot, 1.0 if just fired."""
-        remaining = self._shoot_cooldowns.get(id(owner), 0.0)
+        remaining = self._shoot_cooldowns.get(self._owner_key(owner), 0.0)
         if remaining <= 0:
             return 0.0
         kind = _get_kind_for_character(getattr(owner, "character_name", ""))
         total = self._effective_cooldown(_KIND_SETTINGS[kind])
         return min(1.0, remaining / total) if total > 0 else 0.0
+
+    def get_shoot_cooldown_state(self, owner_uid: Any) -> tuple[float, float]:
+        """Read-only (remaining, total) lookup by stable owner uid.
+
+        For callers whose owner object is recreated fresh every tick (the
+        Internet-mode daemon's per-tick _PlayerProxy) and so can't rely on
+        _set_owner_projectile_charge's attribute mutation surviving to the
+        next tick like it does for LAN/local's persistent Player objects.
+        """
+        remaining = float(self._shoot_cooldowns.get(owner_uid, 0.0))
+        owner = self._cooldown_owners.get(owner_uid)
+        total = float(getattr(owner, "projectile_cooldown_total", 0.0)) if owner is not None else 0.0
+        return remaining, total
 
     def reset(self) -> None:
         for owner in self._cooldown_owners.values():

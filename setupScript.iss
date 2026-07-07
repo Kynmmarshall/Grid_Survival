@@ -2,9 +2,9 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "Grid Survival"
-#define MyAppVersion "1.2"
+#define MyAppVersion "2.1"
 #define MyAppPublisher "GridSurvival, Inc."
-#define MyAppURL "https://pickmydish.duckdns.org:6060"
+#define MyAppURL "https://gridsurvival.duckdns.org"
 #define MyAppExeName "Grid Survival.exe"
 #define MyAppAssocName MyAppName + " File"
 #define MyAppAssocExt ".exe"
@@ -33,8 +33,8 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ChangesAssociations=yes
 DisableProgramGroupPage=yes
-InfoBeforeFile=C:\Users\kynm\Desktop\Grid_Survival\GRID_SURVIVAL_INFO.txt
-InfoAfterFile=C:\Users\kynm\Desktop\Grid_Survival\GRID_SURVIVAL_INFO.txt
+InfoBeforeFile={#SourcePath}\GRID_SURVIVAL_INFO.txt
+InfoAfterFile={#SourcePath}\GRID_SURVIVAL_INFO.txt
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 OutputBaseFilename=Grid Survival Setup
@@ -77,8 +77,8 @@ Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\kynm\Desktop\Grid_Survival\dist\main\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Users\kynm\Desktop\Grid_Survival\dist\main\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\dist\main\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\dist\main\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [InstallDelete]

@@ -5,7 +5,9 @@
     "left": "K_A",
     "right": "K_D",
     "jump": "K_SPACE",
-    "power": "K_Q"
+    "power": "K_Q",
+    "shoot": "K_E",
+    "pause": "K_P"
   },
   "player2": {
     "up": "K_UP",
@@ -13,6 +15,8 @@
     "left": "K_LEFT",
     "right": "K_RIGHT",
     "jump": "K_RSHIFT",
-    "power": "K_RCTRL"
+    "power": "K_SLASH",
+    "shoot": "K_RETURN",
+    "pause": "K_P"
   }
 }

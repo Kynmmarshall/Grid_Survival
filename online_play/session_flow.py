@@ -467,14 +467,17 @@ def _connect_internet_match(
     resolve_level_option: Callable[[int], Any | None],
     toast: Callable[[Any, Any, str], None],
 ) -> OnlineSessionSelection | None:
+    print(f"[ONLINE] Checking control-plane health at {online_service.base_url}...", flush=True)
     health = online_service.health()
     if not health.get("ok"):
+        print(f"[ONLINE] Health check FAILED: {health.get('error', 'offline')}", flush=True)
         toast(
             screen,
             clock,
             f"Internet control-plane unavailable: {health.get('error', 'offline')}",
         )
         return None
+    print("[ONLINE] Health check OK.", flush=True)
 
     while True:
         selected_player_count = choose_player_count()
@@ -676,7 +679,9 @@ def run_online_session_setup(
 ) -> OnlineSessionSelection | None:
     route = prompt_online_route(screen, clock)
     if route is None:
+        print("[ONLINE] Route selection cancelled.", flush=True)
         return None
+    print(f"[ONLINE] Route selected: {route}", flush=True)
 
     if route == "internet":
         try:
@@ -695,6 +700,7 @@ def run_online_session_setup(
             )
         except InternetFallbackLAN:
             # Fallback to LAN route automatically
+            print("[ONLINE] Internet connect refused; falling back to LAN route.", flush=True)
             toast(screen, clock, "Internet route unavailable. Falling back to LAN route.")
             # Fall through to LAN route handling below (prompt_host_or_join branch)
             pass
