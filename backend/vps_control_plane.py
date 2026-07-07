@@ -82,6 +82,7 @@ class ControlPlaneState:
         region = str(payload.get("region") or "global").lower()
         max_players = max(2, min(4, int(payload.get("max_players", 2))))
         rating = int(payload.get("rating", 1000))
+        character_name = str(payload.get("character_name", "Caveman")).strip() or "Caveman"
 
         with self.lock:
             if player in self.player_lobby:
@@ -107,8 +108,8 @@ class ControlPlaneState:
             lobby.members[player] = {
                 "ready": False,
                 "rating": rating,
+                "character": character_name,
                 "joined_at": time.time(),
-                "character": "",
             }
             self.lobbies[code] = lobby
             self.player_lobby[player] = code
@@ -119,6 +120,7 @@ class ControlPlaneState:
         player = str(payload.get("player", "")).strip()
         code = str(payload.get("lobby_code", "")).strip().upper()
         rating = int(payload.get("rating", 1000))
+        character_name = str(payload.get("character_name", "Caveman")).strip() or "Caveman"
         if not player or not code:
             return {"ok": False, "error": "missing player or lobby_code"}
 
@@ -132,8 +134,8 @@ class ControlPlaneState:
             lobby.members[player] = {
                 "ready": False,
                 "rating": rating,
+                "character": character_name,
                 "joined_at": time.time(),
-                "character": "",
             }
             self.player_lobby[player] = code
 
@@ -355,8 +357,8 @@ class ControlPlaneState:
                 player_entry = {
                     "name": member_name,
                     "bot": False,
-                    "rating": int(member.get("rating", 1000)),
-                    "character": character if character else ("" if pending_config else "Caveman"),
+                "rating": int(member.get("rating", 1000)),
+                "character": character if character else ("" if pending_config else "Caveman"),
                 }
                 if character:
                     used_characters.add(character.lower())

@@ -990,13 +990,38 @@ class MatchDaemon:
     def _build_snapshot(self, session: dict) -> dict[str, Any]:
         now = time.time()
         players_list = []
-        for name, entry in session.get("players", {}).items():
-            players_list.append({
-                "player": self._player_entry_snapshot(entry),
-                "power": None,
-                "bot": bool(entry.get("bot", False)),
-                "name": name,
-            })
+        session_players = session.get("players", {})
+        
+        # Build players list in the SAME order as the assignment specifies
+        # This ensures consistency with the game_start message sent to clients
+        assignment = session.get("assignment", {})
+        payload = assignment.get("payload", {})
+        assignment_players = payload.get("players", [])
+        
+        # First, add players/bots that are in the assignment in order
+        seen_names = set()
+        for entry in assignment_players:
+            name = str(entry.get("name", ""))
+            if name and name in session_players:
+                seen_names.add(name)
+                player_entry = session_players[name]
+                players_list.append({
+                    "player": self._player_entry_snapshot(player_entry),
+                    "power": None,
+                    "bot": bool(entry.get("bot", False)) or bool(player_entry.get("bot", False)),
+                    "name": name,
+                })
+        
+        # Then add any remaining players (shouldn't happen, but be defensive)
+        for name, entry in session_players.items():
+            if name not in seen_names:
+                players_list.append({
+                    "player": self._player_entry_snapshot(entry),
+                    "power": None,
+                    "bot": bool(entry.get("bot", False)),
+                    "name": name,
+                })
+        
         round_wins = self._ensure_round_wins(session)
         alive_count = sum(
             1
