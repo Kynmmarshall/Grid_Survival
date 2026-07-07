@@ -489,12 +489,21 @@ def run_server() -> None:
             pass
 
     threading.Thread(target=_matchmaking_loop, daemon=True).start()
-    # start match daemon co-located so issued assignments are consumable in-process
-    try:
-        t = threading.Thread(target=_run_match_daemon, daemon=True)
-        t.start()
-    except Exception:
-        traceback.print_exc()
+    # Start match daemon co-located so issued assignments are consumable
+    # in-process -- but ONLY if nothing else already runs it. If
+    # match_daemon.py is deployed as its own separate process/service (the
+    # common production setup), starting a second copy here would try to
+    # bind the same UDP port and crash one of the two. Opt out via env var
+    # when a standalone match_daemon service already exists.
+    embed_daemon = str(os.getenv("GRID_SURVIVAL_CONTROL_PLANE_EMBED_DAEMON", "1")).strip().lower() not in {"0", "false", "no", "off"}
+    if embed_daemon:
+        try:
+            t = threading.Thread(target=_run_match_daemon, daemon=True)
+            t.start()
+        except Exception:
+            traceback.print_exc()
+    else:
+        print("[INFO] GRID_SURVIVAL_CONTROL_PLANE_EMBED_DAEMON disabled; expecting an external match_daemon service.", flush=True)
 
     server = ControlPlaneHTTPServer((HOST, PORT), Handler)
     signal.signal(signal.SIGTERM, _request_stop)

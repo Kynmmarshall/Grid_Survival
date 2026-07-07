@@ -84,7 +84,7 @@
             "selectedLayer": 0,
             "viewCenter": {
                 "x": 1534.8484848484848,
-                "y": 768.1818181818182
+                "y": 768.181818181818
             }
         },
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_5.tmx": {
@@ -99,7 +99,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822612,
+                "x": 1536.9980506822615,
                 "y": 767.591706539075
             }
         },
@@ -107,7 +107,7 @@
             "scale": 0.275537109375,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1536.9980506822615,
+                "x": 1809.1936912989547,
                 "y": 767.591706539075
             }
         },
@@ -127,7 +127,7 @@
                 "y": 767.591706539075
             }
         },
-        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-04.tmx": {
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-01.tmx": {
             "scale": 1.5853125,
             "selectedLayer": 0,
             "viewCenter": {
@@ -135,14 +135,61 @@
                 "y": 183.8754188842894
             }
         },
-        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-06.tmx": {
-            "expandedObjectLayers": [
-                4
-            ],
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-011.tmx": {
+            "scale": 1,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 319.5,
+                "y": 183.5
+            }
+        },
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-02.tmx": {
             "scale": 1.5853125,
             "selectedLayer": 0,
             "viewCenter": {
                 "x": 320.1261580918589,
+                "y": 183.8754188842894
+            }
+        },
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-03.tmx": {
+            "expandedObjectLayers": [
+                2
+            ],
+            "scale": 1.5853125,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 367.4354425389316,
+                "y": 183.8754188842894
+            }
+        },
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-04.tmx": {
+            "expandedObjectLayers": [
+                2
+            ],
+            "scale": 1.5853125,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1285.866351271437,
+                "y": 971.1019120835798
+            }
+        },
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-05.tmx": {
+            "scale": 1.5853125,
+            "selectedLayer": 2,
+            "viewCenter": {
+                "x": 367.4354425389316,
+                "y": 183.8754188842894
+            }
+        },
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-06.tmx": {
+            "expandedObjectLayers": [
+                3,
+                2
+            ],
+            "scale": 1.5853125,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 367.4354425389316,
                 "y": 183.8754188842894
             }
         },
@@ -154,7 +201,7 @@
             "scale": 1.5853125,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 320.1261580918589,
+                "x": 306.2487679873842,
                 "y": 183.8754188842894
             }
         },
@@ -168,6 +215,9 @@
                 "x": 320.1261580918589,
                 "y": 183.8754188842894
             }
+        },
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/levelNumbers.tsx": {
+            "dynamicWrapping": false
         },
         "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/pixel adventure.tsx": {
             "dynamicWrapping": false
@@ -229,6 +279,10 @@
     ],
     "project": "grid survival.tiled-project",
     "recentFiles": [
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-04.tmx",
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-05.tmx",
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-06.tmx",
+        "C:/Users/kynm/Desktop/MobileGame/Assets/Tiles/Level-07.tmx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_11.tmx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_13.tmx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_7.tmx",
@@ -236,11 +290,7 @@
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_1.tmx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_12.tmx",
         "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_10.tmx",
-        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_9.tmx",
-        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_3.tmx",
-        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_2.tmx",
-        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_8.tmx",
-        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_4.tmx"
+        "C:/Users/kynm/Desktop/Grid_Survival/Assets/maps/level_9.tmx"
     ],
     "tileset.lastUsedFormat": "tsx",
     "tileset.tileSize": {

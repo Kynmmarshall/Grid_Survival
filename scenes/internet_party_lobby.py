@@ -65,6 +65,12 @@ class InternetPartyLobbyScreen:
         self._status_ttl = 0.0
 
     def _set_status(self, text: str, ttl: float = 2.2) -> None:
+        # This is the only status-reporting path in this whole screen (every
+        # create/join/ready/queue action routes through it), and it was
+        # previously on-screen only -- the message would disappear after
+        # ttl seconds with nothing left to debug from. Mirror it to the
+        # console so lobby failures survive past the toast.
+        print(f"[ONLINE] Lobby status: {text}", flush=True)
         self._status_text = str(text)
         self._status_ttl = max(0.0, float(ttl))
 
@@ -507,9 +513,12 @@ class InternetPartyLobbyScreen:
                 poll_timer = 0.0
                 match = self._refresh_updates()
                 if isinstance(match, dict):
+                    print(f"[ONLINE] Match found: {match.get('match_id', match)}", flush=True)
                     accepted = self._show_match_found(match)
                     if accepted:
+                        print("[ONLINE] Match accepted, proceeding to connect.", flush=True)
                         return match
+                    print("[ONLINE] Match declined, continuing to poll/queue.", flush=True)
                     # canceled: continue polling
 
             self._draw()

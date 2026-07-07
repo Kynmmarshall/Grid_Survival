@@ -1019,6 +1019,7 @@ class UdpClientTransport(NetworkManager):
             return False
 
     def connect_to_host(self, host: str, port: int = DEFAULT_PORT) -> bool:
+        print(f"[ONLINE] connect_to_host: binding UDP socket, target {host}:{port}, hello timeout={HELLO_TIMEOUT}s", flush=True)
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1043,15 +1044,19 @@ class UdpClientTransport(NetworkManager):
                 if now >= next_hello:
                     self._send_control(PKT_HELLO, ts=now)
                     hello_sent += 1
+                    print(f"[ONLINE] connect_to_host: sent PKT_HELLO #{hello_sent} to {host}:{port}", flush=True)
                     next_hello = now + HELLO_RETRY_INTERVAL
                 time.sleep(0.02)
             if self.connected:
+                print(f"[ONLINE] connect_to_host: connected after {hello_sent} hello(s)", flush=True)
                 return True
             self.last_error = "Unable to establish UDP session with host"
+            print(f"[ONLINE] connect_to_host: FAILED - no hello_ack after {hello_sent} attempt(s)/{HELLO_TIMEOUT}s (check firewall/port forwarding for {host}:{port})", flush=True)
             self.disconnect()
             return False
         except (socket.error, OSError) as exc:
             self.last_error = str(exc)
+            print(f"[ONLINE] connect_to_host: FAILED - socket error: {exc}", flush=True)
             self.connected = False
             self.udp_connected = False
             if self.socket:
