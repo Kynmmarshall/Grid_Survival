@@ -51,16 +51,32 @@ class OnlineService:
         self._timeout = max(1.0, float(config.timeout_seconds))
         self._api_key = (config.api_key or "").strip() or None
 
+    # Production control-plane address. Used as the fallback when no env var
+    # or .env file is found -- which is always the case in a shipped
+    # PyInstaller build, since _load_repo_env_if_present()'s __file__-relative
+    # lookup only resolves to a real .env when running from source, and no
+    # .env is bundled into the build. Without this, a distributed game build
+    # silently defaulted to "look for a server on the player's own PC".
+    _PRODUCTION_BASE_URL = "http://38.242.246.126:8010"
+    # Same story as _PRODUCTION_BASE_URL: a shipped build never finds a
+    # .env, so GRID_SURVIVAL_ONLINE_API_KEY was silently coming back None
+    # and no X-API-Key header was ever sent, which the server (correctly)
+    # rejects with 401. Note this key offers no real secrecy once baked
+    # into a distributed binary either way (extractable via strings/decompile)
+    # -- it's a "keep casual/accidental traffic out" gate, not real auth, so
+    # embedding it here is no worse than it already being in the built exe.
+    _PRODUCTION_API_KEY = "a2fcb46811703d361f5074c6c86f01d6a241f30960b4176d4d924b90763822f2"
+
     @classmethod
     def from_env(cls) -> "OnlineService":
         _load_repo_env_if_present()
         base_url = (
             os.getenv("GRID_SURVIVAL_ONLINE_API")
             or os.getenv("GRID_SURVIVAL_CONTROL_PLANE_URL")
-            or "http://127.0.0.1:8010"
+            or cls._PRODUCTION_BASE_URL
         )
         timeout_text = os.getenv("GRID_SURVIVAL_ONLINE_TIMEOUT", "6")
-        api_key = os.getenv("GRID_SURVIVAL_ONLINE_API_KEY")
+        api_key = os.getenv("GRID_SURVIVAL_ONLINE_API_KEY") or cls._PRODUCTION_API_KEY
         try:
             timeout = float(timeout_text)
         except (TypeError, ValueError):

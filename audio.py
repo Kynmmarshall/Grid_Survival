@@ -27,6 +27,9 @@ class AudioManager:
         self._sfx_cache: Dict[Path, pygame.mixer.Sound] = {}
         self._is_muted = False
         self._music_volume = MUSIC_VOLUME
+        self._is_ducking = False
+        self._duck_until_ms = 0
+        self._pre_duck_volume = MUSIC_VOLUME
         self._ensure_mixer()
 
     def _ensure_mixer(self):
@@ -106,7 +109,13 @@ class AudioManager:
             print(f"[Audio] Failed to start music playlist: {exc}")
 
     def update(self):
-        """Advance playlist playback when a queued track finishes."""
+        """Advance playlist playback when a queued track finishes, and
+        restore music volume once a duck_music() period elapses."""
+        if self._is_ducking and pygame.time.get_ticks() >= self._duck_until_ms:
+            self._is_ducking = False
+            if self._initialized and not self._is_muted:
+                pygame.mixer.music.set_volume(self._music_volume)
+
         if not self._initialized or self._is_muted:
             return
         if not self._playlist_tracks:
@@ -114,6 +123,19 @@ class AudioManager:
         if pygame.mixer.music.get_busy():
             return
         self._advance_playlist()
+
+    def duck_music(self, duration_ms: int = 1500, duck_to: float = 0.2) -> None:
+        """Temporarily lower background music volume, e.g. while a
+        prominent one-shot SFX (like "match found") plays over it, then
+        automatically restore it after duration_ms (checked in update())."""
+        self._ensure_mixer()
+        if not self._initialized or self._is_muted:
+            return
+        if not self._is_ducking:
+            self._pre_duck_volume = self._music_volume
+        self._is_ducking = True
+        self._duck_until_ms = pygame.time.get_ticks() + max(0, int(duration_ms))
+        pygame.mixer.music.set_volume(self._clamp_volume(self._pre_duck_volume * duck_to))
 
     def stop_music(self, fade_ms: int = 1000):
         self._ensure_mixer()

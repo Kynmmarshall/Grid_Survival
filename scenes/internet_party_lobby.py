@@ -368,14 +368,19 @@ class InternetPartyLobbyScreen:
     def _show_match_found(self, match: dict) -> bool:
         """Show a short 'MATCH FOUND' overlay with countdown. Returns True if accepted."""
         countdown = 3.0
-        # play SFX once on match found
+        # Play SFX once on match found, at max relative volume, and duck the
+        # background music underneath it so it reads as clearly louder/more
+        # prominent than the ambient track rather than getting buried in it.
+        audio = get_audio()
         try:
-            get_audio().play_sfx(SOUND_MATCH_FOUND, volume=0.95, max_instances=1)
+            audio.duck_music(duration_ms=1800, duck_to=0.2)
+            audio.play_sfx(SOUND_MATCH_FOUND, volume=1.0, max_instances=1)
         except Exception:
             pass
         start = pygame.time.get_ticks() / 1000.0
         while True:
             dt = self.clock.tick(60) / 1000.0
+            audio.update()
             for event in pygame.event.get():
                 if self._audio_overlay.handle_event(event):
                     continue
